@@ -1,0 +1,32 @@
+# Rust
+target/
+Cargo.lock
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# WASM build output (regenerated)
+packages/wasm-pkg/*.js
+packages/wasm-pkg/*.wasm
+packages/wasm-pkg/*.ts
+packages/wasm-pkg/package.json
+packages/wasm-pkg/.gitignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Tauri
+crates/bcad-tauri/gen/
+
+# Environment
+.env
+.env.local

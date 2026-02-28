@@ -1,0 +1,13 @@
+{
+  "name": "better-cad",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Free, cross-platform CAD tool for architects",
+  "scripts": {
+    "dev": "pnpm --filter @bettercad/ui dev",
+    "build": "pnpm --filter @bettercad/ui build",
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "check": "pnpm --filter @bettercad/ui typecheck",
+    "test": "pnpm --filter @bettercad/ui test"
+  }
+}
