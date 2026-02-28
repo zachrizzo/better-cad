@@ -1,0 +1,9 @@
+[package]
+name = "bcad-bim"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bcad-kernel = { path = "../bcad-kernel" }
+serde.workspace = true
+thiserror.workspace = true

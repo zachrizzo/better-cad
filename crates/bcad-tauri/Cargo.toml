@@ -1,0 +1,7 @@
+[package]
+name = "bcad-tauri"
+version = "0.1.0"
+edition = "2021"
+
+# Dependencies will be added when this crate is fully set up.
+[dependencies]

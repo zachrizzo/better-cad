@@ -1,0 +1,17 @@
+[package]
+name = "bcad-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bcad-kernel = { path = "../bcad-kernel" }
+bcad-constraint = { path = "../bcad-constraint" }
+bcad-bim = { path = "../bcad-bim" }
+bcad-io = { path = "../bcad-io" }
+wasm-bindgen.workspace = true
+serde-wasm-bindgen.workspace = true
+serde.workspace = true
+console_error_panic_hook.workspace = true

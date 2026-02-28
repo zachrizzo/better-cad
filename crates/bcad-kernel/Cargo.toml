@@ -1,0 +1,15 @@
+[package]
+name = "bcad-kernel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+truck-modeling.workspace = true
+truck-meshalgo.workspace = true
+truck-topology.workspace = true
+truck-polymesh.workspace = true
+nalgebra.workspace = true
+serde.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+log.workspace = true
