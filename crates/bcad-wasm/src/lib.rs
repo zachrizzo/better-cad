@@ -517,3 +517,37 @@ pub fn load_project(data: &[u8]) -> Result<String, JsError> {
     });
     serde_json::to_string(&project).map_err(|e| JsError::new(&e.to_string()))
 }
+
+#[wasm_bindgen]
+pub fn export_ifc_project() -> Result<Vec<u8>, JsError> {
+    PROTOTYPE_STATE.with(|state| {
+        let state = state.borrow();
+        let elements = state.query_elements();
+        bcad_io::ifc::export_ifc(elements).map_err(|e| JsError::new(&e.to_string()))
+    })
+}
+
+#[wasm_bindgen]
+pub fn export_dxf_project() -> Result<Vec<u8>, JsError> {
+    PROTOTYPE_STATE.with(|state| {
+        let state = state.borrow();
+        let elements = state.query_elements();
+        bcad_io::dxf_io::export_dxf(elements).map_err(|e| JsError::new(&e.to_string()))
+    })
+}
+
+#[wasm_bindgen]
+pub fn import_dxf_data(data: &[u8]) -> Result<String, JsError> {
+    let elements = bcad_io::dxf_io::import_dxf(data).map_err(|e| JsError::new(&e.to_string()))?;
+    PROTOTYPE_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        for element in elements {
+            let _ = state.create_element(element);
+        }
+    });
+    // Return the updated elements as JSON.
+    PROTOTYPE_STATE.with(|state| {
+        serde_json::to_string(state.borrow().query_elements())
+            .map_err(|e| JsError::new(&e.to_string()))
+    })
+}

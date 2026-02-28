@@ -31,48 +31,96 @@ function normalizeSwing(swing?: string): 'left' | 'right' {
   return swing === 'left' ? 'left' : 'right'
 }
 
+function isOnActiveLevel(element: PrototypeElement, activeLevelId: string): boolean {
+  return !element.meta.level_id || element.meta.level_id === activeLevelId
+}
+
 function PlanLines() {
   const elements = useEntityStore((s) => s.elements)
+  const activeLevelId = useLevelStore((s) => s.activeLevelId)
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit)
 
   const walls = useMemo(
-    () => Array.from(elements.values()).filter(isWallElement),
-    [elements],
+    () => Array.from(elements.values()).filter((e): e is WallElement => isWallElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
   )
 
   const doors = useMemo(
-    () => Array.from(elements.values()).filter(isDoorElement),
-    [elements],
+    () => Array.from(elements.values()).filter((e): e is DoorElement => isDoorElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
   )
 
   const floors = useMemo(
-    () => Array.from(elements.values()).filter(isFloorElement),
-    [elements],
+    () => Array.from(elements.values()).filter((e): e is FloorElement => isFloorElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
   )
 
   const stairs = useMemo(
-    () => Array.from(elements.values()).filter(isStairElement),
-    [elements],
+    () => Array.from(elements.values()).filter((e): e is StairElement => isStairElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
   )
 
   const windows = useMemo(
-    () => Array.from(elements.values()).filter(isWindowElement),
-    [elements],
+    () => Array.from(elements.values()).filter((e): e is WindowElement => isWindowElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
   )
 
   const columns = useMemo(
-    () => Array.from(elements.values()).filter(isColumnElement),
-    [elements],
+    () => Array.from(elements.values()).filter((e): e is ColumnElement => isColumnElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
   )
 
   const beams = useMemo(
-    () => Array.from(elements.values()).filter(isBeamElement),
-    [elements],
+    () => Array.from(elements.values()).filter((e): e is BeamElement => isBeamElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
   )
 
   const roofs = useMemo(
-    () => Array.from(elements.values()).filter(isRoofElement),
-    [elements],
+    () => Array.from(elements.values()).filter((e): e is RoofElement => isRoofElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
   )
+
+  const rooms = useMemo(
+    () => Array.from(elements.values()).filter((e): e is RoomElement => isRoomElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
+  )
+
+  const dimensions = useMemo(
+    () => Array.from(elements.values()).filter((e): e is DimensionElement => isDimensionElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
+  )
+
+  const textAnnotations = useMemo(
+    () => Array.from(elements.values()).filter((e): e is TextAnnotationElement => isTextAnnotationElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
+  )
+
+  const roomOverlays = useMemo(() => {
+    return rooms.map((room) => {
+      if (room.boundary.length < 3) return null
+      const shape = new THREE.Shape()
+      shape.moveTo(room.boundary[0][0], room.boundary[0][1])
+      for (let i = 1; i < room.boundary.length; i++) {
+        shape.lineTo(room.boundary[i][0], room.boundary[i][1])
+      }
+      shape.closePath()
+      const centroid = polygonCentroid(room.boundary)
+      const area = Math.abs(
+        room.boundary.reduce((sum, pt, i) => {
+          const next = room.boundary[(i + 1) % room.boundary.length]
+          return sum + pt[0] * next[1] - next[0] * pt[1]
+        }, 0) / 2,
+      )
+      return {
+        id: room.meta.id,
+        shape,
+        centroid,
+        name: room.name,
+        color: room.color || '#8b5cf6',
+        area,
+      }
+    }).filter((r): r is NonNullable<typeof r> => r !== null)
+  }, [rooms])
 
   const roofLoops = useMemo(() => {
     return roofs
@@ -280,6 +328,32 @@ function PlanLines() {
 
   return (
     <>
+      {/* Room overlays (filled shapes with labels) */}
+      {roomOverlays.map((room) => (
+        <group key={`room-${room.id}`}>
+          <mesh position={[0, 0, -0.01]}>
+            <shapeGeometry args={[room.shape]} />
+            <meshBasicMaterial color={room.color} transparent opacity={0.18} side={THREE.DoubleSide} />
+          </mesh>
+          <Line
+            points={[
+              ...room.shape.getPoints().map((p) => [p.x, p.y, 0] as [number, number, number]),
+              [room.shape.getPoints()[0].x, room.shape.getPoints()[0].y, 0] as [number, number, number],
+            ]}
+            color={room.color}
+            lineWidth={1.5}
+          />
+          <Text
+            position={[room.centroid[0], room.centroid[1], 0.01]}
+            fontSize={0.3}
+            color={room.color}
+            anchorX="center"
+            anchorY="middle"
+          >
+            {`${room.name}\n${room.area.toFixed(1)} m\u00B2`}
+          </Text>
+        </group>
+      ))}
       {wallLines.map((line, i) => (
         <Line
           key={`wall-${i}`}
@@ -412,6 +486,118 @@ function PlanLines() {
           gapSize={0.1}
         />
       ))}
+
+      {/* Dimension lines */}
+      {dimensions.map((dim) => (
+        <DimensionLine2D key={dim.meta.id} dim={dim} lengthUnit={lengthUnit} />
+      ))}
+
+      {/* Text annotations */}
+      {textAnnotations.map((ann) => (
+        <Text
+          key={ann.meta.id}
+          position={[ann.position[0], ann.position[1], 0.01]}
+          rotation={[0, 0, ann.rotation]}
+          fontSize={ann.font_size}
+          color="#38bdf8"
+          anchorX="left"
+          anchorY="bottom"
+        >
+          {ann.text}
+        </Text>
+      ))}
+
+      {/* Element tags */}
+      {doors.map((door, i) => {
+        const wall = wallById.get(door.wall_id)
+        if (!wall) return null
+        const dx = wall.end[0] - wall.start[0]
+        const dz = wall.end[1] - wall.start[1]
+        const cx = wall.start[0] + dx * door.position_along_wall
+        const cy = wall.start[1] + dz * door.position_along_wall
+        return (
+          <Text
+            key={`tag-door-${door.meta.id}`}
+            position={[cx, cy - 0.3, 0.02]}
+            fontSize={0.15}
+            color="#f59e0b"
+            anchorX="center"
+            anchorY="top"
+          >
+            {`D${String(i + 1).padStart(2, '0')}`}
+          </Text>
+        )
+      })}
+      {walls.map((wall, i) => {
+        const mx = (wall.start[0] + wall.end[0]) / 2
+        const my = (wall.start[1] + wall.end[1]) / 2
+        return (
+          <Text
+            key={`tag-wall-${wall.meta.id}`}
+            position={[mx, my + 0.25, 0.02]}
+            fontSize={0.12}
+            color="#9ca3af"
+            anchorX="center"
+            anchorY="bottom"
+          >
+            {`W${String(i + 1).padStart(2, '0')}`}
+          </Text>
+        )
+      })}
+    </>
+  )
+}
+
+function DimensionLine2D({ dim, lengthUnit }: { dim: DimensionElement; lengthUnit: string }) {
+  const { p1, p2, offset } = dim
+
+  const dx = p2[0] - p1[0]
+  const dy = p2[1] - p1[1]
+  const len = Math.hypot(dx, dy)
+  if (len < 1e-6) return null
+
+  const nx = -dy / len
+  const ny = dx / len
+
+  const off1: [number, number, number] = [p1[0] + nx * offset, p1[1] + ny * offset, 0.01]
+  const off2: [number, number, number] = [p2[0] + nx * offset, p2[1] + ny * offset, 0.01]
+
+  const w1Start: [number, number, number] = [p1[0], p1[1], 0.01]
+  const w1End: [number, number, number] = [p1[0] + nx * (offset + 0.1), p1[1] + ny * (offset + 0.1), 0.01]
+  const w2Start: [number, number, number] = [p2[0], p2[1], 0.01]
+  const w2End: [number, number, number] = [p2[0] + nx * (offset + 0.1), p2[1] + ny * (offset + 0.1), 0.01]
+
+  const tickLen = 0.08
+  const tdx = dx / len * tickLen
+  const tdy = dy / len * tickLen
+
+  const tick1a: [number, number, number] = [off1[0] + tdx + nx * tickLen, off1[1] + tdy + ny * tickLen, 0.01]
+  const tick1b: [number, number, number] = [off1[0] + tdx - nx * tickLen, off1[1] + tdy - ny * tickLen, 0.01]
+  const tick2a: [number, number, number] = [off2[0] - tdx + nx * tickLen, off2[1] - tdy + ny * tickLen, 0.01]
+  const tick2b: [number, number, number] = [off2[0] - tdx - nx * tickLen, off2[1] - tdy - ny * tickLen, 0.01]
+
+  const midX = (off1[0] + off2[0]) / 2
+  const midY = (off1[1] + off2[1]) / 2
+  const angle = Math.atan2(dy, dx)
+  const displayText = dim.text_override || formatLength(len, lengthUnit as Parameters<typeof formatLength>[1])
+
+  return (
+    <>
+      <Line points={[w1Start, w1End]} color="#ff6b6b" lineWidth={0.6} />
+      <Line points={[w2Start, w2End]} color="#ff6b6b" lineWidth={0.6} />
+      <Line points={[off1, off2]} color="#ff6b6b" lineWidth={1} />
+      <Line points={[tick1a, off1, tick1b]} color="#ff6b6b" lineWidth={0.8} />
+      <Line points={[tick2a, off2, tick2b]} color="#ff6b6b" lineWidth={0.8} />
+      <Text
+        position={[midX + nx * 0.05, midY + ny * 0.05, 0.02]}
+        rotation={[0, 0, angle]}
+        fontSize={0.12}
+        color="#ff6b6b"
+        anchorX="center"
+        anchorY="bottom"
+      >
+        {displayText}
+      </Text>
     </>
   )
 }
