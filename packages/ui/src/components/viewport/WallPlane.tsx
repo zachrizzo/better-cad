@@ -4,12 +4,13 @@ import { Line, Html } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import { useUIStore } from '../../stores/ui-store'
 import { useBimStore } from '../../stores/bim-store'
-import { useDocumentStore } from '../../stores/document-store'
 import { useKernel } from '../../hooks/useKernel'
-import { mapKernelPlanMeshToScene } from '../../utils/mesh-coordinates'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { formatLength } from '../../utils/units'
+import type { WallElement } from '../../services/kernel-bridge'
+import { isWallElement, useEntityStore } from '../../stores/entity-store'
+import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 
 const WALL_SNAP_DISTANCE = 0.35
 const MIN_WALL_LENGTH = 0.2
@@ -28,29 +29,33 @@ function applyOrthoConstraint(start: Point2, end: Point2): Point2 {
 
 export function WallPlane() {
   const activeTool = useUIStore((s) => s.activeTool)
-  const walls = useBimStore((s) => s.walls)
   const pendingWallStart = useBimStore((s) => s.pendingWallStart)
   const setPendingWallStart = useBimStore((s) => s.setPendingWallStart)
-  const addWall = useBimStore((s) => s.addWall)
   const defaultWallHeight = useBimStore((s) => s.defaultWallHeight)
   const defaultWallThickness = useBimStore((s) => s.defaultWallThickness)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
-  const addCadMesh = useDocumentStore((s) => s.addCadMesh)
   const { kernel, ready } = useKernel()
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
+  const elements = useEntityStore((s) => s.elements)
+
   const planeRef = useRef<THREE.Mesh>(null)
   const [previewEnd, setPreviewEnd] = useState<Point2 | null>(null)
   const [cursorPoint, setCursorPoint] = useState<Point2 | null>(null)
   const [snapMarker, setSnapMarker] = useState<Point2 | null>(null)
 
+  const wallElements = useMemo(
+    () => Array.from(elements.values()).filter(isWallElement),
+    [elements],
+  )
+
   const snapPoints = useMemo<Point2[]>(() => {
     const points: Point2[] = []
-    walls.forEach((wall) => {
+    wallElements.forEach((wall) => {
       points.push(wall.start, wall.end)
     })
     return points
-  }, [walls])
+  }, [wallElements])
 
   const getConstrainedPoint = useCallback((rawPoint: Point2, shiftKey: boolean) => {
     let point = rawPoint
@@ -91,18 +96,17 @@ export function WallPlane() {
     setCursorPoint(point)
     setSnapMarker(snappedPoint)
     setMeasurementCursor([point[0], 0, point[1]])
+
     if (pendingWallStart) {
       const length = Math.hypot(point[0] - pendingWallStart[0], point[1] - pendingWallStart[1])
       setToolReadout(
         `Wall L:${formatLength(length, lengthUnit)} H:${formatLength(defaultWallHeight, lengthUnit)} T:${formatLength(defaultWallThickness, lengthUnit)}${snappedPoint ? ' SNAP' : ''}`,
       )
+      setPreviewEnd(point)
     } else {
       setToolReadout(
         `Wall defaults H:${formatLength(defaultWallHeight, lengthUnit)} T:${formatLength(defaultWallThickness, lengthUnit)} • pick start`,
       )
-    }
-    if (pendingWallStart) {
-      setPreviewEnd(point)
     }
   }, [
     activeTool,
@@ -132,6 +136,7 @@ export function WallPlane() {
   const handleClick = (e: PlanePointerEvent) => {
     e.stopPropagation()
     if (activeTool !== 'wall') return
+
     const rawPoint: Point2 = [e.point.x, e.point.z]
     const { point } = getConstrainedPoint(rawPoint, e.shiftKey)
     const [x, z] = point
@@ -142,45 +147,49 @@ export function WallPlane() {
       setPendingWallStart(point)
       setPreviewEnd(point)
       setToolReadout(`Wall start X:${formatLength(x, lengthUnit)} Z:${formatLength(z, lengthUnit)}`)
-    } else {
-      const [sx, sz] = pendingWallStart
-      const wallLength = Math.hypot(x - sx, z - sz)
-      if (wallLength < MIN_WALL_LENGTH) {
-        setPreviewEnd(point)
-        return
-      }
-      const wallId = `wall-${Date.now()}`
-
-      addWall({
-        id: wallId,
-        start: [sx, sz],
-        end: [x, z],
-        height: defaultWallHeight,
-        thickness: defaultWallThickness,
-      })
-
-      if (ready && kernel) {
-        kernel
-          .addWall(sx, sz, x, z, defaultWallHeight, defaultWallThickness)
-          .then((mesh) => {
-            if (mesh.positions.length > 0) {
-              addCadMesh(wallId, mapKernelPlanMeshToScene(mesh))
-            } else {
-              console.warn('[BetterCAD] addWall returned empty mesh for', wallId)
-            }
-          })
-          .catch((err) => console.error('[BetterCAD] addWall failed:', err))
-      } else {
-        console.warn('[BetterCAD] Kernel not ready — wall stored in BIM but no 3D mesh generated')
-      }
-
-      // Keep command active for chained walls (common CAD workflow).
-      setPendingWallStart(point)
-      setPreviewEnd(point)
-      setToolReadout(
-        `Wall placed L:${formatLength(wallLength, lengthUnit)} H:${formatLength(defaultWallHeight, lengthUnit)} T:${formatLength(defaultWallThickness, lengthUnit)}`,
-      )
+      return
     }
+
+    const [sx, sz] = pendingWallStart
+    const wallLength = Math.hypot(x - sx, z - sz)
+    if (wallLength < MIN_WALL_LENGTH) {
+      setPreviewEnd(point)
+      return
+    }
+
+    const wallId = `wall-${crypto.randomUUID()}`
+    const wallElement: WallElement = {
+      kind: 'wall',
+      meta: {
+        id: wallId,
+        name: `Wall ${wallElements.length + 1}`,
+      },
+      start: [sx, sz],
+      end: [x, z],
+      height: defaultWallHeight,
+      thickness: defaultWallThickness,
+    }
+
+    // Keep command active for chained walls.
+    setPendingWallStart(point)
+    setPreviewEnd(point)
+    setToolReadout(
+      `Wall placed L:${formatLength(wallLength, lengthUnit)} H:${formatLength(defaultWallHeight, lengthUnit)} T:${formatLength(defaultWallThickness, lengthUnit)}`,
+    )
+
+    if (!ready || !kernel) {
+      console.warn('[BetterCAD] Kernel not ready; wall entity was not persisted')
+      return
+    }
+
+    void (async () => {
+      try {
+        await kernel.createElement(wallElement)
+        await syncEntitiesAndRegenerateMeshes(kernel)
+      } catch (err) {
+        console.error('[BetterCAD] Failed to create wall entity:', err)
+      }
+    })()
   }
 
   if (activeTool !== 'wall') return null
@@ -204,6 +213,7 @@ export function WallPlane() {
       ] as [number, number, number][]
     })()
     : null
+
   const previewLength = pendingWallStart && previewEnd
     ? Math.hypot(previewEnd[0] - pendingWallStart[0], previewEnd[1] - pendingWallStart[1])
     : null
@@ -223,7 +233,6 @@ export function WallPlane() {
         <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
       </mesh>
 
-      {/* Cursor indicator */}
       {cursorPoint && (
         <mesh position={[cursorPoint[0], 0.05, cursorPoint[1]]}>
           <sphereGeometry args={[0.06, 12, 12]} />
@@ -231,7 +240,6 @@ export function WallPlane() {
         </mesh>
       )}
 
-      {/* Preview line from first click to cursor */}
       {pendingWallStart && previewEnd && (
         <>
           <Line
@@ -260,7 +268,6 @@ export function WallPlane() {
         </>
       )}
 
-      {/* Preview wall thickness footprint */}
       {previewFootprint && (
         <Line
           points={previewFootprint}
@@ -269,7 +276,6 @@ export function WallPlane() {
         />
       )}
 
-      {/* Start point indicator */}
       {pendingWallStart && (
         <mesh position={[pendingWallStart[0], 0.05, pendingWallStart[1]]}>
           <sphereGeometry args={[0.1, 16, 16]} />
@@ -277,7 +283,6 @@ export function WallPlane() {
         </mesh>
       )}
 
-      {/* Snap target indicator */}
       {snapMarker && (
         <mesh position={[snapMarker[0], 0.05, snapMarker[1]]} rotation={[-Math.PI / 2, 0, 0]}>
           <ringGeometry args={[0.1, 0.14, 20]} />

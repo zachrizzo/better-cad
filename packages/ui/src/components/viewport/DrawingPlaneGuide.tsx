@@ -5,7 +5,7 @@ import { useUIStore } from '../../stores/ui-store'
 const GUIDE_HALF_SIZE = 40
 
 function isDrawingTool(tool: string): boolean {
-  return tool === 'sketch' || tool === 'wall' || tool === 'door' || tool === 'measure'
+  return tool === 'sketch' || tool === 'wall' || tool === 'door' || tool === 'floor' || tool === 'stair' || tool === 'measure'
 }
 
 export function DrawingPlaneGuide() {

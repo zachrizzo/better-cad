@@ -22,6 +22,8 @@ export interface DoorData {
   sillHeight: number
 }
 
+export type DoorSwing = 'left' | 'right'
+
 interface BimState {
   walls: Map<string, WallData>
   doors: Map<string, DoorData>
@@ -31,6 +33,11 @@ interface BimState {
   defaultDoorWidth: number
   defaultDoorHeight: number
   defaultDoorSill: number
+  defaultDoorSwing: DoorSwing
+  defaultFloorThickness: number
+  defaultStairWidth: number
+  defaultStairRisers: number
+  defaultStairHeight: number
   autoExtrudeSketch: boolean
   sketchExtrudeMode: SketchExtrudeMode
   addWall: (wall: WallData) => void
@@ -44,6 +51,11 @@ interface BimState {
   setDefaultDoorWidth: (width: number) => void
   setDefaultDoorHeight: (height: number) => void
   setDefaultDoorSill: (sillHeight: number) => void
+  setDefaultDoorSwing: (swing: DoorSwing) => void
+  setDefaultFloorThickness: (thickness: number) => void
+  setDefaultStairWidth: (width: number) => void
+  setDefaultStairRisers: (risers: number) => void
+  setDefaultStairHeight: (height: number) => void
   setAutoExtrudeSketch: (enabled: boolean) => void
   setSketchExtrudeMode: (mode: SketchExtrudeMode) => void
 }
@@ -59,6 +71,11 @@ export const useBimStore = create<BimState>()(
       defaultDoorWidth: 0.9,
       defaultDoorHeight: 2.1,
       defaultDoorSill: 0.0,
+      defaultDoorSwing: 'right',
+      defaultFloorThickness: 0.25,
+      defaultStairWidth: 1.1,
+      defaultStairRisers: 16,
+      defaultStairHeight: 3.0,
       autoExtrudeSketch: false,
       sketchExtrudeMode: 'walls',
       addWall: (wall) =>
@@ -105,6 +122,11 @@ export const useBimStore = create<BimState>()(
       setDefaultDoorWidth: (width) => set({ defaultDoorWidth: Math.max(0.01, width) }),
       setDefaultDoorHeight: (height) => set({ defaultDoorHeight: Math.max(0.01, height) }),
       setDefaultDoorSill: (sillHeight) => set({ defaultDoorSill: Math.max(0, sillHeight) }),
+      setDefaultDoorSwing: (swing) => set({ defaultDoorSwing: swing }),
+      setDefaultFloorThickness: (thickness) => set({ defaultFloorThickness: Math.max(0.01, thickness) }),
+      setDefaultStairWidth: (width) => set({ defaultStairWidth: Math.max(0.2, width) }),
+      setDefaultStairRisers: (risers) => set({ defaultStairRisers: Math.max(2, Math.min(64, Math.round(risers))) }),
+      setDefaultStairHeight: (height) => set({ defaultStairHeight: Math.max(0.2, height) }),
       setAutoExtrudeSketch: (enabled) => set({ autoExtrudeSketch: enabled }),
       setSketchExtrudeMode: (mode) => set({ sketchExtrudeMode: mode }),
     }),
@@ -116,6 +138,11 @@ export const useBimStore = create<BimState>()(
         defaultDoorWidth: state.defaultDoorWidth,
         defaultDoorHeight: state.defaultDoorHeight,
         defaultDoorSill: state.defaultDoorSill,
+        defaultDoorSwing: state.defaultDoorSwing,
+        defaultFloorThickness: state.defaultFloorThickness,
+        defaultStairWidth: state.defaultStairWidth,
+        defaultStairRisers: state.defaultStairRisers,
+        defaultStairHeight: state.defaultStairHeight,
         autoExtrudeSketch: state.autoExtrudeSketch,
         sketchExtrudeMode: state.sketchExtrudeMode,
       }),

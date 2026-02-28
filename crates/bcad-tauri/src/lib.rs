@@ -7,9 +7,17 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             commands::ping,
+            commands::reset_project,
+            commands::create_element,
+            commands::update_element,
+            commands::delete_element,
+            commands::query_elements,
+            commands::regen_view,
+            commands::project_summary,
             commands::create_and_tessellate_box,
             commands::extrude_sketch_points,
             commands::add_wall,
+            commands::generate_plan_view,
             commands::import_step,
             commands::export_step,
             commands::get_material_library,

@@ -11,6 +11,7 @@ bcad-kernel = { path = "../bcad-kernel" }
 bcad-constraint = { path = "../bcad-constraint" }
 bcad-bim = { path = "../bcad-bim" }
 bcad-io = { path = "../bcad-io" }
+bcad-domain = { path = "../bcad-domain" }
 wasm-bindgen.workspace = true
 serde-wasm-bindgen.workspace = true
 serde.workspace = true

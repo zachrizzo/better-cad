@@ -1,5 +1,10 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { KernelBackend, TessellatedMesh } from './kernel-bridge'
+import type {
+  KernelBackend,
+  PrototypeElement,
+  RegeneratedMesh,
+  TessellatedMesh,
+} from './kernel-bridge'
 import type { PbrMaterial } from '../stores/material-store'
 
 export class TauriBackend implements KernelBackend {
@@ -7,21 +12,45 @@ export class TauriBackend implements KernelBackend {
     return invoke<string>('ping')
   }
 
-  async createBox(width: number, height: number, depth: number): Promise<string> {
-    // Body ID management is simplified – the kernel creates the solid internally.
-    // Return a stable synthetic ID; tessellation is always done via
-    // createAndTessellateBox.
-    void width; void height; void depth
-    return 'box-0'
+  async resetProject(name: string, units: string): Promise<void> {
+    await invoke('reset_project', { name, units })
+  }
+
+  async createElement(element: PrototypeElement): Promise<string> {
+    return invoke<string>('create_element', { elementJson: JSON.stringify(element) })
+  }
+
+  async updateElement(elementId: string, element: PrototypeElement): Promise<void> {
+    await invoke('update_element', { elementId, elementJson: JSON.stringify(element) })
+  }
+
+  async deleteElement(elementId: string): Promise<void> {
+    await invoke('delete_element', { elementId })
+  }
+
+  async queryElements(): Promise<PrototypeElement[]> {
+    const raw = await invoke<string>('query_elements')
+    return JSON.parse(raw) as PrototypeElement[]
+  }
+
+  async regenView(): Promise<RegeneratedMesh[]> {
+    const result = await invoke<{ id: string; positions: number[]; normals: number[]; indices: number[] }[]>(
+      'regen_view',
+    )
+    return result.map((m) => ({
+      id: m.id,
+      positions: new Float32Array(m.positions),
+      normals: new Float32Array(m.normals),
+      indices: new Uint32Array(m.indices),
+    }))
+  }
+
+  async createBox(_width: number, _height: number, _depth: number): Promise<string> {
+    throw new Error('createBox() is removed in prototype-velocity mode; use createElement()')
   }
 
   async tessellate(_bodyId: string): Promise<TessellatedMesh> {
-    // Stub: individual tessellation by ID is not yet exposed as a command.
-    return {
-      positions: new Float32Array([]),
-      normals: new Float32Array([]),
-      indices: new Uint32Array([]),
-    }
+    throw new Error('tessellate() by body id is not supported in prototype-velocity mode')
   }
 
   async createAndTessellateBox(
@@ -77,32 +106,33 @@ export class TauriBackend implements KernelBackend {
   }
 
   async importFile(data: Uint8Array, format: string): Promise<TessellatedMesh[]> {
-    if (format === 'step') {
-      const result = await invoke<
-        { positions: number[]; normals: number[]; indices: number[] }[]
-      >('import_step', { data: Array.from(data) })
-      return result.map((m) => ({
-        positions: new Float32Array(m.positions),
-        normals: new Float32Array(m.normals),
-        indices: new Uint32Array(m.indices),
-      }))
+    if (format !== 'step') {
+      throw new Error(`Format "${format}" not supported in Tauri backend`)
     }
-    throw new Error(`Format "${format}" not supported in Tauri backend`)
+
+    const result = await invoke<
+      { positions: number[]; normals: number[]; indices: number[] }[]
+    >('import_step', { data: Array.from(data) })
+    return result.map((m) => ({
+      positions: new Float32Array(m.positions),
+      normals: new Float32Array(m.normals),
+      indices: new Uint32Array(m.indices),
+    }))
   }
 
   async exportFile(format: string): Promise<ArrayBuffer> {
-    if (format === 'step') {
-      const bytes = await invoke<number[]>('export_step', { width: 1, height: 1, depth: 1 })
-      return new Uint8Array(bytes).buffer
+    if (format !== 'step') {
+      throw new Error(`Format "${format}" not supported in Tauri backend`)
     }
-    throw new Error(`Format "${format}" not supported in Tauri backend`)
+    const bytes = await invoke<number[]>('export_step', { width: 1, height: 1, depth: 1 })
+    return new Uint8Array(bytes).buffer
   }
 
   async getMaterialLibrary(): Promise<PbrMaterial[]> {
     return invoke<PbrMaterial[]>('get_material_library')
   }
 
-  async saveProject(projectJson: string): Promise<ArrayBuffer> {
+  async saveProject(projectJson?: string): Promise<ArrayBuffer> {
     const bytes = await invoke<number[]>('save_project', { projectJson })
     return new Uint8Array(bytes).buffer
   }

@@ -3,6 +3,7 @@ pub mod dxf_io;
 pub mod ifc;
 pub mod gltf_export;
 pub mod bcad_format;
+pub mod prototype_format;
 
 /// I/O error type for file import/export operations.
 #[derive(Debug, thiserror::Error)]

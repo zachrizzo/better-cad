@@ -1,37 +1,33 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
-import { useStore } from 'zustand'
 import { useUIStore } from './stores/ui-store'
 import { useDocumentStore } from './stores/document-store'
 import { useMaterialStore } from './stores/material-store'
-import { useHistoryStore, useHistoryTemporal } from './stores/history-store'
 import { useKernel } from './hooks/useKernel'
-import { useUndo } from './hooks/useUndo'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { CadMesh } from './components/viewport/CadMesh'
-import { SketchOverlay } from './components/viewport/SketchOverlay'
-import { SketchPlane } from './components/viewport/SketchPlane'
 import { WallPlane } from './components/viewport/WallPlane'
 import { DrawingPlaneGuide } from './components/viewport/DrawingPlaneGuide'
 import { DoorPlane } from './components/viewport/DoorPlane'
+import { FloorPlane } from './components/viewport/FloorPlane'
+import { StairPlane } from './components/viewport/StairPlane'
 import { MeasurePlane } from './components/tools/MeasureTool'
 import { Viewport2D } from './components/viewport/Viewport2D'
 import { PropertyPanel } from './components/layout/PropertyPanel'
-import { useSketchStore } from './stores/sketch-store'
 import { useBimStore } from './stores/bim-store'
-import { ImportDialog } from './components/dialogs/ImportDialog'
-import { ExportDialog } from './components/dialogs/ExportDialog'
-import { extrudeSketchProfile } from './utils/sketch-extrude'
 import { useMeasurementStore } from './stores/measurement-store'
 import { useSettingsStore } from './stores/settings-store'
 import { formatLength } from './utils/units'
+import { isDoorElement, isFloorElement, isStairElement, isWallElement, useEntityStore } from './stores/entity-store'
+import { syncEntitiesAndRegenerateMeshes } from './services/entity-regeneration'
 import './App.css'
 
 function getDrawingPlaneHint(tool: string): string | null {
-  if (tool === 'sketch') return 'Click first corner, then second corner to preview and place a rectangle. Live world X/Z dimensions are shown below.'
   if (tool === 'wall') return 'Click to start and keep clicking for chained walls. Hold Shift for orthogonal lock; right-click to end the chain.'
-  if (tool === 'door') return 'Hover a wall to preview the door snap, then click to place. Doors stay constrained to wall centerlines.'
+  if (tool === 'door') return 'Hover a wall to preview the door snap, then click to place.'
+  if (tool === 'floor') return 'Click to set one floor corner, move cursor, then click opposite corner.'
+  if (tool === 'stair') return 'Click stair start, then click stair run end. Hold Shift for orthogonal lock.'
   if (tool === 'measure') return 'Pick two points on the ground plane to measure distance.'
   return null
 }
@@ -53,11 +49,9 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
 
   return (
     <>
-      {/* Lighting */}
       <ambientLight intensity={0.4} />
       <directionalLight position={[5, 10, 5]} intensity={0.8} castShadow />
 
-      {/* Grid */}
       {showGrid && (
         <Grid
           infiniteGrid
@@ -72,7 +66,6 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
         />
       )}
 
-      {/* Kernel-generated meshes */}
       {Array.from(cadMeshes.entries()).map(([id, mesh]) => (
         <CadMesh
           key={id}
@@ -98,17 +91,13 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
         />
       ))}
 
-      {/* Sketch overlay and interaction plane */}
       <DrawingPlaneGuide />
-      <SketchOverlay />
-      <SketchPlane />
-
-      {/* Tool interaction planes */}
       <WallPlane />
       <DoorPlane />
+      <FloorPlane />
+      <StairPlane />
       <MeasurePlane />
 
-      {/* Camera controls */}
       <OrbitControls makeDefault />
     </>
   )
@@ -127,97 +116,73 @@ export default function App() {
   const selectBody = useUIStore((s) => s.selectBody)
   const theme = useUIStore((s) => s.theme)
   const toggleTheme = useUIStore((s) => s.toggleTheme)
-  const projectName = useDocumentStore((s) => s.projectName)
+
   const cadMeshes = useDocumentStore((s) => s.cadMeshes)
-  const addCadMesh = useDocumentStore((s) => s.addCadMesh)
-  const activateSketch = useSketchStore((s) => s.activateSketch)
-  const deactivateSketch = useSketchStore((s) => s.deactivateSketch)
-  const clearSketch = useSketchStore((s) => s.clearSketch)
-  const sketchProfiles = useSketchStore((s) => s.profiles)
-  const walls = useBimStore((s) => s.walls)
-  const doors = useBimStore((s) => s.doors)
-  const addWall = useBimStore((s) => s.addWall)
+
   const defaultWallHeight = useBimStore((s) => s.defaultWallHeight)
   const defaultWallThickness = useBimStore((s) => s.defaultWallThickness)
-  const autoExtrudeSketch = useBimStore((s) => s.autoExtrudeSketch)
-  const sketchExtrudeMode = useBimStore((s) => s.sketchExtrudeMode)
+  const defaultDoorSwing = useBimStore((s) => s.defaultDoorSwing)
+  const defaultFloorThickness = useBimStore((s) => s.defaultFloorThickness)
+  const defaultStairWidth = useBimStore((s) => s.defaultStairWidth)
+  const defaultStairRisers = useBimStore((s) => s.defaultStairRisers)
+  const defaultStairHeight = useBimStore((s) => s.defaultStairHeight)
+
+  const entityElements = useEntityStore((s) => s.elements)
+  const projectName = useEntityStore((s) => s.projectName)
+  const setProjectMeta = useEntityStore((s) => s.setProjectMeta)
+
   const setMaterials = useMaterialStore((s) => s.setMaterials)
   const measurementCursor = useMeasurementStore((s) => s.cursor)
   const toolReadout = useMeasurementStore((s) => s.toolReadout)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const { kernel, ready, error: kernelError } = useKernel()
+
   const [kernelStatus, setKernelStatus] = useState('loading...')
   const [meshInfo, setMeshInfo] = useState('')
-  const [showImportDialog, setShowImportDialog] = useState(false)
-  const [showExportDialog, setShowExportDialog] = useState(false)
   const [hoveredBodyId, setHoveredBodyId] = useState<string | null>(null)
-  const [extrudingSketch, setExtrudingSketch] = useState(false)
 
-  // Keyboard shortcuts
   useKeyboardShortcuts()
 
-  // Undo/redo
-  useUndo()
-  const temporal = useHistoryTemporal()
-  const canUndo = useStore(temporal, (s) => s.pastStates.length > 0)
-  const canRedo = useStore(temporal, (s) => s.futureStates.length > 0)
-  const historyBoxParams = useHistoryStore((s) => s.boxParams)
-
-  // When undo/redo changes boxParams in history-store, sync to document-store and recompute mesh
-  useEffect(() => {
-    const docParams = useDocumentStore.getState().boxParams
-    if (
-      docParams.width === historyBoxParams.width &&
-      docParams.height === historyBoxParams.height &&
-      docParams.depth === historyBoxParams.depth
-    ) return
-    useDocumentStore.getState().setBoxParams(historyBoxParams)
-    if (!ready || !kernel) return
-    kernel.createAndTessellateBox(historyBoxParams.width, historyBoxParams.height, historyBoxParams.depth)
-      .then((mesh) => addCadMesh('box-0', mesh))
-      .catch((err) => console.error('Undo recompute failed:', err))
-  }, [historyBoxParams, ready, kernel, addCadMesh])
-
-  // Handle kernel error
   useEffect(() => {
     if (kernelError) {
-      setKernelStatus(`Kernel: FAILED`)
+      setKernelStatus('Kernel: FAILED')
       console.error('[BetterCAD] Kernel error:', kernelError)
     }
   }, [kernelError])
 
   useEffect(() => {
-    if (ready && kernel) {
-      kernel.ping().then((result) => {
-        setKernelStatus(`Kernel: ${result}`)
-        console.log('[BetterCAD] Kernel ping:', result)
-      }).catch((err) => {
-        setKernelStatus('Kernel: error')
-        console.error('[BetterCAD] Kernel ping failed:', err)
-      })
+    if (!ready || !kernel) return
 
-      // Load material library
-      kernel.getMaterialLibrary().then((mats) => {
+    void (async () => {
+      try {
+        const ping = await kernel.ping()
+        setKernelStatus(`Kernel: ${ping}`)
+
+        const mats = await kernel.getMaterialLibrary()
         setMaterials(mats)
-        console.log('[BetterCAD] Material library loaded:', mats.length, 'materials')
-      }).catch((err) => {
-        console.warn('[BetterCAD] getMaterialLibrary failed:', err)
-      })
 
-      // Create a tessellated box from the kernel
-      kernel.createAndTessellateBox(1, 1, 1).then((mesh) => {
-        addCadMesh('box-0', mesh)
-        const vertexCount = mesh.positions.length / 3
-        const triangleCount = mesh.indices.length / 3
-        setMeshInfo(`V:${vertexCount} T:${triangleCount}`)
-        console.log('[BetterCAD] Tessellated box:', { vertices: vertexCount, triangles: triangleCount })
-      }).catch((err) => {
-        console.error('[BetterCAD] createAndTessellateBox failed:', err)
-      })
-    }
-  }, [ready, kernel])
+        const elements = await kernel.queryElements()
+        if (elements.length === 0) {
+          await kernel.resetProject('Prototype Project', 'm')
+          await kernel.createElement({
+            kind: 'level',
+            meta: {
+              id: `level-${crypto.randomUUID()}`,
+              name: 'Level 1',
+            },
+            elevation: 0,
+          })
+        }
 
-  // Compute mesh info from store for status bar
+        setProjectMeta('Prototype Project', 'm')
+        await syncEntitiesAndRegenerateMeshes(kernel)
+      } catch (err) {
+        setKernelStatus('Kernel: error')
+        console.error('[BetterCAD] Kernel bootstrap failed:', err)
+      }
+    })()
+  }, [ready, kernel, setMaterials, setProjectMeta])
+
   useEffect(() => {
     if (cadMeshes.size > 0) {
       let totalVerts = 0
@@ -232,45 +197,31 @@ export default function App() {
     }
   }, [cadMeshes])
 
-  // Keep sketch overlay/plane in sync with the active tool no matter how tool changes.
-  useEffect(() => {
-    if (activeTool === 'sketch') {
-      activateSketch()
-    } else {
-      deactivateSketch()
-    }
-  }, [activeTool, activateSketch, deactivateSketch])
-
   const handleToolChange = (tool: Parameters<typeof setActiveTool>[0]) => {
     setActiveTool(tool)
   }
 
-  const handleExtrudeSketch = async () => {
-    if (extrudingSketch || sketchProfiles.size === 0) return
-    setExtrudingSketch(true)
-    try {
-      for (const profile of sketchProfiles.values()) {
-        await extrudeSketchProfile({
-          profile,
-          mode: sketchExtrudeMode,
-          height: defaultWallHeight,
-          thickness: defaultWallThickness,
-          kernel,
-          ready,
-          addCadMesh,
-          addWall,
-        })
-      }
-    } catch (err) {
-      console.error('[BetterCAD] Toolbar sketch extrusion failed:', err)
-    } finally {
-      setExtrudingSketch(false)
-    }
-  }
+  const walls = useMemo(
+    () => Array.from(entityElements.values()).filter(isWallElement),
+    [entityElements],
+  )
+  const doors = useMemo(
+    () => Array.from(entityElements.values()).filter(isDoorElement),
+    [entityElements],
+  )
+  const floors = useMemo(
+    () => Array.from(entityElements.values()).filter(isFloorElement),
+    [entityElements],
+  )
+  const stairs = useMemo(
+    () => Array.from(entityElements.values()).filter(isStairElement),
+    [entityElements],
+  )
 
   const viewportBackground = theme === 'light' ? '#edf2fa' : '#1a1a2e'
   const splitDividerColor = theme === 'light' ? '#d0d0d0' : '#3a3a50'
   const drawingPlaneHint = viewMode !== '2d' ? getDrawingPlaneHint(activeTool) : null
+
   const measurementReadout = useMemo(() => {
     const cursorText = measurementCursor
       ? `Cursor X:${formatLength(measurementCursor[0], lengthUnit)} Y:${formatLength(measurementCursor[1], lengthUnit)} Z:${formatLength(measurementCursor[2], lengthUnit)}`
@@ -281,7 +232,6 @@ export default function App() {
 
   return (
     <div className={`app-layout${theme === 'light' ? ' theme-light' : ''}`}>
-      {/* ---------- Kernel Error Banner ---------- */}
       {kernelError && (
         <div style={{
           background: '#dc2626',
@@ -296,14 +246,13 @@ export default function App() {
           <strong>Kernel Error:</strong>
           <span>{kernelError}</span>
           <span style={{ marginLeft: 'auto', opacity: 0.7, fontSize: '11px' }}>
-            Tools will not work without the WASM kernel. Check browser console for details.
+            Tools will not work without the kernel.
           </span>
         </div>
       )}
 
-      {/* ---------- Toolbar ---------- */}
       <div className="toolbar">
-        <span className="toolbar-title">BetterCAD</span>
+        <span className="toolbar-title">BetterCAD Prototype</span>
 
         <div className="toolbar-separator" />
 
@@ -324,24 +273,23 @@ export default function App() {
         <button
           className={`toolbar-btn ${activeTool === 'door' ? 'active' : ''}`}
           onClick={() => handleToolChange('door')}
-          title="Door tool"
+          title="Door tool (D)"
         >
           Door
         </button>
         <button
-          className="toolbar-btn toolbar-btn-disabled"
-          disabled
-          title="Window tool is not implemented yet"
+          className={`toolbar-btn ${activeTool === 'floor' ? 'active' : ''}`}
+          onClick={() => handleToolChange('floor')}
+          title="Floor tool (F)"
         >
-          Window
+          Floor
         </button>
         <button
-          className="toolbar-btn"
-          disabled={sketchProfiles.size === 0 || extrudingSketch}
-          onClick={() => { void handleExtrudeSketch() }}
-          title={sketchProfiles.size === 0 ? 'Draw at least one sketch profile first' : 'Extrude all sketch profiles'}
+          className={`toolbar-btn ${activeTool === 'stair' ? 'active' : ''}`}
+          onClick={() => handleToolChange('stair')}
+          title="Stair tool (S)"
         >
-          {extrudingSketch ? 'Extruding...' : 'Extrude'}
+          Stair
         </button>
         <button
           className={`toolbar-btn ${activeTool === 'measure' ? 'active' : ''}`}
@@ -350,39 +298,6 @@ export default function App() {
         >
           Measure
         </button>
-        <button
-          className={`toolbar-btn ${activeTool === 'sketch' ? 'active' : ''}`}
-          onClick={() => handleToolChange('sketch')}
-          title="Sketch tool (S)"
-        >
-          Sketch
-        </button>
-        <button
-          className="toolbar-btn"
-          onClick={clearSketch}
-        >
-          Clear Sketch
-        </button>
-
-        <div className="toolbar-separator" />
-
-        <button
-          className="toolbar-btn"
-          onClick={() => setShowImportDialog(true)}
-          title="Import STEP/DXF file"
-        >
-          Import
-        </button>
-        <button
-          className="toolbar-btn"
-          onClick={() => setShowExportDialog(true)}
-          title="Export to STEP/DXF"
-        >
-          Export
-        </button>
-
-        <div className="toolbar-separator" />
-
         <button
           className={`toolbar-btn ${showGrid ? 'active' : ''}`}
           onClick={toggleGrid}
@@ -395,25 +310,6 @@ export default function App() {
           onClick={toggleSnap}
         >
           Snap
-        </button>
-
-        <div className="toolbar-separator" />
-
-        <button
-          className="toolbar-btn"
-          onClick={() => temporal.getState().undo()}
-          disabled={!canUndo}
-          title="Undo (Ctrl+Z)"
-        >
-          Undo
-        </button>
-        <button
-          className="toolbar-btn"
-          onClick={() => temporal.getState().redo()}
-          disabled={!canRedo}
-          title="Redo (Ctrl+Shift+Z)"
-        >
-          Redo
         </button>
 
         <div className="toolbar-separator" />
@@ -448,7 +344,6 @@ export default function App() {
         </button>
       </div>
 
-      {/* ---------- Viewport + Property Panel ---------- */}
       <div className="viewport-area">
         {viewMode === '2d' ? (
           <div className="viewport">
@@ -515,27 +410,29 @@ export default function App() {
         <PropertyPanel />
       </div>
 
-      {/* ---------- Status Bar ---------- */}
       <div className="status-bar">
         <div className="status-bar-left">
           <span>{projectName}</span>
           <span>Tool: {activeTool}</span>
           {meshInfo && <span>{meshInfo}</span>}
           {measurementReadout && <span>{measurementReadout}</span>}
-          {walls.size > 0 && <span>Walls: {walls.size}</span>}
-          {doors.size > 0 && <span>Doors: {doors.size}</span>}
+          {walls.length > 0 && <span>Walls: {walls.length}</span>}
+          {doors.length > 0 && <span>Doors: {doors.length}</span>}
+          {floors.length > 0 && <span>Floors: {floors.length}</span>}
+          {stairs.length > 0 && <span>Stairs: {stairs.length}</span>}
           {selectedBodyId && <span>Selected: {selectedBodyId} (Del to remove)</span>}
-          {activeTool === 'measure' && (
-            <span>Click two points to measure</span>
-          )}
+          {activeTool === 'measure' && <span>Click two points to measure</span>}
           {activeTool === 'door' && (
-            <span>Hover a wall, preview snap, then click to place door</span>
+            <span>Hover a wall, preview snap, then click to place door • swing:{defaultDoorSwing}</span>
+          )}
+          {activeTool === 'floor' && (
+            <span>Click two opposite corners to place a rectangular slab • T:{formatLength(defaultFloorThickness, lengthUnit)}</span>
+          )}
+          {activeTool === 'stair' && (
+            <span>Click start then end of stair run • W:{formatLength(defaultStairWidth, lengthUnit)} R:{defaultStairRisers} H:{formatLength(defaultStairHeight, lengthUnit)}</span>
           )}
           {activeTool === 'wall' && (
             <span>Shift: orthogonal lock • Right-click: finish wall chain • H:{formatLength(defaultWallHeight, lengthUnit)} T:{formatLength(defaultWallThickness, lengthUnit)}</span>
-          )}
-          {activeTool === 'sketch' && (
-            <span>Sketches: {sketchProfiles.size} • {autoExtrudeSketch ? `Auto ${sketchExtrudeMode.toUpperCase()} @ H:${formatLength(defaultWallHeight, lengthUnit)} T:${formatLength(defaultWallThickness, lengthUnit)}` : 'Auto extrude off'}</span>
           )}
         </div>
         <div className="status-bar-right">
@@ -546,21 +443,6 @@ export default function App() {
           <span>{kernelStatus}</span>
         </div>
       </div>
-
-      {/* ---------- Import/Export Dialogs ---------- */}
-      <ImportDialog
-        open={showImportDialog}
-        onClose={() => setShowImportDialog(false)}
-        kernel={kernel}
-        onImport={(meshes) => {
-          meshes.forEach((mesh, i) => addCadMesh(`imported-${i}`, mesh))
-        }}
-      />
-      <ExportDialog
-        open={showExportDialog}
-        onClose={() => setShowExportDialog(false)}
-        kernel={kernel}
-      />
     </div>
   )
 }
