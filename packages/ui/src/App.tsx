@@ -4,7 +4,7 @@ import { OrbitControls, Grid } from '@react-three/drei'
 import { useStore } from 'zustand'
 import { useUIStore } from './stores/ui-store'
 import { useDocumentStore } from './stores/document-store'
-import { useHistoryTemporal } from './stores/history-store'
+import { useHistoryStore, useHistoryTemporal } from './stores/history-store'
 import { useKernel } from './hooks/useKernel'
 import { useUndo } from './hooks/useUndo'
 import { CadMesh } from './components/viewport/CadMesh'
@@ -82,6 +82,22 @@ export default function App() {
   const temporal = useHistoryTemporal()
   const canUndo = useStore(temporal, (s) => s.pastStates.length > 0)
   const canRedo = useStore(temporal, (s) => s.futureStates.length > 0)
+  const historyBoxParams = useHistoryStore((s) => s.boxParams)
+
+  // When undo/redo changes boxParams in history-store, sync to document-store and recompute mesh
+  useEffect(() => {
+    const docParams = useDocumentStore.getState().boxParams
+    if (
+      docParams.width === historyBoxParams.width &&
+      docParams.height === historyBoxParams.height &&
+      docParams.depth === historyBoxParams.depth
+    ) return
+    useDocumentStore.getState().setBoxParams(historyBoxParams)
+    if (!ready || !kernel) return
+    kernel.createAndTessellateBox(historyBoxParams.width, historyBoxParams.height, historyBoxParams.depth)
+      .then((mesh) => addCadMesh('box-0', mesh))
+      .catch((err) => console.error('Undo recompute failed:', err))
+  }, [historyBoxParams, ready, kernel, addCadMesh])
 
   useEffect(() => {
     if (ready && kernel) {

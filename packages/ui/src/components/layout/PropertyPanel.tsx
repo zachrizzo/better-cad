@@ -1,17 +1,21 @@
 import { useCallback, useRef } from 'react'
+import { useHistoryStore } from '../../stores/history-store'
 import { useDocumentStore } from '../../stores/document-store'
 import { useKernel } from '../../hooks/useKernel'
 
 export function PropertyPanel() {
-  const boxParams = useDocumentStore((s) => s.boxParams)
-  const setBoxParams = useDocumentStore((s) => s.setBoxParams)
+  const boxParams = useHistoryStore((s) => s.boxParams)
+  const setHistoryParams = useHistoryStore((s) => s.setBoxParams)
+  const setDocParams = useDocumentStore((s) => s.setBoxParams)
   const addCadMesh = useDocumentStore((s) => s.addCadMesh)
   const { kernel, ready } = useKernel()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleChange = useCallback((field: 'width' | 'height' | 'depth', value: number) => {
     const newParams = { ...boxParams, [field]: value }
-    setBoxParams(newParams)
+    // Update both stores: history-store tracks undo snapshots, document-store is the app state
+    setHistoryParams(newParams)
+    setDocParams(newParams)
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
@@ -23,7 +27,7 @@ export function PropertyPanel() {
         console.error('Recompute failed:', e)
       }
     }, 150)
-  }, [boxParams, setBoxParams, addCadMesh, kernel, ready])
+  }, [boxParams, setHistoryParams, setDocParams, addCadMesh, kernel, ready])
 
   return (
     <div className="property-panel">
