@@ -7,6 +7,7 @@ export interface TessellatedMesh {
 export interface KernelBackend {
   createBox(width: number, height: number, depth: number): Promise<string>
   tessellate(bodyId: string): Promise<TessellatedMesh>
+  createAndTessellateBox(width: number, height: number, depth: number): Promise<TessellatedMesh>
   ping(): Promise<string>
 }
 

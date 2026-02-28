@@ -9,7 +9,7 @@ truck-geometry = "0.5"
 truck-modeling = "0.6"
 truck-shapeops = "0.4"
 truck-stepio = "0.3"
-truck-meshalgo = "0.4"
+truck-meshalgo = { version = "0.4", default-features = false, features = ["tessellation", "filters", "analyzers"] }
 truck-polymesh = "0.6"
 
 # Core utilities

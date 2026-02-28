@@ -4,10 +4,12 @@ import { OrbitControls, Grid } from '@react-three/drei'
 import { useUIStore } from './stores/ui-store'
 import { useDocumentStore } from './stores/document-store'
 import { useKernel } from './hooks/useKernel'
+import { CadMesh } from './components/viewport/CadMesh'
 import './App.css'
 
 function Scene() {
   const showGrid = useUIStore((s) => s.showGrid)
+  const cadMeshes = useDocumentStore((s) => s.cadMeshes)
 
   return (
     <>
@@ -30,11 +32,24 @@ function Scene() {
         />
       )}
 
-      {/* Hardcoded demo box */}
-      <mesh position={[0, 0.5, 0]}>
-        <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color="#4a90d9" metalness={0.1} roughness={0.7} />
-      </mesh>
+      {/* Kernel-generated meshes */}
+      {Array.from(cadMeshes.entries()).map(([id, mesh]) => (
+        <CadMesh
+          key={id}
+          positions={mesh.positions}
+          normals={mesh.normals}
+          indices={mesh.indices}
+          color="#4a90d9"
+        />
+      ))}
+
+      {/* Fallback hardcoded demo box when no kernel meshes are loaded */}
+      {cadMeshes.size === 0 && (
+        <mesh position={[0, 0.5, 0]}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#4a90d9" metalness={0.1} roughness={0.7} />
+        </mesh>
+      )}
 
       {/* Camera controls */}
       <OrbitControls makeDefault />
@@ -52,8 +67,11 @@ export default function App() {
   const viewMode = useUIStore((s) => s.viewMode)
   const setViewMode = useUIStore((s) => s.setViewMode)
   const projectName = useDocumentStore((s) => s.projectName)
+  const cadMeshes = useDocumentStore((s) => s.cadMeshes)
+  const addCadMesh = useDocumentStore((s) => s.addCadMesh)
   const { kernel, ready } = useKernel()
   const [kernelStatus, setKernelStatus] = useState('loading...')
+  const [meshInfo, setMeshInfo] = useState('')
 
   useEffect(() => {
     if (ready && kernel) {
@@ -61,8 +79,34 @@ export default function App() {
         setKernelStatus(`Kernel: ${result}`)
         console.log('[BetterCAD] Kernel ping:', result)
       })
+
+      // Create a tessellated box from the kernel
+      kernel.createAndTessellateBox(1, 1, 1).then((mesh) => {
+        if (mesh.positions.length > 0) {
+          addCadMesh('default-box', mesh)
+          const vertexCount = mesh.positions.length / 3
+          const triangleCount = mesh.indices.length / 3
+          setMeshInfo(`V:${vertexCount} T:${triangleCount}`)
+          console.log('[BetterCAD] Tessellated box:', { vertices: vertexCount, triangles: triangleCount })
+        }
+      }).catch((err) => {
+        console.warn('[BetterCAD] createAndTessellateBox failed:', err)
+      })
     }
   }, [ready, kernel])
+
+  // Compute mesh info from store for status bar
+  useEffect(() => {
+    if (cadMeshes.size > 0) {
+      let totalVerts = 0
+      let totalTris = 0
+      cadMeshes.forEach((m) => {
+        totalVerts += m.positions.length / 3
+        totalTris += m.indices.length / 3
+      })
+      setMeshInfo(`V:${totalVerts} T:${totalTris}`)
+    }
+  }, [cadMeshes])
 
   return (
     <div className="app-layout">
@@ -161,6 +205,7 @@ export default function App() {
         <div className="status-bar-left">
           <span>{projectName}</span>
           <span>Tool: {activeTool}</span>
+          {meshInfo && <span>{meshInfo}</span>}
         </div>
         <div className="status-bar-right">
           <span>View: {viewMode.toUpperCase()}</span>

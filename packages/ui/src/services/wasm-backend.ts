@@ -34,4 +34,21 @@ export class WasmBackend implements KernelBackend {
       indices: new Uint32Array([]),
     }
   }
+
+  async createAndTessellateBox(width: number, height: number, depth: number): Promise<TessellatedMesh> {
+    if (this.wasm?.create_and_tessellate_box) {
+      const result = this.wasm.create_and_tessellate_box(width, height, depth)
+      return {
+        positions: new Float32Array(result.positions),
+        normals: new Float32Array(result.normals),
+        indices: new Uint32Array(result.indices),
+      }
+    }
+    // Mock fallback: return empty mesh
+    return {
+      positions: new Float32Array([]),
+      normals: new Float32Array([]),
+      indices: new Uint32Array([]),
+    }
+  }
 }
