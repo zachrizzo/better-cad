@@ -1,11 +1,14 @@
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 import * as THREE from 'three'
-import { Line } from '@react-three/drei'
+import { Line, Html } from '@react-three/drei'
 import { useSketchStore } from '../../stores/sketch-store'
 import { useBimStore } from '../../stores/bim-store'
 import { useDocumentStore } from '../../stores/document-store'
 import { useKernel } from '../../hooks/useKernel'
 import { extrudeSketchProfile } from '../../utils/sketch-extrude'
+import { useMeasurementStore } from '../../stores/measurement-store'
+import { useSettingsStore } from '../../stores/settings-store'
+import { formatLength } from '../../utils/units'
 
 const MIN_RECT_SIDE = 1e-5
 
@@ -23,11 +26,21 @@ export function SketchPlane() {
   const sketchExtrudeMode = useBimStore((s) => s.sketchExtrudeMode)
   const defaultWallHeight = useBimStore((s) => s.defaultWallHeight)
   const defaultWallThickness = useBimStore((s) => s.defaultWallThickness)
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const addWall = useBimStore((s) => s.addWall)
   const addCadMesh = useDocumentStore((s) => s.addCadMesh)
   const { kernel, ready } = useKernel()
+  const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
+  const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const planeRef = useRef<THREE.Mesh>(null)
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null)
+
+  useEffect(() => {
+    if (!active) {
+      setMeasurementCursor(null)
+      setToolReadout(null)
+    }
+  }, [active, setMeasurementCursor, setToolReadout])
 
   const handlePointerMove = useCallback((e: { point?: THREE.Vector3 }) => {
     if (!active) return
@@ -36,12 +49,25 @@ export function SketchPlane() {
     const preview: [number, number] = [point.x, point.z]
     setHoverPoint(preview)
     setPreviewPoint(preview)
-  }, [active, setPreviewPoint])
+    setMeasurementCursor([preview[0], 0, preview[1]])
+
+    if (pendingPoint) {
+      const dx = preview[0] - pendingPoint.x
+      const dz = preview[1] - pendingPoint.y
+      setToolReadout(
+        `Rect dX:${formatLength(Math.abs(dx), lengthUnit)} dZ:${formatLength(Math.abs(dz), lengthUnit)} Diag:${formatLength(Math.hypot(dx, dz), lengthUnit)}`,
+      )
+    } else {
+      setToolReadout('Sketch: pick first corner')
+    }
+  }, [active, lengthUnit, pendingPoint, setMeasurementCursor, setPreviewPoint, setToolReadout])
 
   const handlePointerLeave = useCallback(() => {
     setHoverPoint(null)
     setPreviewPoint(null)
-  }, [setPreviewPoint])
+    setMeasurementCursor(null)
+    setToolReadout(null)
+  }, [setMeasurementCursor, setPreviewPoint, setToolReadout])
 
   const handleClick = (e: { point?: THREE.Vector3 }) => {
     if (!active) return
@@ -53,10 +79,12 @@ export function SketchPlane() {
     const current: [number, number] = [x, z]
     setHoverPoint(current)
     setPreviewPoint(current)
+    setMeasurementCursor([x, 0, z])
 
     if (!pendingPoint) {
       // First corner of rectangle
       setPendingPoint({ id: 'p-corner-a', x, y: z })
+      setToolReadout(`Sketch start X:${formatLength(x, lengthUnit)} Z:${formatLength(z, lengthUnit)}`)
     } else {
       // Second corner - build rectangle
       const ax = pendingPoint.x, ay = pendingPoint.y
@@ -90,6 +118,9 @@ export function SketchPlane() {
       addLine(`l-${uid}-2`, p2, p3)
       addLine(`l-${uid}-3`, p3, p0)
       addProfile({ id: profileId, points: profilePoints })
+      setToolReadout(
+        `Sketch created W:${formatLength(Math.abs(bx - ax), lengthUnit)} D:${formatLength(Math.abs(by - ay), lengthUnit)}`,
+      )
 
       if (autoExtrudeSketch) {
         void extrudeSketchProfile({
@@ -118,6 +149,12 @@ export function SketchPlane() {
       ay: pendingPoint.y,
       bx: hoverPoint[0],
       by: hoverPoint[1],
+    }
+    : null
+  const previewSize = previewCorners
+    ? {
+      width: Math.abs(previewCorners.bx - previewCorners.ax),
+      depth: Math.abs(previewCorners.by - previewCorners.ay),
     }
     : null
 
@@ -150,20 +187,36 @@ export function SketchPlane() {
       )}
 
       {previewCorners && (
-        <Line
-          points={[
-            [previewCorners.ax, 0.03, previewCorners.ay],
-            [previewCorners.bx, 0.03, previewCorners.ay],
-            [previewCorners.bx, 0.03, previewCorners.by],
-            [previewCorners.ax, 0.03, previewCorners.by],
-            [previewCorners.ax, 0.03, previewCorners.ay],
-          ]}
-          color="#00d4ff"
-          lineWidth={2}
-          dashed
-          dashSize={0.2}
-          gapSize={0.1}
-        />
+        <>
+          <Line
+            points={[
+              [previewCorners.ax, 0.03, previewCorners.ay],
+              [previewCorners.bx, 0.03, previewCorners.ay],
+              [previewCorners.bx, 0.03, previewCorners.by],
+              [previewCorners.ax, 0.03, previewCorners.by],
+              [previewCorners.ax, 0.03, previewCorners.ay],
+            ]}
+            color="#00d4ff"
+            lineWidth={2}
+            dashed
+            dashSize={0.2}
+            gapSize={0.1}
+          />
+          {previewSize && (
+            <Html
+              position={[
+                (previewCorners.ax + previewCorners.bx) / 2,
+                0.16,
+                (previewCorners.ay + previewCorners.by) / 2,
+              ]}
+              center
+            >
+              <div className="measurement-badge">
+                W {formatLength(previewSize.width, lengthUnit)} • D {formatLength(previewSize.depth, lengthUnit)}
+              </div>
+            </Html>
+          )}
+        </>
       )}
     </>
   )

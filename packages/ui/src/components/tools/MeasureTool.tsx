@@ -1,7 +1,10 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import * as THREE from 'three'
-import { Line } from '@react-three/drei'
+import { Line, Html } from '@react-three/drei'
 import { useUIStore } from '../../stores/ui-store'
+import { useMeasurementStore } from '../../stores/measurement-store'
+import { useSettingsStore } from '../../stores/settings-store'
+import { formatLength } from '../../utils/units'
 
 // Measure tool state: two points clicked, shows distance
 export function useMeasureTool() {
@@ -39,19 +42,31 @@ export function useMeasureTool() {
 // Invisible plane for capturing measure tool clicks in the 3D viewport
 export function MeasurePlane() {
   const activeTool = useUIStore((s) => s.activeTool)
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit)
+  const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
+  const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const planeRef = useRef<THREE.Mesh>(null)
   const [pt1, setPt1] = useState<[number, number, number] | null>(null)
   const [pt2, setPt2] = useState<[number, number, number] | null>(null)
   const [cursorPos, setCursorPos] = useState<[number, number, number] | null>(null)
 
+  useEffect(() => {
+    if (activeTool !== 'measure') {
+      setMeasurementCursor(null)
+      setToolReadout(null)
+    }
+  }, [activeTool, setMeasurementCursor, setToolReadout])
+
   const handleClick = (e: { point?: THREE.Vector3 }) => {
     if (activeTool !== 'measure') return
     const point = e.point as THREE.Vector3
     if (!point) return
+    setMeasurementCursor([point.x, point.y, point.z])
 
     if (!pt1) {
       setPt1([point.x, point.y, point.z])
       setPt2(null)
+      setToolReadout(`Measure start X:${formatLength(point.x, lengthUnit)} Z:${formatLength(point.z, lengthUnit)}`)
     } else {
       const p2: [number, number, number] = [point.x, point.y, point.z]
       setPt2(p2)
@@ -59,21 +74,37 @@ export function MeasurePlane() {
       const dy = p2[1] - pt1[1]
       const dz = p2[2] - pt1[2]
       const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
+      setToolReadout(`Distance: ${formatLength(d, lengthUnit)}`)
       console.log(`[BetterCAD] Measure: ${d.toFixed(3)} units`)
       // After showing measurement, reset for next measurement on next click
       setTimeout(() => {
         setPt1(null)
         setPt2(null)
         setCursorPos(null)
+        setToolReadout(null)
       }, 3000)
     }
   }
 
   const handlePointerMove = (e: { point?: THREE.Vector3 }) => {
-    if (activeTool !== 'measure' || !pt1 || pt2) return
     const point = e.point as THREE.Vector3
-    if (!point) return
-    setCursorPos([point.x, point.y, point.z])
+    if (activeTool !== 'measure' || !point) return
+    setMeasurementCursor([point.x, point.y, point.z])
+    if (pt1 && !pt2) {
+      setCursorPos([point.x, point.y, point.z])
+      const dx = point.x - pt1[0]
+      const dy = point.y - pt1[1]
+      const dz = point.z - pt1[2]
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
+      setToolReadout(`Measure preview: ${formatLength(d, lengthUnit)}`)
+    } else if (!pt1) {
+      setToolReadout('Measure: pick first point')
+    }
+  }
+
+  const handlePointerLeave = () => {
+    setMeasurementCursor(null)
+    if (!pt1) setToolReadout(null)
   }
 
   if (activeTool !== 'measure') return null
@@ -90,6 +121,7 @@ export function MeasurePlane() {
         position={[0, 0, 0]}
         onClick={handleClick}
         onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
       >
         <planeGeometry args={[200, 200]} />
         <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
@@ -134,10 +166,9 @@ export function MeasurePlane() {
 
       {/* Distance label - rendered as a small sphere at midpoint with color indicating measurement */}
       {pt1 && pt2 && distance !== null && (
-        <mesh position={[(pt1[0]+pt2[0])/2, (pt1[1]+pt2[1])/2 + 0.3, (pt1[2]+pt2[2])/2]}>
-          <sphereGeometry args={[0.05, 8, 8]} />
-          <meshBasicMaterial color="#ffffff" />
-        </mesh>
+        <Html position={[(pt1[0] + pt2[0]) / 2, (pt1[1] + pt2[1]) / 2 + 0.28, (pt1[2] + pt2[2]) / 2]} center>
+          <div className="measurement-badge">{formatLength(distance, lengthUnit)}</div>
+        </Html>
       )}
     </>
   )

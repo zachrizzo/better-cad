@@ -158,6 +158,19 @@ html, body, #root {
   color: color-mix(in srgb, var(--accent) 75%, var(--text-primary));
 }
 
+.measurement-badge {
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  pointer-events: none;
+}
+
 /* ---------- Property Panel ---------- */
 .property-panel {
   width: 220px;

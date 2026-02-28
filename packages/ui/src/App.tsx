@@ -23,6 +23,9 @@ import { useBimStore } from './stores/bim-store'
 import { ImportDialog } from './components/dialogs/ImportDialog'
 import { ExportDialog } from './components/dialogs/ExportDialog'
 import { extrudeSketchProfile } from './utils/sketch-extrude'
+import { useMeasurementStore } from './stores/measurement-store'
+import { useSettingsStore } from './stores/settings-store'
+import { formatLength } from './utils/units'
 import './App.css'
 
 function getDrawingPlaneHint(tool: string): string | null {
@@ -130,8 +133,6 @@ export default function App() {
   const activateSketch = useSketchStore((s) => s.activateSketch)
   const deactivateSketch = useSketchStore((s) => s.deactivateSketch)
   const clearSketch = useSketchStore((s) => s.clearSketch)
-  const pendingSketchPoint = useSketchStore((s) => s.pendingPoint)
-  const sketchPreviewPoint = useSketchStore((s) => s.previewPoint)
   const sketchProfiles = useSketchStore((s) => s.profiles)
   const walls = useBimStore((s) => s.walls)
   const doors = useBimStore((s) => s.doors)
@@ -141,6 +142,9 @@ export default function App() {
   const autoExtrudeSketch = useBimStore((s) => s.autoExtrudeSketch)
   const sketchExtrudeMode = useBimStore((s) => s.sketchExtrudeMode)
   const setMaterials = useMaterialStore((s) => s.setMaterials)
+  const measurementCursor = useMeasurementStore((s) => s.cursor)
+  const toolReadout = useMeasurementStore((s) => s.toolReadout)
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const { kernel, ready, error: kernelError } = useKernel()
   const [kernelStatus, setKernelStatus] = useState('loading...')
   const [meshInfo, setMeshInfo] = useState('')
@@ -267,31 +271,13 @@ export default function App() {
   const viewportBackground = theme === 'light' ? '#edf2fa' : '#1a1a2e'
   const splitDividerColor = theme === 'light' ? '#d0d0d0' : '#3a3a50'
   const drawingPlaneHint = viewMode !== '2d' ? getDrawingPlaneHint(activeTool) : null
-  const sketchReadout = useMemo(() => {
-    if (activeTool !== 'sketch' || !sketchPreviewPoint) return null
-    const [cursorX, cursorZ] = sketchPreviewPoint
-    const cursorText = `Cursor X:${cursorX.toFixed(3)} Z:${cursorZ.toFixed(3)}`
-    if (!pendingSketchPoint) return cursorText
-
-    const dx = cursorX - pendingSketchPoint.x
-    const dz = cursorZ - pendingSketchPoint.y
-    const width = Math.abs(dx)
-    const depth = Math.abs(dz)
-    const diagonal = Math.hypot(dx, dz)
-    const minX = Math.min(cursorX, pendingSketchPoint.x)
-    const maxX = Math.max(cursorX, pendingSketchPoint.x)
-    const minZ = Math.min(cursorZ, pendingSketchPoint.y)
-    const maxZ = Math.max(cursorZ, pendingSketchPoint.y)
-
-    return [
-      cursorText,
-      `Rect X:[${minX.toFixed(3)}..${maxX.toFixed(3)}]`,
-      `Z:[${minZ.toFixed(3)}..${maxZ.toFixed(3)}]`,
-      `dX:${width.toFixed(3)}`,
-      `dZ:${depth.toFixed(3)}`,
-      `Diag:${diagonal.toFixed(3)}`,
-    ].join(' • ')
-  }, [activeTool, pendingSketchPoint, sketchPreviewPoint])
+  const measurementReadout = useMemo(() => {
+    const cursorText = measurementCursor
+      ? `Cursor X:${formatLength(measurementCursor[0], lengthUnit)} Y:${formatLength(measurementCursor[1], lengthUnit)} Z:${formatLength(measurementCursor[2], lengthUnit)}`
+      : null
+    if (cursorText && toolReadout) return `${cursorText} • ${toolReadout}`
+    return cursorText ?? toolReadout
+  }, [lengthUnit, measurementCursor, toolReadout])
 
   return (
     <div className={`app-layout${theme === 'light' ? ' theme-light' : ''}`}>
@@ -494,7 +480,7 @@ export default function App() {
                 <div className="viewport-hint">
                   <strong>Drawing Plane: Ground (XZ), Y=0</strong>
                   <span>{drawingPlaneHint}</span>
-                  {sketchReadout && <span className="viewport-hint-metrics">{sketchReadout}</span>}
+                  {measurementReadout && <span className="viewport-hint-metrics">{measurementReadout}</span>}
                 </div>
               )}
             </div>
@@ -521,7 +507,7 @@ export default function App() {
               <div className="viewport-hint">
                 <strong>Drawing Plane: Ground (XZ), Y=0</strong>
                 <span>{drawingPlaneHint}</span>
-                {sketchReadout && <span className="viewport-hint-metrics">{sketchReadout}</span>}
+                {measurementReadout && <span className="viewport-hint-metrics">{measurementReadout}</span>}
               </div>
             )}
           </div>
@@ -535,6 +521,7 @@ export default function App() {
           <span>{projectName}</span>
           <span>Tool: {activeTool}</span>
           {meshInfo && <span>{meshInfo}</span>}
+          {measurementReadout && <span>{measurementReadout}</span>}
           {walls.size > 0 && <span>Walls: {walls.size}</span>}
           {doors.size > 0 && <span>Doors: {doors.size}</span>}
           {selectedBodyId && <span>Selected: {selectedBodyId} (Del to remove)</span>}
@@ -545,14 +532,15 @@ export default function App() {
             <span>Hover a wall, preview snap, then click to place door</span>
           )}
           {activeTool === 'wall' && (
-            <span>Shift: orthogonal lock • Right-click: finish wall chain • H:{defaultWallHeight.toFixed(2)} T:{defaultWallThickness.toFixed(2)}</span>
+            <span>Shift: orthogonal lock • Right-click: finish wall chain • H:{formatLength(defaultWallHeight, lengthUnit)} T:{formatLength(defaultWallThickness, lengthUnit)}</span>
           )}
           {activeTool === 'sketch' && (
-            <span>Sketches: {sketchProfiles.size} • {autoExtrudeSketch ? `Auto ${sketchExtrudeMode.toUpperCase()} @ H:${defaultWallHeight.toFixed(2)} T:${defaultWallThickness.toFixed(2)}` : 'Auto extrude off'}</span>
+            <span>Sketches: {sketchProfiles.size} • {autoExtrudeSketch ? `Auto ${sketchExtrudeMode.toUpperCase()} @ H:${formatLength(defaultWallHeight, lengthUnit)} T:${formatLength(defaultWallThickness, lengthUnit)}` : 'Auto extrude off'}</span>
           )}
         </div>
         <div className="status-bar-right">
           <span>View: {viewMode.toUpperCase()}</span>
+          <span>Units: {lengthUnit.toUpperCase()}</span>
           <span>{showGrid ? 'Grid ON' : 'Grid OFF'}</span>
           <span>{snapEnabled ? 'Snap ON' : 'Snap OFF'}</span>
           <span>{kernelStatus}</span>

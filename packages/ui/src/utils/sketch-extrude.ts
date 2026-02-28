@@ -52,8 +52,7 @@ export async function extrudeSketchProfile({
     if (!ready || !kernel) {
       throw new Error('Kernel not ready for sketch extrusion')
     }
-    const kernelPoints = profile.points.map(([x, z]) => [x, -z] as [number, number])
-    const mesh = await kernel.extrudeSketchPoints(kernelPoints, h)
+    const mesh = await kernel.extrudeSketchPoints(profile.points, h)
     const meshId = `${profile.id}-solid`
     addCadMesh(meshId, asCadMesh(mapKernelPlanMeshToScene(mesh)))
     return { meshIds: [meshId], wallIds: [] }
@@ -80,7 +79,7 @@ export async function extrudeSketchProfile({
     wallIds.push(wallId)
 
     if (ready && kernel) {
-      const mesh = await kernel.addWall(start[0], -start[1], end[0], -end[1], h, t)
+      const mesh = await kernel.addWall(start[0], start[1], end[0], end[1], h, t)
       addCadMesh(wallId, asCadMesh(mapKernelPlanMeshToScene(mesh)))
       meshIds.push(wallId)
     }

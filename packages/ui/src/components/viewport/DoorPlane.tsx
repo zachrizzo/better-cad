@@ -1,14 +1,14 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import * as THREE from 'three'
-import { Line } from '@react-three/drei'
+import { Line, Html } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import { useUIStore } from '../../stores/ui-store'
 import { useBimStore } from '../../stores/bim-store'
 import type { WallData } from '../../stores/bim-store'
+import { useMeasurementStore } from '../../stores/measurement-store'
+import { useSettingsStore } from '../../stores/settings-store'
+import { formatLength } from '../../utils/units'
 
-const DEFAULT_DOOR_WIDTH = 0.9
-const DEFAULT_DOOR_HEIGHT = 2.1
-const DEFAULT_DOOR_SILL = 0.0
 const DOOR_ATTACH_DISTANCE = 0.8
 const DOOR_END_CLEARANCE = 0.05
 
@@ -29,7 +29,11 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function getDoorCandidate(point: Point2, walls: Map<string, WallData>): DoorCandidate | null {
+function getDoorCandidate(
+  point: Point2,
+  walls: Map<string, WallData>,
+  defaults: { width: number; height: number; sillHeight: number },
+): DoorCandidate | null {
   let nearest: DoorCandidate | null = null
   let nearestDistance = Infinity
 
@@ -49,7 +53,7 @@ function getDoorCandidate(point: Point2, walls: Map<string, WallData>): DoorCand
 
     if (distance > DOOR_ATTACH_DISTANCE || distance >= nearestDistance) return
 
-    const minT = (DEFAULT_DOOR_WIDTH / 2 + DOOR_END_CLEARANCE) / length
+    const minT = (defaults.width / 2 + DOOR_END_CLEARANCE) / length
     if (minT >= 0.5) return
     const tDoor = clamp(tRaw, minT, 1 - minT)
     const center: Point2 = [sx + tDoor * dx, sz + tDoor * dz]
@@ -59,9 +63,9 @@ function getDoorCandidate(point: Point2, walls: Map<string, WallData>): DoorCand
       positionAlongWall: tDoor,
       center,
       direction: dir,
-      width: DEFAULT_DOOR_WIDTH,
-      height: DEFAULT_DOOR_HEIGHT,
-      sillHeight: DEFAULT_DOOR_SILL,
+      width: defaults.width,
+      height: defaults.height,
+      sillHeight: defaults.sillHeight,
     }
     nearestDistance = distance
   })
@@ -74,29 +78,69 @@ export function DoorPlane() {
   const walls = useBimStore((s) => s.walls)
   const doors = useBimStore((s) => s.doors)
   const addDoor = useBimStore((s) => s.addDoor)
+  const defaultDoorWidth = useBimStore((s) => s.defaultDoorWidth)
+  const defaultDoorHeight = useBimStore((s) => s.defaultDoorHeight)
+  const defaultDoorSill = useBimStore((s) => s.defaultDoorSill)
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit)
+  const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
+  const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const planeRef = useRef<THREE.Mesh>(null)
   const [candidate, setCandidate] = useState<DoorCandidate | null>(null)
 
   useEffect(() => {
     if (activeTool !== 'door') {
       setCandidate(null)
+      setMeasurementCursor(null)
+      setToolReadout(null)
     }
-  }, [activeTool])
+  }, [activeTool, setMeasurementCursor, setToolReadout])
 
   const updateCandidate = useCallback((point: Point2) => {
-    setCandidate(getDoorCandidate(point, walls))
-  }, [walls])
+    setCandidate(getDoorCandidate(point, walls, {
+      width: defaultDoorWidth,
+      height: defaultDoorHeight,
+      sillHeight: defaultDoorSill,
+    }))
+  }, [defaultDoorHeight, defaultDoorSill, defaultDoorWidth, walls])
 
   const handlePointerMove = useCallback((e: PlanePointerEvent) => {
     if (activeTool !== 'door') return
-    updateCandidate([e.point.x, e.point.z])
-  }, [activeTool, updateCandidate])
+    const point: Point2 = [e.point.x, e.point.z]
+    updateCandidate(point)
+    setMeasurementCursor([point[0], 0, point[1]])
+    const nextCandidate = getDoorCandidate(point, walls, {
+      width: defaultDoorWidth,
+      height: defaultDoorHeight,
+      sillHeight: defaultDoorSill,
+    })
+    if (nextCandidate) {
+      setToolReadout(
+        `Door W:${formatLength(nextCandidate.width, lengthUnit)} H:${formatLength(nextCandidate.height, lengthUnit)} • ${nextCandidate.wallId}`,
+      )
+    } else {
+      setToolReadout('Door: hover closer to a wall to snap')
+    }
+  }, [
+    activeTool,
+    defaultDoorHeight,
+    defaultDoorSill,
+    defaultDoorWidth,
+    lengthUnit,
+    setMeasurementCursor,
+    setToolReadout,
+    updateCandidate,
+    walls,
+  ])
 
   const handleClick = useCallback((e: PlanePointerEvent) => {
     e.stopPropagation()
     if (activeTool !== 'door') return
     const clickPoint: Point2 = [e.point.x, e.point.z]
-    const doorCandidate = getDoorCandidate(clickPoint, walls)
+    const doorCandidate = getDoorCandidate(clickPoint, walls, {
+      width: defaultDoorWidth,
+      height: defaultDoorHeight,
+      sillHeight: defaultDoorSill,
+    })
     if (!doorCandidate) {
       console.log('[BetterCAD] Door placement: hover closer to a wall')
       return
@@ -108,14 +152,28 @@ export function DoorPlane() {
       ...doorCandidate,
     })
     setCandidate(doorCandidate)
+    setToolReadout(
+      `Door placed W:${formatLength(doorCandidate.width, lengthUnit)} H:${formatLength(doorCandidate.height, lengthUnit)} on ${doorCandidate.wallId}`,
+    )
     console.log(
       `[BetterCAD] Door placed on ${doorCandidate.wallId} at t=${doorCandidate.positionAlongWall.toFixed(3)} (opening cut pending kernel support)`,
     )
-  }, [activeTool, addDoor, walls])
+  }, [
+    activeTool,
+    addDoor,
+    defaultDoorHeight,
+    defaultDoorSill,
+    defaultDoorWidth,
+    lengthUnit,
+    setToolReadout,
+    walls,
+  ])
 
   const handlePointerLeave = useCallback(() => {
     setCandidate(null)
-  }, [])
+    setMeasurementCursor(null)
+    setToolReadout(null)
+  }, [setMeasurementCursor, setToolReadout])
 
   return (
     <>
@@ -160,6 +218,11 @@ export function DoorPlane() {
             color="#2dd4bf"
             lineWidth={3}
           />
+          <Html position={[candidate.center[0], 0.35, candidate.center[1]]} center>
+            <div className="measurement-badge">
+              {formatLength(candidate.width, lengthUnit)}
+            </div>
+          </Html>
         </>
       )}
 

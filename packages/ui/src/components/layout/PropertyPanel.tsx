@@ -4,10 +4,12 @@ import { useDocumentStore } from '../../stores/document-store'
 import { useUIStore } from '../../stores/ui-store'
 import { useBimStore } from '../../stores/bim-store'
 import { useSketchStore } from '../../stores/sketch-store'
+import { useSettingsStore } from '../../stores/settings-store'
 import { useKernel } from '../../hooks/useKernel'
 import { MaterialPicker } from '../materials/MaterialPicker'
 import { extrudeSketchProfile } from '../../utils/sketch-extrude'
 import { mapKernelPlanMeshToScene } from '../../utils/mesh-coordinates'
+import { LENGTH_UNITS, metersToUnitValue, type LengthUnit, unitValueToMeters } from '../../utils/units'
 
 const MIN_DIMENSION = 0.01
 
@@ -15,6 +17,24 @@ interface Dimensions {
   width: number
   height: number
   depth: number
+}
+
+function dimensionsToDisplayUnits(dimensions: Dimensions, unit: LengthUnit): Dimensions {
+  const precision = LENGTH_UNITS[unit].precision
+  const toDisplay = (meters: number) => Number(metersToUnitValue(meters, unit).toFixed(precision))
+  return {
+    width: toDisplay(dimensions.width),
+    height: toDisplay(dimensions.height),
+    depth: toDisplay(dimensions.depth),
+  }
+}
+
+function dimensionsToMeters(dimensions: Dimensions, unit: LengthUnit): Dimensions {
+  return {
+    width: unitValueToMeters(dimensions.width, unit),
+    height: unitValueToMeters(dimensions.height, unit),
+    depth: unitValueToMeters(dimensions.depth, unit),
+  }
 }
 
 function getMeshDimensions(positions: Float32Array): Dimensions | null {
@@ -157,12 +177,20 @@ export function PropertyPanel() {
   const addWall = useBimStore((s) => s.addWall)
   const defaultWallHeight = useBimStore((s) => s.defaultWallHeight)
   const defaultWallThickness = useBimStore((s) => s.defaultWallThickness)
+  const defaultDoorWidth = useBimStore((s) => s.defaultDoorWidth)
+  const defaultDoorHeight = useBimStore((s) => s.defaultDoorHeight)
+  const defaultDoorSill = useBimStore((s) => s.defaultDoorSill)
   const autoExtrudeSketch = useBimStore((s) => s.autoExtrudeSketch)
   const sketchExtrudeMode = useBimStore((s) => s.sketchExtrudeMode)
   const setDefaultWallHeight = useBimStore((s) => s.setDefaultWallHeight)
   const setDefaultWallThickness = useBimStore((s) => s.setDefaultWallThickness)
+  const setDefaultDoorWidth = useBimStore((s) => s.setDefaultDoorWidth)
+  const setDefaultDoorHeight = useBimStore((s) => s.setDefaultDoorHeight)
+  const setDefaultDoorSill = useBimStore((s) => s.setDefaultDoorSill)
   const setAutoExtrudeSketch = useBimStore((s) => s.setAutoExtrudeSketch)
   const setSketchExtrudeMode = useBimStore((s) => s.setSketchExtrudeMode)
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit)
+  const setLengthUnit = useSettingsStore((s) => s.setLengthUnit)
   const profiles = useSketchStore((s) => s.profiles)
   const { kernel, ready } = useKernel()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -191,21 +219,39 @@ export function PropertyPanel() {
     return boxParams
   }, [selectedWall, selectedMesh, boxParams])
 
-  const [inputDims, setInputDims] = useState<Dimensions>(panelDimensions)
+  const displayDimensions = useMemo(
+    () => dimensionsToDisplayUnits(panelDimensions, lengthUnit),
+    [lengthUnit, panelDimensions],
+  )
+  const toDisplayValue = useCallback(
+    (meters: number) => Number(metersToUnitValue(meters, lengthUnit).toFixed(LENGTH_UNITS[lengthUnit].precision)),
+    [lengthUnit],
+  )
+  const unitStep = useMemo(() => {
+    if (lengthUnit === 'mm') return 1
+    if (lengthUnit === 'cm') return 0.1
+    if (lengthUnit === 'in') return 0.1
+    if (lengthUnit === 'ft') return 0.01
+    return 0.01
+  }, [lengthUnit])
+  const displayMin = useMemo(() => metersToUnitValue(MIN_DIMENSION, lengthUnit), [lengthUnit])
+
+  const [inputDims, setInputDims] = useState<Dimensions>(displayDimensions)
 
   useEffect(() => {
-    setInputDims(panelDimensions)
-  }, [panelDimensions, selectedMeshId])
+    setInputDims(displayDimensions)
+  }, [displayDimensions, selectedMeshId])
 
   // Clear pending debounce timer on unmount to prevent stale closure firing
   useEffect(() => {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [])
 
-  const applyDimensions = useCallback((newParams: Dimensions) => {
+  const applyDimensions = useCallback((newDisplayParams: Dimensions) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
       try {
+        const newParams = dimensionsToMeters(newDisplayParams, lengthUnit)
         if (selectedWall) {
           const [sx, sz] = selectedWall.start
           const [ex, ez] = selectedWall.end
@@ -231,9 +277,9 @@ export function PropertyPanel() {
           if (ready && kernel) {
             const mesh = await kernel.addWall(
               sx,
-              -sz,
+              sz,
               nextEnd[0],
-              -nextEnd[1],
+              nextEnd[1],
               nextHeight,
               nextThickness,
             )
@@ -270,7 +316,7 @@ export function PropertyPanel() {
         console.error('Dimension update failed:', e)
       }
     }, 150)
-  }, [addCadMesh, kernel, ready, selectedMesh, selectedMeshId, selectedWall, setDocParams, setHistoryParams, updateWall])
+  }, [addCadMesh, kernel, lengthUnit, ready, selectedMesh, selectedMeshId, selectedWall, setDocParams, setHistoryParams, updateWall])
 
   const handleChange = useCallback((field: keyof Dimensions, value: number) => {
     const next = {
@@ -321,6 +367,20 @@ export function PropertyPanel() {
   return (
     <div className="property-panel">
       <div className="property-panel-title">{panelTitle}</div>
+      <div className="property-row">
+        <label className="property-label">Units</label>
+        <select
+          className="property-input"
+          value={lengthUnit}
+          onChange={(e) => setLengthUnit(e.target.value as LengthUnit)}
+        >
+          <option value="mm">Millimeters (mm)</option>
+          <option value="cm">Centimeters (cm)</option>
+          <option value="m">Meters (m)</option>
+          <option value="in">Inches (in)</option>
+          <option value="ft">Feet (ft)</option>
+        </select>
+      </div>
       {(['width', 'height', 'depth'] as const).map((field) => (
         <div className="property-row" key={field}>
           <label className="property-label">{field.charAt(0).toUpperCase() + field.slice(1)}</label>
@@ -328,8 +388,8 @@ export function PropertyPanel() {
             type="number"
             className="property-input"
             value={inputDims[field]}
-            min={0.01}
-            step={0.1}
+            min={displayMin}
+            step={unitStep}
             onChange={(e) => {
               const v = parseFloat(e.target.value)
               if (!isNaN(v) && v > 0) handleChange(field, v)
@@ -339,19 +399,19 @@ export function PropertyPanel() {
       ))}
 
       <div className="property-panel-title" style={{ marginTop: 14 }}>
-        Sketch / Wall Defaults
+        Defaults ({LENGTH_UNITS[lengthUnit].symbol})
       </div>
       <div className="property-row">
         <label className="property-label">Wall H</label>
         <input
           type="number"
           className="property-input"
-          value={defaultWallHeight}
-          min={0.01}
-          step={0.1}
+          value={toDisplayValue(defaultWallHeight)}
+          min={displayMin}
+          step={unitStep}
           onChange={(e) => {
             const v = parseFloat(e.target.value)
-            if (!isNaN(v) && v > 0) setDefaultWallHeight(v)
+            if (!isNaN(v) && v > 0) setDefaultWallHeight(unitValueToMeters(v, lengthUnit))
           }}
         />
       </div>
@@ -360,12 +420,54 @@ export function PropertyPanel() {
         <input
           type="number"
           className="property-input"
-          value={defaultWallThickness}
-          min={0.01}
-          step={0.05}
+          value={toDisplayValue(defaultWallThickness)}
+          min={displayMin}
+          step={unitStep}
           onChange={(e) => {
             const v = parseFloat(e.target.value)
-            if (!isNaN(v) && v > 0) setDefaultWallThickness(v)
+            if (!isNaN(v) && v > 0) setDefaultWallThickness(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+      <div className="property-row">
+        <label className="property-label">Door W</label>
+        <input
+          type="number"
+          className="property-input"
+          value={toDisplayValue(defaultDoorWidth)}
+          min={displayMin}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!isNaN(v) && v > 0) setDefaultDoorWidth(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+      <div className="property-row">
+        <label className="property-label">Door H</label>
+        <input
+          type="number"
+          className="property-input"
+          value={toDisplayValue(defaultDoorHeight)}
+          min={displayMin}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!isNaN(v) && v > 0) setDefaultDoorHeight(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+      <div className="property-row">
+        <label className="property-label">Door S</label>
+        <input
+          type="number"
+          className="property-input"
+          value={toDisplayValue(defaultDoorSill)}
+          min={0}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!isNaN(v) && v >= 0) setDefaultDoorSill(unitValueToMeters(v, lengthUnit))
           }}
         />
       </div>

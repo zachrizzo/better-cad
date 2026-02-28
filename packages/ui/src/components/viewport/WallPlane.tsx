@@ -1,12 +1,15 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
-import { Line } from '@react-three/drei'
+import { Line, Html } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import { useUIStore } from '../../stores/ui-store'
 import { useBimStore } from '../../stores/bim-store'
 import { useDocumentStore } from '../../stores/document-store'
 import { useKernel } from '../../hooks/useKernel'
 import { mapKernelPlanMeshToScene } from '../../utils/mesh-coordinates'
+import { useMeasurementStore } from '../../stores/measurement-store'
+import { useSettingsStore } from '../../stores/settings-store'
+import { formatLength } from '../../utils/units'
 
 const WALL_SNAP_DISTANCE = 0.35
 const MIN_WALL_LENGTH = 0.2
@@ -31,8 +34,11 @@ export function WallPlane() {
   const addWall = useBimStore((s) => s.addWall)
   const defaultWallHeight = useBimStore((s) => s.defaultWallHeight)
   const defaultWallThickness = useBimStore((s) => s.defaultWallThickness)
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const addCadMesh = useDocumentStore((s) => s.addCadMesh)
   const { kernel, ready } = useKernel()
+  const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
+  const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const planeRef = useRef<THREE.Mesh>(null)
   const [previewEnd, setPreviewEnd] = useState<Point2 | null>(null)
   const [cursorPoint, setCursorPoint] = useState<Point2 | null>(null)
@@ -73,8 +79,10 @@ export function WallPlane() {
       setPreviewEnd(null)
       setCursorPoint(null)
       setSnapMarker(null)
+      setMeasurementCursor(null)
+      setToolReadout(null)
     }
-  }, [activeTool, setPendingWallStart])
+  }, [activeTool, setMeasurementCursor, setPendingWallStart, setToolReadout])
 
   const handlePointerMove = useCallback((e: PlanePointerEvent) => {
     if (activeTool !== 'wall') return
@@ -82,22 +90,44 @@ export function WallPlane() {
     const { point, snappedPoint } = getConstrainedPoint(rawPoint, e.shiftKey)
     setCursorPoint(point)
     setSnapMarker(snappedPoint)
+    setMeasurementCursor([point[0], 0, point[1]])
+    if (pendingWallStart) {
+      const length = Math.hypot(point[0] - pendingWallStart[0], point[1] - pendingWallStart[1])
+      setToolReadout(
+        `Wall L:${formatLength(length, lengthUnit)} H:${formatLength(defaultWallHeight, lengthUnit)} T:${formatLength(defaultWallThickness, lengthUnit)}${snappedPoint ? ' SNAP' : ''}`,
+      )
+    } else {
+      setToolReadout(
+        `Wall defaults H:${formatLength(defaultWallHeight, lengthUnit)} T:${formatLength(defaultWallThickness, lengthUnit)} • pick start`,
+      )
+    }
     if (pendingWallStart) {
       setPreviewEnd(point)
     }
-  }, [activeTool, getConstrainedPoint, pendingWallStart])
+  }, [
+    activeTool,
+    defaultWallHeight,
+    defaultWallThickness,
+    getConstrainedPoint,
+    lengthUnit,
+    pendingWallStart,
+    setMeasurementCursor,
+    setToolReadout,
+  ])
 
   const handlePointerLeave = useCallback(() => {
     setCursorPoint(null)
     setSnapMarker(null)
-  }, [])
+    setMeasurementCursor(null)
+  }, [setMeasurementCursor])
 
   const handleCancel = useCallback((e: PlanePointerEvent) => {
     e.stopPropagation()
     e.nativeEvent.preventDefault()
     setPendingWallStart(null)
     setPreviewEnd(null)
-  }, [setPendingWallStart])
+    setToolReadout('Wall chain ended')
+  }, [setPendingWallStart, setToolReadout])
 
   const handleClick = (e: PlanePointerEvent) => {
     e.stopPropagation()
@@ -106,10 +136,12 @@ export function WallPlane() {
     const { point } = getConstrainedPoint(rawPoint, e.shiftKey)
     const [x, z] = point
     setCursorPoint(point)
+    setMeasurementCursor([x, 0, z])
 
     if (!pendingWallStart) {
       setPendingWallStart(point)
       setPreviewEnd(point)
+      setToolReadout(`Wall start X:${formatLength(x, lengthUnit)} Z:${formatLength(z, lengthUnit)}`)
     } else {
       const [sx, sz] = pendingWallStart
       const wallLength = Math.hypot(x - sx, z - sz)
@@ -129,7 +161,7 @@ export function WallPlane() {
 
       if (ready && kernel) {
         kernel
-          .addWall(sx, -sz, x, -z, defaultWallHeight, defaultWallThickness)
+          .addWall(sx, sz, x, z, defaultWallHeight, defaultWallThickness)
           .then((mesh) => {
             if (mesh.positions.length > 0) {
               addCadMesh(wallId, mapKernelPlanMeshToScene(mesh))
@@ -145,6 +177,9 @@ export function WallPlane() {
       // Keep command active for chained walls (common CAD workflow).
       setPendingWallStart(point)
       setPreviewEnd(point)
+      setToolReadout(
+        `Wall placed L:${formatLength(wallLength, lengthUnit)} H:${formatLength(defaultWallHeight, lengthUnit)} T:${formatLength(defaultWallThickness, lengthUnit)}`,
+      )
     }
   }
 
@@ -168,6 +203,9 @@ export function WallPlane() {
         [sx + nx, 0.03, sz + nz],
       ] as [number, number, number][]
     })()
+    : null
+  const previewLength = pendingWallStart && previewEnd
+    ? Math.hypot(previewEnd[0] - pendingWallStart[0], previewEnd[1] - pendingWallStart[1])
     : null
 
   return (
@@ -195,17 +233,31 @@ export function WallPlane() {
 
       {/* Preview line from first click to cursor */}
       {pendingWallStart && previewEnd && (
-        <Line
-          points={[
-            [pendingWallStart[0], 0.05, pendingWallStart[1]],
-            [previewEnd[0], 0.05, previewEnd[1]],
-          ]}
-          color="#ffaa00"
-          lineWidth={2}
-          dashed
-          dashSize={0.3}
-          gapSize={0.15}
-        />
+        <>
+          <Line
+            points={[
+              [pendingWallStart[0], 0.05, pendingWallStart[1]],
+              [previewEnd[0], 0.05, previewEnd[1]],
+            ]}
+            color="#ffaa00"
+            lineWidth={2}
+            dashed
+            dashSize={0.3}
+            gapSize={0.15}
+          />
+          {previewLength !== null && (
+            <Html
+              position={[
+                (pendingWallStart[0] + previewEnd[0]) / 2,
+                0.2,
+                (pendingWallStart[1] + previewEnd[1]) / 2,
+              ]}
+              center
+            >
+              <div className="measurement-badge">{formatLength(previewLength, lengthUnit)}</div>
+            </Html>
+          )}
+        </>
       )}
 
       {/* Preview wall thickness footprint */}
