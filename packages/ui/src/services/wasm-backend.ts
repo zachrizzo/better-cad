@@ -124,6 +124,10 @@ export class WasmBackend implements KernelBackend {
   }
 
   async importFile(data: Uint8Array, format: string): Promise<TessellatedMesh[]> {
+    if (format === 'dxf') {
+      this.requireMethod('import_dxf_data')(data)
+      return []
+    }
     if (format !== 'step') {
       throw new Error(`Import format "${format}" is not supported`)
     }
@@ -137,11 +141,23 @@ export class WasmBackend implements KernelBackend {
   }
 
   async exportFile(format: string): Promise<ArrayBuffer> {
-    if (format !== 'step') {
-      throw new Error(`Export format "${format}" is not supported`)
+    if (format === 'dxf') {
+      const bytes: Uint8Array = this.requireMethod('export_dxf_project')()
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
     }
-    const bytes: Uint8Array = this.requireMethod('export_step_from_box')(1.0, 1.0, 1.0)
-    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    if (format === 'ifc') {
+      const bytes: Uint8Array = this.requireMethod('export_ifc_project')()
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    }
+    if (format === 'step') {
+      const bytes: Uint8Array = this.requireMethod('export_step_project')()
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    }
+    if (format === 'gltf') {
+      const bytes: Uint8Array = this.requireMethod('export_gltf_project')()
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    }
+    throw new Error(`Export format "${format}" is not supported`)
   }
 
   async getMaterialLibrary(): Promise<PbrMaterial[]> {

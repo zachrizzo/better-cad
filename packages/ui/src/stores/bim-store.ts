@@ -38,6 +38,17 @@ interface BimState {
   defaultStairWidth: number
   defaultStairRisers: number
   defaultStairHeight: number
+  defaultWindowWidth: number
+  defaultWindowHeight: number
+  defaultWindowSill: number
+  defaultColumnWidth: number
+  defaultColumnDepth: number
+  defaultColumnHeight: number
+  defaultBeamWidth: number
+  defaultBeamDepth: number
+  defaultBeamElevation: number
+  defaultRoofThickness: number
+  defaultRoofElevation: number
   autoExtrudeSketch: boolean
   sketchExtrudeMode: SketchExtrudeMode
   addWall: (wall: WallData) => void
@@ -56,6 +67,17 @@ interface BimState {
   setDefaultStairWidth: (width: number) => void
   setDefaultStairRisers: (risers: number) => void
   setDefaultStairHeight: (height: number) => void
+  setDefaultWindowWidth: (width: number) => void
+  setDefaultWindowHeight: (height: number) => void
+  setDefaultWindowSill: (sillHeight: number) => void
+  setDefaultColumnWidth: (width: number) => void
+  setDefaultColumnDepth: (depth: number) => void
+  setDefaultColumnHeight: (height: number) => void
+  setDefaultBeamWidth: (width: number) => void
+  setDefaultBeamDepth: (depth: number) => void
+  setDefaultBeamElevation: (elevation: number) => void
+  setDefaultRoofThickness: (thickness: number) => void
+  setDefaultRoofElevation: (elevation: number) => void
   setAutoExtrudeSketch: (enabled: boolean) => void
   setSketchExtrudeMode: (mode: SketchExtrudeMode) => void
 }
@@ -76,6 +98,17 @@ export const useBimStore = create<BimState>()(
       defaultStairWidth: 1.1,
       defaultStairRisers: 16,
       defaultStairHeight: 3.0,
+      defaultWindowWidth: 1.2,
+      defaultWindowHeight: 1.2,
+      defaultWindowSill: 0.9,
+      defaultColumnWidth: 0.3,
+      defaultColumnDepth: 0.3,
+      defaultColumnHeight: 3.0,
+      defaultBeamWidth: 0.2,
+      defaultBeamDepth: 0.4,
+      defaultBeamElevation: 3.0,
+      defaultRoofThickness: 0.3,
+      defaultRoofElevation: 3.0,
       autoExtrudeSketch: false,
       sketchExtrudeMode: 'walls',
       addWall: (wall) =>
@@ -127,6 +160,17 @@ export const useBimStore = create<BimState>()(
       setDefaultStairWidth: (width) => set({ defaultStairWidth: Math.max(0.2, width) }),
       setDefaultStairRisers: (risers) => set({ defaultStairRisers: Math.max(2, Math.min(64, Math.round(risers))) }),
       setDefaultStairHeight: (height) => set({ defaultStairHeight: Math.max(0.2, height) }),
+      setDefaultWindowWidth: (width) => set({ defaultWindowWidth: Math.max(0.01, width) }),
+      setDefaultWindowHeight: (height) => set({ defaultWindowHeight: Math.max(0.01, height) }),
+      setDefaultWindowSill: (sillHeight) => set({ defaultWindowSill: Math.max(0, sillHeight) }),
+      setDefaultColumnWidth: (width) => set({ defaultColumnWidth: Math.max(0.01, width) }),
+      setDefaultColumnDepth: (depth) => set({ defaultColumnDepth: Math.max(0.01, depth) }),
+      setDefaultColumnHeight: (height) => set({ defaultColumnHeight: Math.max(0.01, height) }),
+      setDefaultBeamWidth: (width) => set({ defaultBeamWidth: Math.max(0.01, width) }),
+      setDefaultBeamDepth: (depth) => set({ defaultBeamDepth: Math.max(0.01, depth) }),
+      setDefaultBeamElevation: (elevation) => set({ defaultBeamElevation: Math.max(0, elevation) }),
+      setDefaultRoofThickness: (thickness) => set({ defaultRoofThickness: Math.max(0.01, thickness) }),
+      setDefaultRoofElevation: (elevation) => set({ defaultRoofElevation: Math.max(0, elevation) }),
       setAutoExtrudeSketch: (enabled) => set({ autoExtrudeSketch: enabled }),
       setSketchExtrudeMode: (mode) => set({ sketchExtrudeMode: mode }),
     }),
@@ -143,6 +187,17 @@ export const useBimStore = create<BimState>()(
         defaultStairWidth: state.defaultStairWidth,
         defaultStairRisers: state.defaultStairRisers,
         defaultStairHeight: state.defaultStairHeight,
+        defaultWindowWidth: state.defaultWindowWidth,
+        defaultWindowHeight: state.defaultWindowHeight,
+        defaultWindowSill: state.defaultWindowSill,
+        defaultColumnWidth: state.defaultColumnWidth,
+        defaultColumnDepth: state.defaultColumnDepth,
+        defaultColumnHeight: state.defaultColumnHeight,
+        defaultBeamWidth: state.defaultBeamWidth,
+        defaultBeamDepth: state.defaultBeamDepth,
+        defaultBeamElevation: state.defaultBeamElevation,
+        defaultRoofThickness: state.defaultRoofThickness,
+        defaultRoofElevation: state.defaultRoofElevation,
         autoExtrudeSketch: state.autoExtrudeSketch,
         sketchExtrudeMode: state.sketchExtrudeMode,
       }),

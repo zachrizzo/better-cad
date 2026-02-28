@@ -52,6 +52,14 @@ export interface FloorElement {
   thickness: number
 }
 
+export interface RoofElement {
+  kind: 'roof'
+  meta: ElementMeta
+  boundary: [number, number][]
+  thickness: number
+  elevation: number
+}
+
 export interface StairElement {
   kind: 'stair'
   meta: ElementMeta
@@ -60,6 +68,50 @@ export interface StairElement {
   width: number
   risers: number
   total_height: number
+}
+
+export interface ColumnElement {
+  kind: 'column'
+  meta: ElementMeta
+  center: [number, number]
+  width: number
+  depth: number
+  height: number
+}
+
+export interface BeamElement {
+  kind: 'beam'
+  meta: ElementMeta
+  start: [number, number, number]
+  end: [number, number, number]
+  width: number
+  depth: number
+}
+
+export interface RoomElement {
+  kind: 'room'
+  meta: ElementMeta
+  boundary: [number, number][]
+  name: string
+  color?: string
+}
+
+export interface DimensionElement {
+  kind: 'dimension'
+  meta: ElementMeta
+  p1: [number, number]
+  p2: [number, number]
+  offset: number
+  text_override?: string
+}
+
+export interface TextAnnotationElement {
+  kind: 'text_annotation'
+  meta: ElementMeta
+  position: [number, number]
+  text: string
+  font_size: number
+  rotation: number
 }
 
 export interface LevelElement {
@@ -79,7 +131,13 @@ export type PrototypeElement =
   | DoorElement
   | WindowElement
   | FloorElement
+  | RoofElement
   | StairElement
+  | ColumnElement
+  | BeamElement
+  | RoomElement
+  | DimensionElement
+  | TextAnnotationElement
   | LevelElement
   | GenericElement
 

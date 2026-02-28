@@ -11,6 +11,7 @@ import type { FloorElement } from '../../services/kernel-bridge'
 import { isFloorElement, useEntityStore } from '../../stores/entity-store'
 import { useKernel } from '../../hooks/useKernel'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
+import { useLevelStore } from '../../stores/level-store'
 
 const MIN_FLOOR_DIMENSION = 0.2
 
@@ -24,6 +25,12 @@ export function FloorPlane() {
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const elements = useEntityStore((s) => s.elements)
+  const activeLevelId = useLevelStore((s) => s.activeLevelId)
+  const levels = useLevelStore((s) => s.levels)
+  const activeLevelElevation = useMemo(() => {
+    const lvl = levels.find((l) => l.id === activeLevelId)
+    return lvl?.elevation ?? 0
+  }, [levels, activeLevelId])
   const { kernel, ready } = useKernel()
 
   const planeRef = useRef<THREE.Mesh>(null)
@@ -107,6 +114,7 @@ export function FloorPlane() {
       meta: {
         id: `floor-${crypto.randomUUID()}`,
         name: `Floor ${floorCount + 1}`,
+        level_id: activeLevelId,
       },
       boundary: [
         [minX, minZ],
@@ -187,11 +195,14 @@ export function FloorPlane() {
     })()
     : null
 
+  const planeY = activeLevelElevation
+
   return (
     <>
       <mesh
         ref={planeRef}
         rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, planeY, 0]}
         onClick={handleClick}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
@@ -202,7 +213,7 @@ export function FloorPlane() {
       </mesh>
 
       {cursorPoint && (
-        <mesh position={[cursorPoint[0], 0.04, cursorPoint[1]]}>
+        <mesh position={[cursorPoint[0], planeY + 0.04, cursorPoint[1]]}>
           <sphereGeometry args={[0.05, 12, 12]} />
           <meshBasicMaterial color="#10b981" />
         </mesh>
@@ -210,12 +221,16 @@ export function FloorPlane() {
 
       {previewData && (
         <>
-          <mesh position={[previewData.center[0], 0.01, previewData.center[1]]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh position={[previewData.center[0], planeY + 0.01, previewData.center[1]]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[previewData.width, previewData.depth]} />
             <meshBasicMaterial color="#34d399" transparent opacity={0.15} side={THREE.DoubleSide} />
           </mesh>
-          <Line points={previewData.loop} color="#10b981" lineWidth={2} />
-          <Html position={[previewData.center[0], 0.3, previewData.center[1]]} center>
+          <Line
+            points={previewData.loop.map(([x, y, z]) => [x, planeY + y, z] as [number, number, number])}
+            color="#10b981"
+            lineWidth={2}
+          />
+          <Html position={[previewData.center[0], planeY + 0.3, previewData.center[1]]} center>
             <div className="measurement-badge">
               {formatLength(previewData.width, lengthUnit)} x {formatLength(previewData.depth, lengthUnit)}
             </div>

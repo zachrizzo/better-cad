@@ -4,9 +4,10 @@ import { useBimStore } from '../../stores/bim-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { useKernel } from '../../hooks/useKernel'
 import { MaterialPicker } from '../materials/MaterialPicker'
-import { isDoorElement, isFloorElement, isStairElement, isWallElement, useEntityStore } from '../../stores/entity-store'
+import { isBeamElement, isColumnElement, isDimensionElement, isDoorElement, isFloorElement, isRoofElement, isRoomElement, isStairElement, isTextAnnotationElement, isWallElement, isWindowElement, useEntityStore } from '../../stores/entity-store'
 import { LENGTH_UNITS, metersToUnitValue, type LengthUnit, unitValueToMeters } from '../../utils/units'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
+import { LevelManager } from '../panels/LevelManager'
 
 const MIN_VALUE = 0.01
 
@@ -25,6 +26,12 @@ export function PropertyPanel() {
   const defaultStairWidth = useBimStore((s) => s.defaultStairWidth)
   const defaultStairRisers = useBimStore((s) => s.defaultStairRisers)
   const defaultStairHeight = useBimStore((s) => s.defaultStairHeight)
+  const defaultWindowWidth = useBimStore((s) => s.defaultWindowWidth)
+  const defaultWindowHeight = useBimStore((s) => s.defaultWindowHeight)
+  const defaultWindowSill = useBimStore((s) => s.defaultWindowSill)
+  const defaultColumnWidth = useBimStore((s) => s.defaultColumnWidth)
+  const defaultColumnDepth = useBimStore((s) => s.defaultColumnDepth)
+  const defaultColumnHeight = useBimStore((s) => s.defaultColumnHeight)
 
   const setDefaultWallHeight = useBimStore((s) => s.setDefaultWallHeight)
   const setDefaultWallThickness = useBimStore((s) => s.setDefaultWallThickness)
@@ -36,6 +43,16 @@ export function PropertyPanel() {
   const setDefaultStairWidth = useBimStore((s) => s.setDefaultStairWidth)
   const setDefaultStairRisers = useBimStore((s) => s.setDefaultStairRisers)
   const setDefaultStairHeight = useBimStore((s) => s.setDefaultStairHeight)
+  const setDefaultWindowWidth = useBimStore((s) => s.setDefaultWindowWidth)
+  const setDefaultWindowHeight = useBimStore((s) => s.setDefaultWindowHeight)
+  const setDefaultWindowSill = useBimStore((s) => s.setDefaultWindowSill)
+  const setDefaultColumnWidth = useBimStore((s) => s.setDefaultColumnWidth)
+  const setDefaultColumnDepth = useBimStore((s) => s.setDefaultColumnDepth)
+  const setDefaultColumnHeight = useBimStore((s) => s.setDefaultColumnHeight)
+  const defaultRoofThickness = useBimStore((s) => s.defaultRoofThickness)
+  const defaultRoofElevation = useBimStore((s) => s.defaultRoofElevation)
+  const setDefaultRoofThickness = useBimStore((s) => s.setDefaultRoofThickness)
+  const setDefaultRoofElevation = useBimStore((s) => s.setDefaultRoofElevation)
 
   const elements = useEntityStore((s) => s.elements)
   const selectedElement = selectedBodyId ? elements.get(selectedBodyId) ?? null : null
@@ -64,6 +81,7 @@ export function PropertyPanel() {
 
   return (
     <div className="property-panel">
+      <LevelManager />
       <div className="property-panel-title">{panelTitle}</div>
 
       <div className="property-row">
@@ -173,6 +191,51 @@ export function PropertyPanel() {
       </div>
 
       <div className="property-row">
+        <label className="property-label">Win W</label>
+        <input
+          type="number"
+          className="property-input"
+          value={metersToUnitValue(defaultWindowWidth, lengthUnit)}
+          min={displayMin}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!Number.isNaN(v) && v > 0) setDefaultWindowWidth(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+
+      <div className="property-row">
+        <label className="property-label">Win H</label>
+        <input
+          type="number"
+          className="property-input"
+          value={metersToUnitValue(defaultWindowHeight, lengthUnit)}
+          min={displayMin}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!Number.isNaN(v) && v > 0) setDefaultWindowHeight(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+
+      <div className="property-row">
+        <label className="property-label">Win Sill</label>
+        <input
+          type="number"
+          className="property-input"
+          value={metersToUnitValue(defaultWindowSill, lengthUnit)}
+          min={0}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!Number.isNaN(v) && v >= 0) setDefaultWindowSill(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+
+      <div className="property-row">
         <label className="property-label">Floor T</label>
         <input
           type="number"
@@ -229,6 +292,81 @@ export function PropertyPanel() {
           onChange={(e) => {
             const v = parseFloat(e.target.value)
             if (!Number.isNaN(v) && v > 0) setDefaultStairHeight(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+
+      <div className="property-row">
+        <label className="property-label">Col W</label>
+        <input
+          type="number"
+          className="property-input"
+          value={metersToUnitValue(defaultColumnWidth, lengthUnit)}
+          min={displayMin}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!Number.isNaN(v) && v > 0) setDefaultColumnWidth(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+
+      <div className="property-row">
+        <label className="property-label">Col D</label>
+        <input
+          type="number"
+          className="property-input"
+          value={metersToUnitValue(defaultColumnDepth, lengthUnit)}
+          min={displayMin}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!Number.isNaN(v) && v > 0) setDefaultColumnDepth(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+
+      <div className="property-row">
+        <label className="property-label">Col H</label>
+        <input
+          type="number"
+          className="property-input"
+          value={metersToUnitValue(defaultColumnHeight, lengthUnit)}
+          min={displayMin}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!Number.isNaN(v) && v > 0) setDefaultColumnHeight(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+
+      <div className="property-row">
+        <label className="property-label">Roof T</label>
+        <input
+          type="number"
+          className="property-input"
+          value={metersToUnitValue(defaultRoofThickness, lengthUnit)}
+          min={displayMin}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!Number.isNaN(v) && v > 0) setDefaultRoofThickness(unitValueToMeters(v, lengthUnit))
+          }}
+        />
+      </div>
+
+      <div className="property-row">
+        <label className="property-label">Roof E</label>
+        <input
+          type="number"
+          className="property-input"
+          value={metersToUnitValue(defaultRoofElevation, lengthUnit)}
+          min={0}
+          step={unitStep}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (!Number.isNaN(v) && v >= 0) setDefaultRoofElevation(unitValueToMeters(v, lengthUnit))
           }}
         />
       </div>
@@ -332,6 +470,59 @@ export function PropertyPanel() {
             </>
           )}
 
+          {isWindowElement(selectedElement) && (
+            <>
+              <div className="property-row">
+                <label className="property-label">Width</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.width, lengthUnit)}
+                  min={displayMin}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v <= 0) return
+                    const next = { ...selectedElement, width: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Height</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.height, lengthUnit)}
+                  min={displayMin}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v <= 0) return
+                    const next = { ...selectedElement, height: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Sill H</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.sill_height, lengthUnit)}
+                  min={0}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v < 0) return
+                    const next = { ...selectedElement, sill_height: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+            </>
+          )}
+
           {isFloorElement(selectedElement) && (
             <div className="property-row">
               <label className="property-label">Thick</label>
@@ -398,6 +589,274 @@ export function PropertyPanel() {
                     const v = parseFloat(e.target.value)
                     if (Number.isNaN(v) || v <= 0) return
                     const next = { ...selectedElement, total_height: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+            </>
+          )}
+
+          {isColumnElement(selectedElement) && (
+            <>
+              <div className="property-row">
+                <label className="property-label">Width</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.width, lengthUnit)}
+                  min={displayMin}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v <= 0) return
+                    const next = { ...selectedElement, width: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Depth</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.depth, lengthUnit)}
+                  min={displayMin}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v <= 0) return
+                    const next = { ...selectedElement, depth: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Height</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.height, lengthUnit)}
+                  min={displayMin}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v <= 0) return
+                    const next = { ...selectedElement, height: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+            </>
+          )}
+
+          {isBeamElement(selectedElement) && (
+            <>
+              <div className="property-row">
+                <label className="property-label">Width</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.width, lengthUnit)}
+                  min={displayMin}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v <= 0) return
+                    const next = { ...selectedElement, width: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Depth</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.depth, lengthUnit)}
+                  min={displayMin}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v <= 0) return
+                    const next = { ...selectedElement, depth: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+            </>
+          )}
+
+          {isRoofElement(selectedElement) && (
+            <>
+              <div className="property-row">
+                <label className="property-label">Thick</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.thickness, lengthUnit)}
+                  min={displayMin}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v <= 0) return
+                    const next = { ...selectedElement, thickness: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Elev</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.elevation, lengthUnit)}
+                  min={0}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v < 0) return
+                    const next = { ...selectedElement, elevation: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+            </>
+          )}
+
+          {isRoomElement(selectedElement) && (
+            <>
+              <div className="property-row">
+                <label className="property-label">Name</label>
+                <input
+                  type="text"
+                  className="property-input"
+                  value={selectedElement.name}
+                  onChange={(e) => {
+                    const next = { ...selectedElement, name: e.target.value, meta: { ...selectedElement.meta, name: e.target.value } }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Color</label>
+                <input
+                  type="color"
+                  className="property-input"
+                  value={selectedElement.color || '#8b5cf6'}
+                  onChange={(e) => {
+                    const next = { ...selectedElement, color: e.target.value }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Area</label>
+                <span className="property-input" style={{ background: 'transparent', border: 'none' }}>
+                  {(() => {
+                    const pts = selectedElement.boundary
+                    let sum = 0
+                    for (let i = 0; i < pts.length; i++) {
+                      const next = pts[(i + 1) % pts.length]
+                      sum += pts[i][0] * next[1] - next[0] * pts[i][1]
+                    }
+                    return `${Math.abs(sum / 2).toFixed(2)} m\u00B2`
+                  })()}
+                </span>
+              </div>
+              <div className="property-row">
+                <label className="property-label">Perimeter</label>
+                <span className="property-input" style={{ background: 'transparent', border: 'none' }}>
+                  {(() => {
+                    const pts = selectedElement.boundary
+                    let perim = 0
+                    for (let i = 0; i < pts.length; i++) {
+                      const next = pts[(i + 1) % pts.length]
+                      perim += Math.hypot(next[0] - pts[i][0], next[1] - pts[i][1])
+                    }
+                    return `${perim.toFixed(2)} m`
+                  })()}
+                </span>
+              </div>
+            </>
+          )}
+
+          {isDimensionElement(selectedElement) && (
+            <>
+              <div className="property-row">
+                <label className="property-label">Offset</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.offset, lengthUnit)}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v)) return
+                    const next = { ...selectedElement, offset: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Override</label>
+                <input
+                  type="text"
+                  className="property-input"
+                  value={selectedElement.text_override ?? ''}
+                  placeholder="Auto"
+                  onChange={(e) => {
+                    const next = {
+                      ...selectedElement,
+                      text_override: e.target.value || undefined,
+                    }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+            </>
+          )}
+
+          {isTextAnnotationElement(selectedElement) && (
+            <>
+              <div className="property-row">
+                <label className="property-label">Text</label>
+                <input
+                  type="text"
+                  className="property-input"
+                  value={selectedElement.text}
+                  onChange={(e) => {
+                    const next = { ...selectedElement, text: e.target.value }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Size</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={metersToUnitValue(selectedElement.font_size, lengthUnit)}
+                  min={displayMin}
+                  step={unitStep}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v) || v <= 0) return
+                    const next = { ...selectedElement, font_size: unitValueToMeters(v, lengthUnit) }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Rotation</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  value={Math.round(selectedElement.rotation * 180 / Math.PI)}
+                  step={5}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (Number.isNaN(v)) return
+                    const next = { ...selectedElement, rotation: v * Math.PI / 180 }
                     void patchSelectedElement(next)
                   }}
                 />

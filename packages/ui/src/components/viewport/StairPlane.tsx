@@ -11,6 +11,7 @@ import type { StairElement } from '../../services/kernel-bridge'
 import { isStairElement, useEntityStore } from '../../stores/entity-store'
 import { useKernel } from '../../hooks/useKernel'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
+import { useLevelStore } from '../../stores/level-store'
 
 const MIN_STAIR_RUN = 0.4
 
@@ -35,6 +36,12 @@ export function StairPlane() {
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const elements = useEntityStore((s) => s.elements)
+  const activeLevelId = useLevelStore((s) => s.activeLevelId)
+  const levels = useLevelStore((s) => s.levels)
+  const activeLevelElevation = useMemo(() => {
+    const lvl = levels.find((l) => l.id === activeLevelId)
+    return lvl?.elevation ?? 0
+  }, [levels, activeLevelId])
   const { kernel, ready } = useKernel()
 
   const planeRef = useRef<THREE.Mesh>(null)
@@ -122,6 +129,7 @@ export function StairPlane() {
       meta: {
         id: `stair-${crypto.randomUUID()}`,
         name: `Stair ${stairCount + 1}`,
+        level_id: activeLevelId,
       },
       start: startPoint,
       end: point,
@@ -225,11 +233,16 @@ export function StairPlane() {
     })()
     : null
 
+  const planeY = activeLevelElevation
+  const offsetLine = (line: [number, number, number][]): [number, number, number][] =>
+    line.map(([x, y, z]) => [x, planeY + y, z])
+
   return (
     <>
       <mesh
         ref={planeRef}
         rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, planeY, 0]}
         onClick={handleClick}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
@@ -240,14 +253,14 @@ export function StairPlane() {
       </mesh>
 
       {cursorPoint && (
-        <mesh position={[cursorPoint[0], 0.04, cursorPoint[1]]}>
+        <mesh position={[cursorPoint[0], planeY + 0.04, cursorPoint[1]]}>
           <sphereGeometry args={[0.05, 12, 12]} />
           <meshBasicMaterial color="#38bdf8" />
         </mesh>
       )}
 
       {startPoint && (
-        <mesh position={[startPoint[0], 0.05, startPoint[1]]}>
+        <mesh position={[startPoint[0], planeY + 0.05, startPoint[1]]}>
           <sphereGeometry args={[0.08, 14, 14]} />
           <meshBasicMaterial color="#0ea5e9" />
         </mesh>
@@ -256,19 +269,19 @@ export function StairPlane() {
       {preview && (
         <>
           <Line
-            points={preview.centerLine}
+            points={offsetLine(preview.centerLine)}
             color="#0ea5e9"
             lineWidth={2}
             dashed
             dashSize={0.2}
             gapSize={0.12}
           />
-          <Line points={preview.leftLine} color="#38bdf8" lineWidth={1.6} />
-          <Line points={preview.rightLine} color="#38bdf8" lineWidth={1.6} />
+          <Line points={offsetLine(preview.leftLine)} color="#38bdf8" lineWidth={1.6} />
+          <Line points={offsetLine(preview.rightLine)} color="#38bdf8" lineWidth={1.6} />
           {preview.riserLines.map((line, idx) => (
-            <Line key={idx} points={line} color="#7dd3fc" lineWidth={1} />
+            <Line key={idx} points={offsetLine(line)} color="#7dd3fc" lineWidth={1} />
           ))}
-          <Html position={[preview.center[0], 0.35, preview.center[1]]} center>
+          <Html position={[preview.center[0], planeY + 0.35, preview.center[1]]} center>
             <div className="measurement-badge">
               {formatLength(preview.run, lengthUnit)} • {defaultStairRisers} risers
             </div>

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 type ViewMode = '2d' | '3d' | 'split'
-type ToolType = 'select' | 'wall' | 'door' | 'floor' | 'stair' | 'measure'
+type ToolType = 'select' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section'
 type Theme = 'dark' | 'light'
 
 interface UIState {

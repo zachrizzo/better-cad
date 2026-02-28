@@ -365,3 +365,187 @@ html, body, #root {
   text-align: center;
   line-height: 1.2;
 }
+
+/* ---------- Level Manager ---------- */
+.level-manager {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+}
+
+.level-manager-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 2px 0;
+  user-select: none;
+}
+
+.level-manager-header:hover {
+  color: var(--accent);
+}
+
+.level-manager-toggle {
+  font-size: 13px;
+  font-weight: 700;
+  width: 14px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.level-manager-title {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.level-manager-active-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.level-manager-body {
+  margin-top: 6px;
+}
+
+.level-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.1s;
+}
+
+.level-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.level-row-active {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.level-indicator {
+  width: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.level-name {
+  flex: 1;
+  color: var(--text-primary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.level-elevation {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  margin-right: 2px;
+}
+
+.level-count {
+  color: var(--text-muted);
+  font-size: 10px;
+  min-width: 20px;
+}
+
+.level-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.level-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent);
+}
+
+.level-btn-vis {
+  font-weight: 700;
+  width: 18px;
+  text-align: center;
+  padding: 1px 2px;
+}
+
+.level-vis-visible {
+  color: #4ade80;
+}
+
+.level-vis-ghosted {
+  color: #fbbf24;
+}
+
+.level-vis-hidden {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.level-btn-remove {
+  color: var(--danger);
+}
+
+.level-btn-remove:hover {
+  border-color: var(--danger);
+}
+
+.level-btn-ok {
+  color: #4ade80;
+}
+
+.level-btn-add {
+  margin-top: 4px;
+}
+
+.level-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.level-edit-row {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+  align-items: center;
+}
+
+.level-edit-name {
+  flex: 1;
+  font-size: 10px !important;
+  padding: 2px 4px !important;
+}
+
+.level-edit-elev {
+  width: 50px;
+  font-size: 10px !important;
+  padding: 2px 4px !important;
+}
+
+.level-copy-target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.level-copy-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}

@@ -1,14 +1,26 @@
 import { Canvas } from '@react-three/fiber'
-import { MapControls, Line } from '@react-three/drei'
+import { MapControls, Line, Text } from '@react-three/drei'
 import { useMemo } from 'react'
+import * as THREE from 'three'
 import {
+  isBeamElement,
+  isColumnElement,
+  isDimensionElement,
   isDoorElement,
   isFloorElement,
+  isRoofElement,
+  isRoomElement,
   isStairElement,
+  isTextAnnotationElement,
   isWallElement,
+  isWindowElement,
   useEntityStore,
 } from '../../stores/entity-store'
-import type { DoorElement, FloorElement, StairElement, WallElement } from '../../services/kernel-bridge'
+import type { BeamElement, ColumnElement, DimensionElement, DoorElement, FloorElement, PrototypeElement, RoofElement, RoomElement, StairElement, TextAnnotationElement, WallElement, WindowElement } from '../../services/kernel-bridge'
+import { useLevelStore } from '../../stores/level-store'
+import { useSettingsStore } from '../../stores/settings-store'
+import { formatLength } from '../../utils/units'
+import { polygonCentroid } from '../../services/room-detection'
 
 interface PlanLine {
   start: [number, number]
@@ -41,6 +53,37 @@ function PlanLines() {
     () => Array.from(elements.values()).filter(isStairElement),
     [elements],
   )
+
+  const windows = useMemo(
+    () => Array.from(elements.values()).filter(isWindowElement),
+    [elements],
+  )
+
+  const columns = useMemo(
+    () => Array.from(elements.values()).filter(isColumnElement),
+    [elements],
+  )
+
+  const beams = useMemo(
+    () => Array.from(elements.values()).filter(isBeamElement),
+    [elements],
+  )
+
+  const roofs = useMemo(
+    () => Array.from(elements.values()).filter(isRoofElement),
+    [elements],
+  )
+
+  const roofLoops = useMemo(() => {
+    return roofs
+      .map((roof: RoofElement) => {
+        if (roof.boundary.length < 3) return null
+        const pts = roof.boundary.map((pt) => [pt[0], pt[1], 0] as [number, number, number])
+        pts.push([roof.boundary[0][0], roof.boundary[0][1], 0])
+        return { id: roof.meta.id, points: pts }
+      })
+      .filter((loop): loop is { id: string; points: [number, number, number][] } => loop !== null)
+  }, [roofs])
 
   const wallById = useMemo(() => {
     const map = new Map<string, WallElement>()
@@ -179,6 +222,62 @@ function PlanLines() {
     return { spans, leaves, arcs }
   }, [doors, wallById])
 
+  const windowOverlay = useMemo(() => {
+    const lines: { start: [number, number]; end: [number, number] }[] = []
+
+    windows.forEach((win: WindowElement) => {
+      const wall = wallById.get(win.wall_id)
+      if (!wall) return
+      const dx = wall.end[0] - wall.start[0]
+      const dz = wall.end[1] - wall.start[1]
+      const len = Math.max(1e-8, Math.hypot(dx, dz))
+      const dir: [number, number] = [dx / len, dz / len]
+      const normal: [number, number] = [-dir[1], dir[0]]
+      const center: [number, number] = [
+        wall.start[0] + dx * win.position_along_wall,
+        wall.start[1] + dz * win.position_along_wall,
+      ]
+      const half = win.width / 2
+      const offset = wall.thickness * 0.3
+
+      // Two parallel lines offset from wall center (standard window symbol)
+      lines.push({
+        start: [center[0] - dir[0] * half + normal[0] * offset, center[1] - dir[1] * half + normal[1] * offset],
+        end: [center[0] + dir[0] * half + normal[0] * offset, center[1] + dir[1] * half + normal[1] * offset],
+      })
+      lines.push({
+        start: [center[0] - dir[0] * half - normal[0] * offset, center[1] - dir[1] * half - normal[1] * offset],
+        end: [center[0] + dir[0] * half - normal[0] * offset, center[1] + dir[1] * half - normal[1] * offset],
+      })
+    })
+
+    return lines
+  }, [windows, wallById])
+
+  const columnOverlay = useMemo(() => {
+    const edges: PlanLine[] = []
+    const crosses: PlanLine[] = []
+
+    columns.forEach((col: ColumnElement) => {
+      const hw = col.width / 2
+      const hd = col.depth / 2
+      const cx = col.center[0]
+      const cy = col.center[1]
+
+      // Rectangle edges
+      edges.push({ start: [cx - hw, cy - hd], end: [cx + hw, cy - hd] })
+      edges.push({ start: [cx + hw, cy - hd], end: [cx + hw, cy + hd] })
+      edges.push({ start: [cx + hw, cy + hd], end: [cx - hw, cy + hd] })
+      edges.push({ start: [cx - hw, cy + hd], end: [cx - hw, cy - hd] })
+
+      // X cross-hatch
+      crosses.push({ start: [cx - hw, cy - hd], end: [cx + hw, cy + hd] })
+      crosses.push({ start: [cx + hw, cy - hd], end: [cx - hw, cy + hd] })
+    })
+
+    return { edges, crosses }
+  }, [columns])
+
   return (
     <>
       {wallLines.map((line, i) => (
@@ -253,6 +352,64 @@ function PlanLines() {
           dashed
           dashSize={0.12}
           gapSize={0.08}
+        />
+      ))}
+      {windowOverlay.map((line, i) => (
+        <Line
+          key={`window-${i}`}
+          points={[
+            [line.start[0], line.start[1], 0],
+            [line.end[0], line.end[1], 0],
+          ]}
+          color="#60a5fa"
+          lineWidth={2}
+        />
+      ))}
+      {columnOverlay.edges.map((line, i) => (
+        <Line
+          key={`col-edge-${i}`}
+          points={[
+            [line.start[0], line.start[1], 0],
+            [line.end[0], line.end[1], 0],
+          ]}
+          color="#9ca3af"
+          lineWidth={2}
+        />
+      ))}
+      {columnOverlay.crosses.map((line, i) => (
+        <Line
+          key={`col-cross-${i}`}
+          points={[
+            [line.start[0], line.start[1], 0],
+            [line.end[0], line.end[1], 0],
+          ]}
+          color="#6b7280"
+          lineWidth={1}
+        />
+      ))}
+      {beams.map((beam: BeamElement) => (
+        <Line
+          key={`beam-${beam.meta.id}`}
+          points={[
+            [beam.start[0], beam.start[1], 0],
+            [beam.end[0], beam.end[1], 0],
+          ]}
+          color="#78716c"
+          lineWidth={1.5}
+          dashed
+          dashSize={0.15}
+          gapSize={0.1}
+        />
+      ))}
+      {roofLoops.map((loop) => (
+        <Line
+          key={`roof-${loop.id}`}
+          points={loop.points}
+          color="#b45309"
+          lineWidth={1.6}
+          dashed
+          dashSize={0.2}
+          gapSize={0.1}
         />
       ))}
     </>

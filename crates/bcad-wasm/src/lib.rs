@@ -357,6 +357,131 @@ pub fn export_step_from_box(width: f64, height: f64, depth: f64) -> Result<Vec<u
     bcad_io::step::export_step(&[solid]).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Export all project elements as a STEP file by creating box solids from the tessellated geometry.
+/// For now, this creates one box solid per wall element (using wall bounding volume).
+#[wasm_bindgen]
+pub fn export_step_project() -> Result<Vec<u8>, JsError> {
+    PROTOTYPE_STATE.with(|state| {
+        let state = state.borrow();
+        let elements = state.query_elements();
+
+        let mut solids = Vec::new();
+        for element in elements {
+            match element {
+                Element::Wall(wall) => {
+                    let dx = wall.end[0] - wall.start[0];
+                    let dy = wall.end[1] - wall.start[1];
+                    let length = (dx * dx + dy * dy).sqrt();
+                    if length < 1e-8 { continue; }
+                    if let Ok(solid) = bcad_kernel::geometry::create_box(length, wall.thickness, wall.height) {
+                        solids.push(solid);
+                    }
+                }
+                Element::Floor(floor) => {
+                    if floor.boundary.len() >= 2 {
+                        let xs: Vec<f64> = floor.boundary.iter().map(|p| p[0]).collect();
+                        let ys: Vec<f64> = floor.boundary.iter().map(|p| p[1]).collect();
+                        let w = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - xs.iter().cloned().fold(f64::INFINITY, f64::min);
+                        let d = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - ys.iter().cloned().fold(f64::INFINITY, f64::min);
+                        if w > 1e-8 && d > 1e-8 {
+                            if let Ok(solid) = bcad_kernel::geometry::create_box(w, d, floor.thickness) {
+                                solids.push(solid);
+                            }
+                        }
+                    }
+                }
+                Element::Stair(stair) => {
+                    let dx = stair.end[0] - stair.start[0];
+                    let dy = stair.end[1] - stair.start[1];
+                    let run_len = (dx * dx + dy * dy).sqrt();
+                    if run_len > 1e-8 {
+                        if let Ok(solid) = bcad_kernel::geometry::create_box(run_len, stair.width, stair.total_height) {
+                            solids.push(solid);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if solids.is_empty() {
+            return Err(JsError::new("no exportable geometry in project"));
+        }
+
+        bcad_io::step::export_step(&solids).map_err(|e| JsError::new(&e.to_string()))
+    })
+}
+
+/// Export all project elements as a GLB (binary glTF 2.0) file using the regenerated meshes.
+#[wasm_bindgen]
+pub fn export_gltf_project() -> Result<Vec<u8>, JsError> {
+    PROTOTYPE_STATE.with(|state| {
+        let state = state.borrow();
+        let elements = state.query_elements();
+
+        let mut openings_by_wall: HashMap<String, Vec<bcad_bim::wall::OpeningSpec>> = HashMap::new();
+        for element in elements {
+            match element {
+                Element::Door(door) => {
+                    openings_by_wall
+                        .entry(door.wall_id.clone())
+                        .or_default()
+                        .push(bcad_bim::wall::OpeningSpec {
+                            position_along_wall: door.position_along_wall,
+                            width: door.width,
+                            height: door.height,
+                            sill_height: door.sill_height,
+                        });
+                }
+                Element::Window(window) => {
+                    openings_by_wall
+                        .entry(window.wall_id.clone())
+                        .or_default()
+                        .push(bcad_bim::wall::OpeningSpec {
+                            position_along_wall: window.position_along_wall,
+                            width: window.width,
+                            height: window.height,
+                            sill_height: window.sill_height,
+                        });
+                }
+                _ => {}
+            }
+        }
+
+        let mut mesh_material_pairs: Vec<(bcad_kernel::tessellation::TessellatedMesh, bcad_kernel::materials::PbrMaterial)> = Vec::new();
+
+        for element in state.query_elements() {
+            match element {
+                Element::Wall(wall) => {
+                    if let Ok(mesh) = wall_mesh(wall, &openings_by_wall) {
+                        mesh_material_pairs.push((mesh, bcad_kernel::materials::PbrMaterial::new("Wall", [0.85, 0.85, 0.80, 1.0], 0.0, 0.7)));
+                    }
+                }
+                Element::Floor(floor) => {
+                    if let Ok(mesh) = floor_mesh(floor) {
+                        mesh_material_pairs.push((mesh, bcad_kernel::materials::PbrMaterial::new("Floor", [0.6, 0.6, 0.55, 1.0], 0.0, 0.6)));
+                    }
+                }
+                Element::Stair(stair) => {
+                    if let Ok(mesh) = stair_mesh(stair) {
+                        mesh_material_pairs.push((mesh, bcad_kernel::materials::PbrMaterial::new("Stair", [0.5, 0.45, 0.35, 1.0], 0.0, 0.5)));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if mesh_material_pairs.is_empty() {
+            return Err(JsError::new("no exportable geometry in project"));
+        }
+
+        let refs: Vec<(&bcad_kernel::tessellation::TessellatedMesh, &bcad_kernel::materials::PbrMaterial)> =
+            mesh_material_pairs.iter().map(|(m, mat)| (m, mat)).collect();
+
+        bcad_io::gltf_export::export_gltf(&refs).map_err(|e| JsError::new(&e.to_string()))
+    })
+}
+
 #[wasm_bindgen]
 pub fn import_step_data(data: &[u8]) -> Result<JsValue, JsError> {
     let solids = bcad_io::step::import_step(data).map_err(|e| JsError::new(&e.to_string()))?;

@@ -15,6 +15,8 @@ interface CadMeshProps {
   materialId?: string
   isSelected?: boolean
   isHovered?: boolean
+  levelOpacity?: number
+  elevationOffset?: number
   onClick?: (e: MeshPointerEvent) => void
   onPointerOver?: (e: MeshPointerEvent) => void
   onPointerOut?: (e: MeshPointerEvent) => void
@@ -30,6 +32,8 @@ export function CadMesh({
   materialId,
   isSelected = false,
   isHovered = false,
+  levelOpacity = 1.0,
+  elevationOffset = 0,
   onClick,
   onPointerOver,
   onPointerOut,
@@ -47,15 +51,20 @@ export function CadMesh({
   const emissiveColor = isSelected ? '#3a6aff' : isHovered ? '#2a4aaa' : '#000000'
   const emissiveIntensity = isSelected ? 0.4 : isHovered ? 0.2 : 0
 
+  const yOffset = elevationOffset !== 0 ? [0, elevationOffset, 0] as const : undefined
+  const hasLevelTransparency = levelOpacity < 0.99
+
   if (material) {
     const [r, g, b] = material.base_color
     const matColor = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`
-    const opacity = material.base_color[3]
-    const isTransparent = opacity < 0.99
+    const baseOpacity = material.base_color[3]
+    const finalOpacity = baseOpacity * levelOpacity
+    const isTransparent = finalOpacity < 0.99
 
     return (
       <mesh
         geometry={geometry}
+        position={yOffset}
         onClick={onClick}
         onPointerOver={onPointerOver}
         onPointerOut={onPointerOut}
@@ -65,9 +74,10 @@ export function CadMesh({
           metalness={material.metallic}
           roughness={material.roughness}
           transparent={isTransparent}
-          opacity={opacity}
+          opacity={finalOpacity}
           emissive={emissiveColor}
           emissiveIntensity={emissiveIntensity}
+          depthWrite={!hasLevelTransparency}
         />
       </mesh>
     )
@@ -76,6 +86,7 @@ export function CadMesh({
   return (
     <mesh
       geometry={geometry}
+      position={yOffset}
       onClick={onClick}
       onPointerOver={onPointerOver}
       onPointerOut={onPointerOut}
@@ -84,8 +95,11 @@ export function CadMesh({
         color={color}
         metalness={metalness}
         roughness={roughness}
+        transparent={hasLevelTransparency}
+        opacity={levelOpacity}
         emissive={emissiveColor}
         emissiveIntensity={emissiveIntensity}
+        depthWrite={!hasLevelTransparency}
       />
     </mesh>
   )

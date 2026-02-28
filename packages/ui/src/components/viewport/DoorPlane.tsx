@@ -11,6 +11,7 @@ import type { DoorElement, WallElement } from '../../services/kernel-bridge'
 import { isDoorElement, isWallElement, useEntityStore } from '../../stores/entity-store'
 import { useKernel } from '../../hooks/useKernel'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
+import { useLevelStore } from '../../stores/level-store'
 
 const DOOR_ATTACH_DISTANCE = 0.8
 const DOOR_END_CLEARANCE = 0.05
@@ -122,6 +123,12 @@ export function DoorPlane() {
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const elements = useEntityStore((s) => s.elements)
+  const activeLevelId = useLevelStore((s) => s.activeLevelId)
+  const levels = useLevelStore((s) => s.levels)
+  const activeLevelElevation = useMemo(() => {
+    const lvl = levels.find((l) => l.id === activeLevelId)
+    return lvl?.elevation ?? 0
+  }, [levels, activeLevelId])
   const { kernel, ready } = useKernel()
 
   const planeRef = useRef<THREE.Mesh>(null)
@@ -219,6 +226,7 @@ export function DoorPlane() {
         id: doorId,
         name: `Door ${doors.length + 1}`,
         host_id: doorCandidate.wallId,
+        level_id: activeLevelId,
       },
       wall_id: doorCandidate.wallId,
       position_along_wall: doorCandidate.positionAlongWall,
@@ -262,7 +270,7 @@ export function DoorPlane() {
         <mesh
           ref={planeRef}
           rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0, 0]}
+          position={[0, activeLevelElevation, 0]}
           onClick={handleClick}
           onPointerMove={handlePointerMove}
           onPointerLeave={handlePointerLeave}
@@ -275,7 +283,7 @@ export function DoorPlane() {
       {candidate && activeTool === 'door' && (
         <>
           <group
-            position={[candidate.center[0], 0, candidate.center[1]]}
+            position={[candidate.center[0], activeLevelElevation, candidate.center[1]]}
             rotation={[0, Math.atan2(candidate.direction[1], candidate.direction[0]), 0]}
           >
             <mesh position={[0, candidate.sillHeight + candidate.height / 2, 0]}>
@@ -314,7 +322,7 @@ export function DoorPlane() {
               )
             })()}
           </group>
-          <Html position={[candidate.center[0], 0.35, candidate.center[1]]} center>
+          <Html position={[candidate.center[0], activeLevelElevation + 0.35, candidate.center[1]]} center>
             <div className="measurement-badge">
               {formatLength(candidate.width, lengthUnit)} • {candidate.swing}
             </div>
@@ -326,6 +334,15 @@ export function DoorPlane() {
         const hostWall = walls.find((wall) => wall.meta.id === door.wall_id)
         const thickness = hostWall ? Math.max(0.05, hostWall.thickness * 0.6) : 0.08
         const swing = normalizeSwing(door.swing)
+
+        // Level-based visibility and elevation
+        const doorLevelId = door.meta.level_id
+        const levelState = useLevelStore.getState()
+        const doorLevel = doorLevelId ? levelState.levels.find((l) => l.id === doorLevelId) : undefined
+        const doorElevation = doorLevel?.elevation ?? 0
+        const doorVisibility = doorLevel?.visibility ?? 'visible'
+        if (doorVisibility === 'hidden') return null
+        const doorOpacity = doorVisibility === 'ghosted' ? 0.25 : 0.65
 
         const [sx, sz] = hostWall ? hostWall.start : [0, 0]
         const [ex, ez] = hostWall ? hostWall.end : [1, 0]
@@ -339,12 +356,12 @@ export function DoorPlane() {
         return (
           <group
             key={door.meta.id}
-            position={[center[0], 0, center[1]]}
+            position={[center[0], doorElevation, center[1]]}
             rotation={[0, Math.atan2(dir[1], dir[0]), 0]}
           >
             <mesh position={[0, door.sill_height + door.height / 2, 0]}>
               <boxGeometry args={[door.width, door.height, thickness]} />
-              <meshStandardMaterial color="#8B4513" opacity={0.65} transparent />
+              <meshStandardMaterial color="#8B4513" opacity={doorOpacity} transparent depthWrite={doorVisibility !== 'ghosted'} />
             </mesh>
             <Line
               points={[
