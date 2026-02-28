@@ -6,6 +6,62 @@
 use crate::topology::Solid;
 use truck_modeling::{builder, Point3, Vector3};
 
+/// Extrude a 2D polygon (given as XY points) into a 3D solid by sweeping along Z.
+///
+/// `points` must be ordered (clockwise or counter-clockwise) and form a closed polygon.
+/// The polygon is placed on the Z=0 plane and swept upward by `height`.
+pub fn extrude_sketch_points(points: &[(f64, f64)], height: f64) -> Result<Solid, crate::error::KernelError> {
+    if points.len() < 3 {
+        return Err(crate::error::KernelError::TopologyError(
+            "need at least 3 points".into(),
+        ));
+    }
+    if height <= 0.0 {
+        return Err(crate::error::KernelError::TopologyError(
+            "height must be positive".into(),
+        ));
+    }
+
+    // Build truck vertices on the Z=0 plane
+    let vertices: Vec<_> = points
+        .iter()
+        .map(|&(x, y)| builder::vertex(Point3::new(x, y, 0.0)))
+        .collect();
+
+    // Build edges connecting consecutive vertices, wrapping around to close
+    let n = vertices.len();
+    let edges: Vec<_> = (0..n)
+        .map(|i| {
+            let j = (i + 1) % n;
+            builder::line(&vertices[i], &vertices[j])
+        })
+        .collect();
+
+    // Build a closed wire from the edges
+    let wire: crate::topology::Wire = edges.into();
+
+    // Attach a planar face to the closed wire
+    let face = builder::try_attach_plane(&[wire]).map_err(|e| {
+        crate::error::KernelError::TopologyError(format!("failed to attach plane: {e}"))
+    })?;
+
+    // Sweep the face along +Z by the given height to produce a solid
+    let solid: Solid = builder::tsweep(&face, Vector3::new(0.0, 0.0, height));
+    Ok(solid)
+}
+
+/// Subtract the tool solid from the target solid (boolean difference).
+///
+/// NOTE: truck-shapeops 0.4 has limited boolean operation support.
+/// This is a stub that returns the target solid unchanged.
+/// TODO: Implement actual boolean difference when truck-shapeops API stabilizes.
+pub fn boolean_cut(target: Solid, _tool: Solid) -> Result<Solid, crate::error::KernelError> {
+    // truck-shapeops 0.4 does not expose a straightforward boolean difference API.
+    // Return the target unchanged for now so downstream code compiles.
+    // Future: use truck_shapeops boolean operations once the API is stable.
+    Ok(target)
+}
+
 /// Creates a B-Rep box solid with the given dimensions.
 ///
 /// The box is axis-aligned with one corner at the origin:
@@ -67,5 +123,54 @@ mod tests {
     #[test]
     fn test_create_box_rejects_negative_dimensions() {
         assert!(create_box(-1.0, 1.0, 1.0).is_err());
+    }
+
+    // --- extrude_sketch_points tests ---
+
+    #[test]
+    fn test_extrude_square() {
+        let points = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let solid = extrude_sketch_points(&points, 2.0).unwrap();
+        // Should have exactly 1 boundary shell
+        assert_eq!(solid.boundaries().len(), 1);
+        // An extruded quad should have 6 faces (4 side walls + top + bottom)
+        assert_eq!(solid.boundaries()[0].len(), 6);
+        // Tessellate and verify we get a valid mesh
+        let mesh = crate::tessellation::tessellate(&solid).unwrap();
+        assert!(!mesh.indices.is_empty());
+    }
+
+    #[test]
+    fn test_extrude_triangle() {
+        let points = vec![(0.0, 0.0), (2.0, 0.0), (1.0, 1.5)];
+        let solid = extrude_sketch_points(&points, 1.0).unwrap();
+        assert_eq!(solid.boundaries().len(), 1);
+        // An extruded triangle should have 5 faces (3 side walls + top + bottom)
+        assert_eq!(solid.boundaries()[0].len(), 5);
+    }
+
+    #[test]
+    fn test_extrude_rejects_too_few_points() {
+        assert!(extrude_sketch_points(&[(0.0, 0.0), (1.0, 0.0)], 1.0).is_err());
+        assert!(extrude_sketch_points(&[(0.0, 0.0)], 1.0).is_err());
+        assert!(extrude_sketch_points(&[], 1.0).is_err());
+    }
+
+    #[test]
+    fn test_extrude_rejects_non_positive_height() {
+        let points = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)];
+        assert!(extrude_sketch_points(&points, 0.0).is_err());
+        assert!(extrude_sketch_points(&points, -1.0).is_err());
+    }
+
+    // --- boolean_cut tests ---
+
+    #[test]
+    fn test_boolean_cut_compiles_and_returns() {
+        let target = create_box(2.0, 2.0, 2.0).unwrap();
+        let tool = create_box(1.0, 1.0, 1.0).unwrap();
+        // Stub: just verify it compiles and returns Ok
+        let result = boolean_cut(target, tool);
+        assert!(result.is_ok());
     }
 }

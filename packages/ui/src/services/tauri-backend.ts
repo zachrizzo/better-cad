@@ -22,6 +22,10 @@ export class TauriBackend implements KernelBackend {
     return tauriInvoke<TessellatedMesh>('tessellate', { bodyId })
   }
 
+  async extrudeSketchPoints(_points: [number, number][], _height: number): Promise<string> {
+    return 'stub-id'
+  }
+
   async createAndTessellateBox(width: number, height: number, depth: number): Promise<TessellatedMesh> {
     return tauriInvoke<TessellatedMesh>('create_and_tessellate_box', { width, height, depth })
   }

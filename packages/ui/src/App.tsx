@@ -8,7 +8,10 @@ import { useHistoryStore, useHistoryTemporal } from './stores/history-store'
 import { useKernel } from './hooks/useKernel'
 import { useUndo } from './hooks/useUndo'
 import { CadMesh } from './components/viewport/CadMesh'
+import { SketchOverlay } from './components/viewport/SketchOverlay'
+import { SketchPlane } from './components/viewport/SketchPlane'
 import { PropertyPanel } from './components/layout/PropertyPanel'
+import { useSketchStore } from './stores/sketch-store'
 import './App.css'
 
 function Scene() {
@@ -54,6 +57,10 @@ function Scene() {
           <meshStandardMaterial color="#4a90d9" metalness={0.1} roughness={0.7} />
         </mesh>
       )}
+
+      {/* Sketch overlay and interaction plane */}
+      <SketchOverlay />
+      <SketchPlane />
 
       {/* Camera controls */}
       <OrbitControls makeDefault />
@@ -177,6 +184,21 @@ export default function App() {
           onClick={() => setActiveTool('measure')}
         >
           Measure
+        </button>
+        <button
+          className={`toolbar-btn ${activeTool === 'sketch' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTool('sketch')
+            useSketchStore.getState().activateSketch()
+          }}
+        >
+          Sketch
+        </button>
+        <button
+          className="toolbar-btn"
+          onClick={() => useSketchStore.getState().clearSketch()}
+        >
+          Clear Sketch
         </button>
 
         <div className="toolbar-separator" />

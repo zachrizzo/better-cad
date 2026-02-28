@@ -35,6 +35,10 @@ export class WasmBackend implements KernelBackend {
     }
   }
 
+  async extrudeSketchPoints(_points: [number, number][], _height: number): Promise<string> {
+    return 'stub-id'
+  }
+
   async createAndTessellateBox(width: number, height: number, depth: number): Promise<TessellatedMesh> {
     if (this.wasm?.create_and_tessellate_box) {
       const result = this.wasm.create_and_tessellate_box(width, height, depth)

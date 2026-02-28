@@ -8,6 +8,7 @@ truck-modeling.workspace = true
 truck-meshalgo.workspace = true
 truck-topology.workspace = true
 truck-polymesh.workspace = true
+truck-shapeops.workspace = true
 nalgebra.workspace = true
 serde.workspace = true
 uuid.workspace = true
