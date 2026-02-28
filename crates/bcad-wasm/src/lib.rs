@@ -105,3 +105,23 @@ pub fn import_step_data(data: &[u8]) -> Result<JsValue, JsError> {
         .collect();
     serde_wasm_bindgen::to_value(&meshes).map_err(|e| JsError::new(&e.to_string()))
 }
+
+/// Return the default PBR material library as a JS array.
+#[wasm_bindgen]
+pub fn get_material_library() -> Result<JsValue, JsError> {
+    let lib = bcad_kernel::materials::MaterialLibrary::default_library();
+    serde_wasm_bindgen::to_value(&lib.materials).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Save a project JSON string into the .bcad compressed archive format.
+/// Returns the raw bytes of the .bcad file.
+#[wasm_bindgen]
+pub fn save_project(project_json: &str) -> Result<Vec<u8>, JsError> {
+    bcad_io::bcad_format::save_bcad(project_json).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Load a .bcad compressed archive and return the project JSON string.
+#[wasm_bindgen]
+pub fn load_project(data: &[u8]) -> Result<String, JsError> {
+    bcad_io::bcad_format::load_bcad(data).map_err(|e| JsError::new(&e.to_string()))
+}

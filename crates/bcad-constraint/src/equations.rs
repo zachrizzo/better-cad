@@ -12,61 +12,61 @@ use crate::sketch::{PointId, Sketch};
 pub fn residuals_for(constraint: &Constraint, sketch: &Sketch) -> Vec<f64> {
     match constraint {
         Constraint::Coincident(p1, p2) => {
-            let a = sketch.get_point(*p1).unwrap();
-            let b = sketch.get_point(*p2).unwrap();
+            let Some(a) = sketch.get_point(*p1) else { return vec![0.0, 0.0]; };
+            let Some(b) = sketch.get_point(*p2) else { return vec![0.0, 0.0]; };
             vec![a.x - b.x, a.y - b.y]
         }
         Constraint::Horizontal(lid) => {
-            let line = sketch.get_line(*lid).unwrap();
-            let a = sketch.get_point(line.p1).unwrap();
-            let b = sketch.get_point(line.p2).unwrap();
+            let Some(line) = sketch.get_line(*lid) else { return vec![0.0]; };
+            let Some(a) = sketch.get_point(line.p1) else { return vec![0.0]; };
+            let Some(b) = sketch.get_point(line.p2) else { return vec![0.0]; };
             vec![a.y - b.y]
         }
         Constraint::Vertical(lid) => {
-            let line = sketch.get_line(*lid).unwrap();
-            let a = sketch.get_point(line.p1).unwrap();
-            let b = sketch.get_point(line.p2).unwrap();
+            let Some(line) = sketch.get_line(*lid) else { return vec![0.0]; };
+            let Some(a) = sketch.get_point(line.p1) else { return vec![0.0]; };
+            let Some(b) = sketch.get_point(line.p2) else { return vec![0.0]; };
             vec![a.x - b.x]
         }
         Constraint::Distance(p1, p2, d) => {
-            let a = sketch.get_point(*p1).unwrap();
-            let b = sketch.get_point(*p2).unwrap();
+            let Some(a) = sketch.get_point(*p1) else { return vec![0.0]; };
+            let Some(b) = sketch.get_point(*p2) else { return vec![0.0]; };
             let dx = b.x - a.x;
             let dy = b.y - a.y;
-            let dist = (dx * dx + dy * dy).sqrt();
+            let dist = (dx * dx + dy * dy).sqrt().max(1e-10);
             vec![dist - d]
         }
         Constraint::Fixed(pid, fx, fy) => {
-            let p = sketch.get_point(*pid).unwrap();
+            let Some(p) = sketch.get_point(*pid) else { return vec![0.0, 0.0]; };
             vec![p.x - fx, p.y - fy]
         }
         Constraint::Perpendicular(l1, l2) => {
-            let line1 = sketch.get_line(*l1).unwrap();
-            let line2 = sketch.get_line(*l2).unwrap();
-            let a = sketch.get_point(line1.p1).unwrap();
-            let b = sketch.get_point(line1.p2).unwrap();
-            let c = sketch.get_point(line2.p1).unwrap();
-            let d = sketch.get_point(line2.p2).unwrap();
+            let Some(line1) = sketch.get_line(*l1) else { return vec![0.0]; };
+            let Some(line2) = sketch.get_line(*l2) else { return vec![0.0]; };
+            let Some(a) = sketch.get_point(line1.p1) else { return vec![0.0]; };
+            let Some(b) = sketch.get_point(line1.p2) else { return vec![0.0]; };
+            let Some(c) = sketch.get_point(line2.p1) else { return vec![0.0]; };
+            let Some(d) = sketch.get_point(line2.p2) else { return vec![0.0]; };
             let dot = (b.x - a.x) * (d.x - c.x) + (b.y - a.y) * (d.y - c.y);
             vec![dot]
         }
         Constraint::Parallel(l1, l2) => {
-            let line1 = sketch.get_line(*l1).unwrap();
-            let line2 = sketch.get_line(*l2).unwrap();
-            let a = sketch.get_point(line1.p1).unwrap();
-            let b = sketch.get_point(line1.p2).unwrap();
-            let c = sketch.get_point(line2.p1).unwrap();
-            let d = sketch.get_point(line2.p2).unwrap();
+            let Some(line1) = sketch.get_line(*l1) else { return vec![0.0]; };
+            let Some(line2) = sketch.get_line(*l2) else { return vec![0.0]; };
+            let Some(a) = sketch.get_point(line1.p1) else { return vec![0.0]; };
+            let Some(b) = sketch.get_point(line1.p2) else { return vec![0.0]; };
+            let Some(c) = sketch.get_point(line2.p1) else { return vec![0.0]; };
+            let Some(d) = sketch.get_point(line2.p2) else { return vec![0.0]; };
             let cross = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
             vec![cross]
         }
         Constraint::Angle(l1, l2, target_angle) => {
-            let line1 = sketch.get_line(*l1).unwrap();
-            let line2 = sketch.get_line(*l2).unwrap();
-            let a = sketch.get_point(line1.p1).unwrap();
-            let b = sketch.get_point(line1.p2).unwrap();
-            let c = sketch.get_point(line2.p1).unwrap();
-            let d = sketch.get_point(line2.p2).unwrap();
+            let Some(line1) = sketch.get_line(*l1) else { return vec![0.0]; };
+            let Some(line2) = sketch.get_line(*l2) else { return vec![0.0]; };
+            let Some(a) = sketch.get_point(line1.p1) else { return vec![0.0]; };
+            let Some(b) = sketch.get_point(line1.p2) else { return vec![0.0]; };
+            let Some(c) = sketch.get_point(line2.p1) else { return vec![0.0]; };
+            let Some(d) = sketch.get_point(line2.p2) else { return vec![0.0]; };
             let dx1 = b.x - a.x;
             let dy1 = b.y - a.y;
             let dx2 = d.x - c.x;
@@ -101,12 +101,12 @@ pub fn jacobian_contributions(
         if let Some(&col_base) = param_map.get(pid) {
             // Perturb x
             {
-                let p = sketch.get_point_mut(*pid).unwrap();
+                let Some(p) = sketch.get_point_mut(*pid) else { continue; };
                 p.x += EPSILON;
             }
             let perturbed = residuals_for(constraint, sketch);
             {
-                let p = sketch.get_point_mut(*pid).unwrap();
+                let Some(p) = sketch.get_point_mut(*pid) else { continue; };
                 p.x -= EPSILON;
             }
             for r in 0..n_residuals {
@@ -118,12 +118,12 @@ pub fn jacobian_contributions(
 
             // Perturb y
             {
-                let p = sketch.get_point_mut(*pid).unwrap();
+                let Some(p) = sketch.get_point_mut(*pid) else { continue; };
                 p.y += EPSILON;
             }
             let perturbed = residuals_for(constraint, sketch);
             {
-                let p = sketch.get_point_mut(*pid).unwrap();
+                let Some(p) = sketch.get_point_mut(*pid) else { continue; };
                 p.y -= EPSILON;
             }
             for r in 0..n_residuals {
@@ -148,15 +148,16 @@ fn constraint_point_ids(constraint: &Constraint, sketch: &Sketch) -> Vec<PointId
         Constraint::Distance(p1, p2, _) => vec![*p1, *p2],
         Constraint::Fixed(p, _, _) => vec![*p],
         Constraint::Horizontal(lid) | Constraint::Vertical(lid) => {
-            let line = sketch.get_line(*lid).unwrap();
+            let Some(line) = sketch.get_line(*lid) else { return vec![]; };
             vec![line.p1, line.p2]
         }
         Constraint::Perpendicular(l1, l2)
         | Constraint::Parallel(l1, l2)
         | Constraint::Angle(l1, l2, _) => {
-            let line1 = sketch.get_line(*l1).unwrap();
-            let line2 = sketch.get_line(*l2).unwrap();
+            let Some(line1) = sketch.get_line(*l1) else { return vec![]; };
+            let Some(line2) = sketch.get_line(*l2) else { return vec![]; };
             let mut pts = vec![line1.p1, line1.p2, line2.p1, line2.p2];
+            pts.sort_unstable();
             pts.dedup();
             pts
         }

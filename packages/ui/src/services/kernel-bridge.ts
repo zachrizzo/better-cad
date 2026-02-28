@@ -1,3 +1,5 @@
+import type { PbrMaterial } from '../stores/material-store'
+
 export interface TessellatedMesh {
   positions: Float32Array
   normals: Float32Array
@@ -8,11 +10,14 @@ export interface KernelBackend {
   createBox(width: number, height: number, depth: number): Promise<string>
   tessellate(bodyId: string): Promise<TessellatedMesh>
   createAndTessellateBox(width: number, height: number, depth: number): Promise<TessellatedMesh>
-  extrudeSketchPoints(points: [number, number][], height: number): Promise<string>
+  extrudeSketchPoints(points: [number, number][], height: number): Promise<TessellatedMesh>
   addWall(startX: number, startY: number, endX: number, endY: number, height: number, thickness: number): Promise<TessellatedMesh>
   generatePlanView(wallsJson: string): Promise<string>
   importFile(data: Uint8Array, format: string): Promise<TessellatedMesh[]>
   exportFile(format: string): Promise<ArrayBuffer>
+  getMaterialLibrary(): Promise<PbrMaterial[]>
+  saveProject(projectJson: string): Promise<ArrayBuffer>
+  loadProject(data: ArrayBuffer): Promise<string>
   ping(): Promise<string>
 }
 

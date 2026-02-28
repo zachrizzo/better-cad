@@ -1,27 +1,52 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import { useStore } from 'zustand'
 import { useUIStore } from './stores/ui-store'
 import { useDocumentStore } from './stores/document-store'
+import { useMaterialStore } from './stores/material-store'
 import { useHistoryStore, useHistoryTemporal } from './stores/history-store'
 import { useKernel } from './hooks/useKernel'
 import { useUndo } from './hooks/useUndo'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { CadMesh } from './components/viewport/CadMesh'
 import { SketchOverlay } from './components/viewport/SketchOverlay'
 import { SketchPlane } from './components/viewport/SketchPlane'
 import { WallPlane } from './components/viewport/WallPlane'
+import { DrawingPlaneGuide } from './components/viewport/DrawingPlaneGuide'
+import { DoorPlane } from './components/viewport/DoorPlane'
+import { MeasurePlane } from './components/tools/MeasureTool'
 import { Viewport2D } from './components/viewport/Viewport2D'
 import { PropertyPanel } from './components/layout/PropertyPanel'
 import { useSketchStore } from './stores/sketch-store'
 import { useBimStore } from './stores/bim-store'
 import { ImportDialog } from './components/dialogs/ImportDialog'
 import { ExportDialog } from './components/dialogs/ExportDialog'
+import { extrudeSketchProfile } from './utils/sketch-extrude'
 import './App.css'
 
-function Scene() {
+function getDrawingPlaneHint(tool: string): string | null {
+  if (tool === 'sketch') return 'Click first corner, then second corner to preview and place a rectangle. Live world X/Z dimensions are shown below.'
+  if (tool === 'wall') return 'Click to start and keep clicking for chained walls. Hold Shift for orthogonal lock; right-click to end the chain.'
+  if (tool === 'door') return 'Hover a wall to preview the door snap, then click to place. Doors stay constrained to wall centerlines.'
+  if (tool === 'measure') return 'Pick two points on the ground plane to measure distance.'
+  return null
+}
+
+function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
+  selectedBodyId: string | null
+  hoveredBodyId: string | null
+  onSelectBody: (id: string | null) => void
+  onHoverBody: (id: string | null) => void
+}) {
+  const activeTool = useUIStore((s) => s.activeTool)
   const showGrid = useUIStore((s) => s.showGrid)
+  const theme = useUIStore((s) => s.theme)
   const cadMeshes = useDocumentStore((s) => s.cadMeshes)
+  const bodyMaterials = useMaterialStore((s) => s.bodyMaterials)
+  const gridCellColor = theme === 'light' ? '#cfd7e6' : '#3a3a50'
+  const gridSectionColor = theme === 'light' ? '#9fb1cc' : '#5a5a70'
+  const isSelectMode = activeTool === 'select'
 
   return (
     <>
@@ -35,10 +60,10 @@ function Scene() {
           infiniteGrid
           cellSize={1}
           cellThickness={0.5}
-          cellColor="#3a3a50"
+          cellColor={gridCellColor}
           sectionSize={5}
           sectionThickness={1}
-          sectionColor="#5a5a70"
+          sectionColor={gridSectionColor}
           fadeDistance={50}
           fadeStrength={1.5}
         />
@@ -51,24 +76,34 @@ function Scene() {
           positions={mesh.positions}
           normals={mesh.normals}
           indices={mesh.indices}
+          materialId={bodyMaterials.get(id)}
           color="#4a90d9"
+          isSelected={isSelectMode && selectedBodyId === id}
+          isHovered={isSelectMode && hoveredBodyId === id}
+          onClick={isSelectMode ? (e) => {
+            e.stopPropagation()
+            onSelectBody(selectedBodyId === id ? null : id)
+          } : undefined}
+          onPointerOver={isSelectMode ? (e) => {
+            e.stopPropagation()
+            onHoverBody(id)
+          } : undefined}
+          onPointerOut={isSelectMode ? (e) => {
+            e.stopPropagation()
+            onHoverBody(null)
+          } : undefined}
         />
       ))}
 
-      {/* Fallback hardcoded demo box when no kernel meshes are loaded */}
-      {cadMeshes.size === 0 && (
-        <mesh position={[0, 0.5, 0]}>
-          <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color="#4a90d9" metalness={0.1} roughness={0.7} />
-        </mesh>
-      )}
-
       {/* Sketch overlay and interaction plane */}
+      <DrawingPlaneGuide />
       <SketchOverlay />
       <SketchPlane />
 
-      {/* Wall placement plane */}
+      {/* Tool interaction planes */}
       <WallPlane />
+      <DoorPlane />
+      <MeasurePlane />
 
       {/* Camera controls */}
       <OrbitControls makeDefault />
@@ -85,15 +120,37 @@ export default function App() {
   const toggleSnap = useUIStore((s) => s.toggleSnap)
   const viewMode = useUIStore((s) => s.viewMode)
   const setViewMode = useUIStore((s) => s.setViewMode)
+  const selectedBodyId = useUIStore((s) => s.selectedBodyId)
+  const selectBody = useUIStore((s) => s.selectBody)
+  const theme = useUIStore((s) => s.theme)
+  const toggleTheme = useUIStore((s) => s.toggleTheme)
   const projectName = useDocumentStore((s) => s.projectName)
   const cadMeshes = useDocumentStore((s) => s.cadMeshes)
   const addCadMesh = useDocumentStore((s) => s.addCadMesh)
+  const activateSketch = useSketchStore((s) => s.activateSketch)
+  const deactivateSketch = useSketchStore((s) => s.deactivateSketch)
+  const clearSketch = useSketchStore((s) => s.clearSketch)
+  const pendingSketchPoint = useSketchStore((s) => s.pendingPoint)
+  const sketchPreviewPoint = useSketchStore((s) => s.previewPoint)
+  const sketchProfiles = useSketchStore((s) => s.profiles)
   const walls = useBimStore((s) => s.walls)
-  const { kernel, ready } = useKernel()
+  const doors = useBimStore((s) => s.doors)
+  const addWall = useBimStore((s) => s.addWall)
+  const defaultWallHeight = useBimStore((s) => s.defaultWallHeight)
+  const defaultWallThickness = useBimStore((s) => s.defaultWallThickness)
+  const autoExtrudeSketch = useBimStore((s) => s.autoExtrudeSketch)
+  const sketchExtrudeMode = useBimStore((s) => s.sketchExtrudeMode)
+  const setMaterials = useMaterialStore((s) => s.setMaterials)
+  const { kernel, ready, error: kernelError } = useKernel()
   const [kernelStatus, setKernelStatus] = useState('loading...')
   const [meshInfo, setMeshInfo] = useState('')
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
+  const [hoveredBodyId, setHoveredBodyId] = useState<string | null>(null)
+  const [extrudingSketch, setExtrudingSketch] = useState(false)
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts()
 
   // Undo/redo
   useUndo()
@@ -117,24 +174,41 @@ export default function App() {
       .catch((err) => console.error('Undo recompute failed:', err))
   }, [historyBoxParams, ready, kernel, addCadMesh])
 
+  // Handle kernel error
+  useEffect(() => {
+    if (kernelError) {
+      setKernelStatus(`Kernel: FAILED`)
+      console.error('[BetterCAD] Kernel error:', kernelError)
+    }
+  }, [kernelError])
+
   useEffect(() => {
     if (ready && kernel) {
       kernel.ping().then((result) => {
         setKernelStatus(`Kernel: ${result}`)
         console.log('[BetterCAD] Kernel ping:', result)
+      }).catch((err) => {
+        setKernelStatus('Kernel: error')
+        console.error('[BetterCAD] Kernel ping failed:', err)
+      })
+
+      // Load material library
+      kernel.getMaterialLibrary().then((mats) => {
+        setMaterials(mats)
+        console.log('[BetterCAD] Material library loaded:', mats.length, 'materials')
+      }).catch((err) => {
+        console.warn('[BetterCAD] getMaterialLibrary failed:', err)
       })
 
       // Create a tessellated box from the kernel
       kernel.createAndTessellateBox(1, 1, 1).then((mesh) => {
-        if (mesh.positions.length > 0) {
-          addCadMesh('default-box', mesh)
-          const vertexCount = mesh.positions.length / 3
-          const triangleCount = mesh.indices.length / 3
-          setMeshInfo(`V:${vertexCount} T:${triangleCount}`)
-          console.log('[BetterCAD] Tessellated box:', { vertices: vertexCount, triangles: triangleCount })
-        }
+        addCadMesh('box-0', mesh)
+        const vertexCount = mesh.positions.length / 3
+        const triangleCount = mesh.indices.length / 3
+        setMeshInfo(`V:${vertexCount} T:${triangleCount}`)
+        console.log('[BetterCAD] Tessellated box:', { vertices: vertexCount, triangles: triangleCount })
       }).catch((err) => {
-        console.warn('[BetterCAD] createAndTessellateBox failed:', err)
+        console.error('[BetterCAD] createAndTessellateBox failed:', err)
       })
     }
   }, [ready, kernel])
@@ -149,11 +223,98 @@ export default function App() {
         totalTris += m.indices.length / 3
       })
       setMeshInfo(`V:${totalVerts} T:${totalTris}`)
+    } else {
+      setMeshInfo('')
     }
   }, [cadMeshes])
 
+  // Keep sketch overlay/plane in sync with the active tool no matter how tool changes.
+  useEffect(() => {
+    if (activeTool === 'sketch') {
+      activateSketch()
+    } else {
+      deactivateSketch()
+    }
+  }, [activeTool, activateSketch, deactivateSketch])
+
+  const handleToolChange = (tool: Parameters<typeof setActiveTool>[0]) => {
+    setActiveTool(tool)
+  }
+
+  const handleExtrudeSketch = async () => {
+    if (extrudingSketch || sketchProfiles.size === 0) return
+    setExtrudingSketch(true)
+    try {
+      for (const profile of sketchProfiles.values()) {
+        await extrudeSketchProfile({
+          profile,
+          mode: sketchExtrudeMode,
+          height: defaultWallHeight,
+          thickness: defaultWallThickness,
+          kernel,
+          ready,
+          addCadMesh,
+          addWall,
+        })
+      }
+    } catch (err) {
+      console.error('[BetterCAD] Toolbar sketch extrusion failed:', err)
+    } finally {
+      setExtrudingSketch(false)
+    }
+  }
+
+  const viewportBackground = theme === 'light' ? '#edf2fa' : '#1a1a2e'
+  const splitDividerColor = theme === 'light' ? '#d0d0d0' : '#3a3a50'
+  const drawingPlaneHint = viewMode !== '2d' ? getDrawingPlaneHint(activeTool) : null
+  const sketchReadout = useMemo(() => {
+    if (activeTool !== 'sketch' || !sketchPreviewPoint) return null
+    const [cursorX, cursorZ] = sketchPreviewPoint
+    const cursorText = `Cursor X:${cursorX.toFixed(3)} Z:${cursorZ.toFixed(3)}`
+    if (!pendingSketchPoint) return cursorText
+
+    const dx = cursorX - pendingSketchPoint.x
+    const dz = cursorZ - pendingSketchPoint.y
+    const width = Math.abs(dx)
+    const depth = Math.abs(dz)
+    const diagonal = Math.hypot(dx, dz)
+    const minX = Math.min(cursorX, pendingSketchPoint.x)
+    const maxX = Math.max(cursorX, pendingSketchPoint.x)
+    const minZ = Math.min(cursorZ, pendingSketchPoint.y)
+    const maxZ = Math.max(cursorZ, pendingSketchPoint.y)
+
+    return [
+      cursorText,
+      `Rect X:[${minX.toFixed(3)}..${maxX.toFixed(3)}]`,
+      `Z:[${minZ.toFixed(3)}..${maxZ.toFixed(3)}]`,
+      `dX:${width.toFixed(3)}`,
+      `dZ:${depth.toFixed(3)}`,
+      `Diag:${diagonal.toFixed(3)}`,
+    ].join(' • ')
+  }, [activeTool, pendingSketchPoint, sketchPreviewPoint])
+
   return (
-    <div className="app-layout">
+    <div className={`app-layout${theme === 'light' ? ' theme-light' : ''}`}>
+      {/* ---------- Kernel Error Banner ---------- */}
+      {kernelError && (
+        <div style={{
+          background: '#dc2626',
+          color: '#fff',
+          padding: '8px 16px',
+          fontSize: '13px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          zIndex: 1000,
+        }}>
+          <strong>Kernel Error:</strong>
+          <span>{kernelError}</span>
+          <span style={{ marginLeft: 'auto', opacity: 0.7, fontSize: '11px' }}>
+            Tools will not work without the WASM kernel. Check browser console for details.
+          </span>
+        </div>
+      )}
+
       {/* ---------- Toolbar ---------- */}
       <div className="toolbar">
         <span className="toolbar-title">BetterCAD</span>
@@ -162,52 +323,57 @@ export default function App() {
 
         <button
           className={`toolbar-btn ${activeTool === 'select' ? 'active' : ''}`}
-          onClick={() => setActiveTool('select')}
+          onClick={() => handleToolChange('select')}
+          title="Select (Escape)"
         >
           Select
         </button>
         <button
           className={`toolbar-btn ${activeTool === 'wall' ? 'active' : ''}`}
-          onClick={() => setActiveTool('wall')}
+          onClick={() => handleToolChange('wall')}
+          title="Wall tool (W)"
         >
           Wall
         </button>
         <button
           className={`toolbar-btn ${activeTool === 'door' ? 'active' : ''}`}
-          onClick={() => setActiveTool('door')}
+          onClick={() => handleToolChange('door')}
+          title="Door tool"
         >
           Door
         </button>
         <button
-          className={`toolbar-btn ${activeTool === 'window' ? 'active' : ''}`}
-          onClick={() => setActiveTool('window')}
+          className="toolbar-btn toolbar-btn-disabled"
+          disabled
+          title="Window tool is not implemented yet"
         >
           Window
         </button>
         <button
-          className={`toolbar-btn ${activeTool === 'extrude' ? 'active' : ''}`}
-          onClick={() => setActiveTool('extrude')}
+          className="toolbar-btn"
+          disabled={sketchProfiles.size === 0 || extrudingSketch}
+          onClick={() => { void handleExtrudeSketch() }}
+          title={sketchProfiles.size === 0 ? 'Draw at least one sketch profile first' : 'Extrude all sketch profiles'}
         >
-          Extrude
+          {extrudingSketch ? 'Extruding...' : 'Extrude'}
         </button>
         <button
           className={`toolbar-btn ${activeTool === 'measure' ? 'active' : ''}`}
-          onClick={() => setActiveTool('measure')}
+          onClick={() => handleToolChange('measure')}
+          title="Measure tool (M)"
         >
           Measure
         </button>
         <button
           className={`toolbar-btn ${activeTool === 'sketch' ? 'active' : ''}`}
-          onClick={() => {
-            setActiveTool('sketch')
-            useSketchStore.getState().activateSketch()
-          }}
+          onClick={() => handleToolChange('sketch')}
+          title="Sketch tool (S)"
         >
           Sketch
         </button>
         <button
           className="toolbar-btn"
-          onClick={() => useSketchStore.getState().clearSketch()}
+          onClick={clearSketch}
         >
           Clear Sketch
         </button>
@@ -234,6 +400,7 @@ export default function App() {
         <button
           className={`toolbar-btn ${showGrid ? 'active' : ''}`}
           onClick={toggleGrid}
+          title="Toggle grid (G)"
         >
           Grid
         </button>
@@ -283,32 +450,80 @@ export default function App() {
         >
           Split
         </button>
+
+        <div className="toolbar-separator" />
+
+        <button
+          className="toolbar-btn"
+          onClick={toggleTheme}
+          title="Toggle dark/light theme"
+        >
+          {theme === 'dark' ? 'Light' : 'Dark'}
+        </button>
       </div>
 
       {/* ---------- Viewport + Property Panel ---------- */}
       <div className="viewport-area">
         {viewMode === '2d' ? (
           <div className="viewport">
-            <Viewport2D />
+            <Viewport2D background={viewportBackground} />
           </div>
         ) : viewMode === 'split' ? (
           <>
             <div className="viewport" style={{ flex: 1 }}>
-              <Viewport2D />
+              <Viewport2D background={viewportBackground} />
             </div>
-            <div className="viewport" style={{ flex: 1, borderLeft: '1px solid #3a3a50' }}>
-              <Canvas camera={{ position: [5, 5, 5], fov: 50 }}>
-                <color attach="background" args={['#1a1a2e']} />
-                <Scene />
+            <div className="viewport" style={{ flex: 1, borderLeft: `1px solid ${splitDividerColor}` }}>
+              <Canvas
+                camera={{ position: [5, 5, 5], fov: 50 }}
+                onPointerMissed={() => {
+                  if (activeTool === 'select') {
+                    selectBody(null)
+                  }
+                }}
+              >
+                <color attach="background" args={[viewportBackground]} />
+                <Scene
+                  selectedBodyId={selectedBodyId}
+                  hoveredBodyId={hoveredBodyId}
+                  onSelectBody={selectBody}
+                  onHoverBody={setHoveredBodyId}
+                />
               </Canvas>
+              {drawingPlaneHint && (
+                <div className="viewport-hint">
+                  <strong>Drawing Plane: Ground (XZ), Y=0</strong>
+                  <span>{drawingPlaneHint}</span>
+                  {sketchReadout && <span className="viewport-hint-metrics">{sketchReadout}</span>}
+                </div>
+              )}
             </div>
           </>
         ) : (
           <div className="viewport">
-            <Canvas camera={{ position: [5, 5, 5], fov: 50 }}>
-              <color attach="background" args={['#1a1a2e']} />
-              <Scene />
+            <Canvas
+              camera={{ position: [5, 5, 5], fov: 50 }}
+              onPointerMissed={() => {
+                if (activeTool === 'select') {
+                  selectBody(null)
+                }
+              }}
+            >
+              <color attach="background" args={[viewportBackground]} />
+              <Scene
+                selectedBodyId={selectedBodyId}
+                hoveredBodyId={hoveredBodyId}
+                onSelectBody={selectBody}
+                onHoverBody={setHoveredBodyId}
+              />
             </Canvas>
+            {drawingPlaneHint && (
+              <div className="viewport-hint">
+                <strong>Drawing Plane: Ground (XZ), Y=0</strong>
+                <span>{drawingPlaneHint}</span>
+                {sketchReadout && <span className="viewport-hint-metrics">{sketchReadout}</span>}
+              </div>
+            )}
           </div>
         )}
         <PropertyPanel />
@@ -321,6 +536,20 @@ export default function App() {
           <span>Tool: {activeTool}</span>
           {meshInfo && <span>{meshInfo}</span>}
           {walls.size > 0 && <span>Walls: {walls.size}</span>}
+          {doors.size > 0 && <span>Doors: {doors.size}</span>}
+          {selectedBodyId && <span>Selected: {selectedBodyId} (Del to remove)</span>}
+          {activeTool === 'measure' && (
+            <span>Click two points to measure</span>
+          )}
+          {activeTool === 'door' && (
+            <span>Hover a wall, preview snap, then click to place door</span>
+          )}
+          {activeTool === 'wall' && (
+            <span>Shift: orthogonal lock • Right-click: finish wall chain • H:{defaultWallHeight.toFixed(2)} T:{defaultWallThickness.toFixed(2)}</span>
+          )}
+          {activeTool === 'sketch' && (
+            <span>Sketches: {sketchProfiles.size} • {autoExtrudeSketch ? `Auto ${sketchExtrudeMode.toUpperCase()} @ H:${defaultWallHeight.toFixed(2)} T:${defaultWallThickness.toFixed(2)}` : 'Auto extrude off'}</span>
+          )}
         </div>
         <div className="status-bar-right">
           <span>View: {viewMode.toUpperCase()}</span>

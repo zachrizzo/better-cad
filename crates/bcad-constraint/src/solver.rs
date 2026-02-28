@@ -102,7 +102,7 @@ pub fn solve(sketch: &mut Sketch) -> SolverResult {
 
         // e. Update parameters
         for (&pid, &col_base) in &param_map {
-            let p = sketch.get_point_mut(pid).unwrap();
+            let Some(p) = sketch.get_point_mut(pid) else { continue; };
             p.x += delta[col_base];
             p.y += delta[col_base + 1];
         }

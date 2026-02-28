@@ -39,24 +39,6 @@ pub fn tessellate_with_tolerance(
     polygon.put_together_same_attrs(TOLERANCE);
     polygon.add_naive_normals(true);
 
-    // Extract positions, normals, and triangle indices into flat arrays
-    let positions_pts = polygon.positions();
-    let normals_vecs = polygon.normals();
-
-    let mut positions = Vec::with_capacity(positions_pts.len() * 3);
-    for p in positions_pts {
-        positions.push(p.x as f32);
-        positions.push(p.y as f32);
-        positions.push(p.z as f32);
-    }
-
-    let mut normals = Vec::with_capacity(normals_vecs.len() * 3);
-    for n in normals_vecs {
-        normals.push(n.x as f32);
-        normals.push(n.y as f32);
-        normals.push(n.z as f32);
-    }
-
     // Collect triangle face indices. Truck polygon meshes store faces
     // with StandardVertex which has separate pos/nor indices. We need
     // to expand to a flat per-vertex layout for GPU consumption.

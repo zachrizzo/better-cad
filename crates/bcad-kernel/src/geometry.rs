@@ -55,11 +55,13 @@ pub fn extrude_sketch_points(points: &[(f64, f64)], height: f64) -> Result<Solid
 /// NOTE: truck-shapeops 0.4 has limited boolean operation support.
 /// This is a stub that returns the target solid unchanged.
 /// TODO: Implement actual boolean difference when truck-shapeops API stabilizes.
-pub fn boolean_cut(target: Solid, _tool: Solid) -> Result<Solid, crate::error::KernelError> {
+pub fn boolean_cut(_target: Solid, _tool: Solid) -> Result<Solid, crate::error::KernelError> {
     // truck-shapeops 0.4 does not expose a straightforward boolean difference API.
-    // Return the target unchanged for now so downstream code compiles.
+    // Returning Ok with the unmodified target would silently produce wrong geometry.
     // Future: use truck_shapeops boolean operations once the API is stable.
-    Ok(target)
+    Err(crate::error::KernelError::BooleanError(
+        "boolean difference not yet implemented".into(),
+    ))
 }
 
 /// Creates a B-Rep box solid with the given dimensions.
@@ -166,11 +168,11 @@ mod tests {
     // --- boolean_cut tests ---
 
     #[test]
-    fn test_boolean_cut_compiles_and_returns() {
+    fn test_boolean_cut_returns_not_implemented_error() {
         let target = create_box(2.0, 2.0, 2.0).unwrap();
         let tool = create_box(1.0, 1.0, 1.0).unwrap();
-        // Stub: just verify it compiles and returns Ok
+        // Stub returns an explicit error so callers are not silently misled
         let result = boolean_cut(target, tool);
-        assert!(result.is_ok());
+        assert!(result.is_err());
     }
 }

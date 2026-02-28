@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "BetterCAD",
+  "version": "0.1.0",
+  "identifier": "com.bettercad.app",
+  "build": {
+    "beforeDevCommand": "cd packages/ui && npx vite --port 5173",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../packages/ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "BetterCAD",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}
