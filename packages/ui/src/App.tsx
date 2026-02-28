@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
+import { useStore } from 'zustand'
 import { useUIStore } from './stores/ui-store'
 import { useDocumentStore } from './stores/document-store'
+import { useHistoryTemporal } from './stores/history-store'
 import { useKernel } from './hooks/useKernel'
+import { useUndo } from './hooks/useUndo'
 import { CadMesh } from './components/viewport/CadMesh'
+import { PropertyPanel } from './components/layout/PropertyPanel'
 import './App.css'
 
 function Scene() {
@@ -72,6 +76,12 @@ export default function App() {
   const { kernel, ready } = useKernel()
   const [kernelStatus, setKernelStatus] = useState('loading...')
   const [meshInfo, setMeshInfo] = useState('')
+
+  // Undo/redo
+  useUndo()
+  const temporal = useHistoryTemporal()
+  const canUndo = useStore(temporal, (s) => s.pastStates.length > 0)
+  const canRedo = useStore(temporal, (s) => s.futureStates.length > 0)
 
   useEffect(() => {
     if (ready && kernel) {
@@ -171,6 +181,25 @@ export default function App() {
         <div className="toolbar-separator" />
 
         <button
+          className="toolbar-btn"
+          onClick={() => temporal.getState().undo()}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+        >
+          Undo
+        </button>
+        <button
+          className="toolbar-btn"
+          onClick={() => temporal.getState().redo()}
+          disabled={!canRedo}
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          Redo
+        </button>
+
+        <div className="toolbar-separator" />
+
+        <button
           className={`toolbar-btn ${viewMode === '3d' ? 'active' : ''}`}
           onClick={() => setViewMode('3d')}
         >
@@ -190,14 +219,17 @@ export default function App() {
         </button>
       </div>
 
-      {/* ---------- Viewport ---------- */}
-      <div className="viewport">
-        <Canvas
-          camera={{ position: [5, 5, 5], fov: 50 }}
-        >
-          <color attach="background" args={['#1a1a2e']} />
-          <Scene />
-        </Canvas>
+      {/* ---------- Viewport + Property Panel ---------- */}
+      <div className="viewport-area">
+        <div className="viewport">
+          <Canvas
+            camera={{ position: [5, 5, 5], fov: 50 }}
+          >
+            <color attach="background" args={['#1a1a2e']} />
+            <Scene />
+          </Canvas>
+        </div>
+        <PropertyPanel />
       </div>
 
       {/* ---------- Status Bar ---------- */}

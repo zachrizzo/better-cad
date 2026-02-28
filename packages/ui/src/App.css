@@ -69,11 +69,59 @@ html, body, #root {
   background: #3a3a50;
 }
 
-/* ---------- Viewport ---------- */
+/* ---------- Viewport Area ---------- */
+.viewport-area {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
 .viewport {
   flex: 1;
   position: relative;
   overflow: hidden;
+}
+
+/* ---------- Property Panel ---------- */
+.property-panel {
+  width: 220px;
+  background: #2a2a3e;
+  border-left: 1px solid #3a3a54;
+  padding: 12px;
+  overflow-y: auto;
+}
+.property-panel-title {
+  color: #a0a0c0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+.property-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+.property-label {
+  color: #c0c0d8;
+  font-size: 12px;
+  width: 50px;
+  flex-shrink: 0;
+}
+.property-input {
+  flex: 1;
+  background: #1a1a2e;
+  border: 1px solid #3a3a54;
+  color: #e0e0e0;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 3px;
+}
+.property-input:focus {
+  outline: none;
+  border-color: #4a90d9;
 }
 
 /* ---------- Status bar ---------- */
