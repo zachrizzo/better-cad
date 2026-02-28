@@ -10,8 +10,13 @@ import { useUndo } from './hooks/useUndo'
 import { CadMesh } from './components/viewport/CadMesh'
 import { SketchOverlay } from './components/viewport/SketchOverlay'
 import { SketchPlane } from './components/viewport/SketchPlane'
+import { WallPlane } from './components/viewport/WallPlane'
+import { Viewport2D } from './components/viewport/Viewport2D'
 import { PropertyPanel } from './components/layout/PropertyPanel'
 import { useSketchStore } from './stores/sketch-store'
+import { useBimStore } from './stores/bim-store'
+import { ImportDialog } from './components/dialogs/ImportDialog'
+import { ExportDialog } from './components/dialogs/ExportDialog'
 import './App.css'
 
 function Scene() {
@@ -62,6 +67,9 @@ function Scene() {
       <SketchOverlay />
       <SketchPlane />
 
+      {/* Wall placement plane */}
+      <WallPlane />
+
       {/* Camera controls */}
       <OrbitControls makeDefault />
     </>
@@ -80,9 +88,12 @@ export default function App() {
   const projectName = useDocumentStore((s) => s.projectName)
   const cadMeshes = useDocumentStore((s) => s.cadMeshes)
   const addCadMesh = useDocumentStore((s) => s.addCadMesh)
+  const walls = useBimStore((s) => s.walls)
   const { kernel, ready } = useKernel()
   const [kernelStatus, setKernelStatus] = useState('loading...')
   const [meshInfo, setMeshInfo] = useState('')
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [showExportDialog, setShowExportDialog] = useState(false)
 
   // Undo/redo
   useUndo()
@@ -204,6 +215,23 @@ export default function App() {
         <div className="toolbar-separator" />
 
         <button
+          className="toolbar-btn"
+          onClick={() => setShowImportDialog(true)}
+          title="Import STEP/DXF file"
+        >
+          Import
+        </button>
+        <button
+          className="toolbar-btn"
+          onClick={() => setShowExportDialog(true)}
+          title="Export to STEP/DXF"
+        >
+          Export
+        </button>
+
+        <div className="toolbar-separator" />
+
+        <button
           className={`toolbar-btn ${showGrid ? 'active' : ''}`}
           onClick={toggleGrid}
         >
@@ -259,14 +287,30 @@ export default function App() {
 
       {/* ---------- Viewport + Property Panel ---------- */}
       <div className="viewport-area">
-        <div className="viewport">
-          <Canvas
-            camera={{ position: [5, 5, 5], fov: 50 }}
-          >
-            <color attach="background" args={['#1a1a2e']} />
-            <Scene />
-          </Canvas>
-        </div>
+        {viewMode === '2d' ? (
+          <div className="viewport">
+            <Viewport2D />
+          </div>
+        ) : viewMode === 'split' ? (
+          <>
+            <div className="viewport" style={{ flex: 1 }}>
+              <Viewport2D />
+            </div>
+            <div className="viewport" style={{ flex: 1, borderLeft: '1px solid #3a3a50' }}>
+              <Canvas camera={{ position: [5, 5, 5], fov: 50 }}>
+                <color attach="background" args={['#1a1a2e']} />
+                <Scene />
+              </Canvas>
+            </div>
+          </>
+        ) : (
+          <div className="viewport">
+            <Canvas camera={{ position: [5, 5, 5], fov: 50 }}>
+              <color attach="background" args={['#1a1a2e']} />
+              <Scene />
+            </Canvas>
+          </div>
+        )}
         <PropertyPanel />
       </div>
 
@@ -276,6 +320,7 @@ export default function App() {
           <span>{projectName}</span>
           <span>Tool: {activeTool}</span>
           {meshInfo && <span>{meshInfo}</span>}
+          {walls.size > 0 && <span>Walls: {walls.size}</span>}
         </div>
         <div className="status-bar-right">
           <span>View: {viewMode.toUpperCase()}</span>
@@ -284,6 +329,21 @@ export default function App() {
           <span>{kernelStatus}</span>
         </div>
       </div>
+
+      {/* ---------- Import/Export Dialogs ---------- */}
+      <ImportDialog
+        open={showImportDialog}
+        onClose={() => setShowImportDialog(false)}
+        kernel={kernel}
+        onImport={(meshes) => {
+          meshes.forEach((mesh, i) => addCadMesh(`imported-${i}`, mesh))
+        }}
+      />
+      <ExportDialog
+        open={showExportDialog}
+        onClose={() => setShowExportDialog(false)}
+        kernel={kernel}
+      />
     </div>
   )
 }

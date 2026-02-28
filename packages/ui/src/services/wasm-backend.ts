@@ -55,4 +55,58 @@ export class WasmBackend implements KernelBackend {
       indices: new Uint32Array([]),
     }
   }
+
+  async addWall(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    height: number,
+    thickness: number,
+  ): Promise<TessellatedMesh> {
+    if (this.wasm?.add_wall) {
+      const result = this.wasm.add_wall(startX, startY, endX, endY, height, thickness)
+      return {
+        positions: new Float32Array(result.positions),
+        normals: new Float32Array(result.normals),
+        indices: new Uint32Array(result.indices),
+      }
+    }
+    return {
+      positions: new Float32Array([]),
+      normals: new Float32Array([]),
+      indices: new Uint32Array([]),
+    }
+  }
+
+  async generatePlanView(wallsJson: string): Promise<string> {
+    if (this.wasm?.generate_plan_view) {
+      return this.wasm.generate_plan_view(wallsJson)
+    }
+    return JSON.stringify({ wall_lines: [] })
+  }
+
+  async importFile(data: Uint8Array, format: string): Promise<TessellatedMesh[]> {
+    if (format === 'step' && this.wasm?.import_step_data) {
+      const result = this.wasm.import_step_data(data)
+      if (Array.isArray(result)) {
+        return result.map((m: { positions: number[]; normals: number[]; indices: number[] }) => ({
+          positions: new Float32Array(m.positions),
+          normals: new Float32Array(m.normals),
+          indices: new Uint32Array(m.indices),
+        }))
+      }
+      return []
+    }
+    throw new Error(`Import format "${format}" is not supported`)
+  }
+
+  async exportFile(format: string): Promise<ArrayBuffer> {
+    if (format === 'step' && this.wasm?.export_step_from_box) {
+      // Export the default scene box (1x1x1) as STEP
+      const bytes: Uint8Array = this.wasm.export_step_from_box(1.0, 1.0, 1.0)
+      return bytes.buffer
+    }
+    throw new Error(`Export format "${format}" is not supported`)
+  }
 }

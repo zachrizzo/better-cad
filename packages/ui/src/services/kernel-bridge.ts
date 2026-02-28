@@ -9,6 +9,10 @@ export interface KernelBackend {
   tessellate(bodyId: string): Promise<TessellatedMesh>
   createAndTessellateBox(width: number, height: number, depth: number): Promise<TessellatedMesh>
   extrudeSketchPoints(points: [number, number][], height: number): Promise<string>
+  addWall(startX: number, startY: number, endX: number, endY: number, height: number, thickness: number): Promise<TessellatedMesh>
+  generatePlanView(wallsJson: string): Promise<string>
+  importFile(data: Uint8Array, format: string): Promise<TessellatedMesh[]>
+  exportFile(format: string): Promise<ArrayBuffer>
   ping(): Promise<string>
 }
 

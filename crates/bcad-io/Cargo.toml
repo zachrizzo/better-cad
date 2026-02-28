@@ -12,3 +12,6 @@ thiserror.workspace = true
 dxf.workspace = true
 gltf.workspace = true
 zip.workspace = true
+truck-stepio.workspace = true
+truck-modeling.workspace = true
+truck-topology = { workspace = true }
