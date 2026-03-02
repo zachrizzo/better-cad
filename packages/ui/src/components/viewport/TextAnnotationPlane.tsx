@@ -8,12 +8,14 @@ import { useMeasurementStore } from '../../stores/measurement-store'
 import { isTextAnnotationElement, useEntityStore } from '../../stores/entity-store'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { useLevelStore } from '../../stores/level-store'
+import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
 import type { TextAnnotationElement } from '../../services/kernel-bridge'
 
 type Point2 = [number, number]
 
 export function TextAnnotationPlane() {
   const activeTool = useUIStore((s) => s.activeTool)
+  const snapEnabled = useUIStore((s) => s.snapEnabled)
   const { kernel, ready } = useKernel()
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
@@ -28,29 +30,39 @@ export function TextAnnotationPlane() {
   const [cursorPoint, setCursorPoint] = useState<Point2 | null>(null)
   const [pendingPosition, setPendingPosition] = useState<Point2 | null>(null)
   const [inputText, setInputText] = useState('')
+  const [snapMarker, setSnapMarker] = useState<Point2 | null>(null)
+  const snapPoints = usePlanSnapPoints()
 
   useEffect(() => {
     if (activeTool !== 'text') {
       setPendingPosition(null)
       setCursorPoint(null)
       setInputText('')
+      setSnapMarker(null)
       setMeasurementCursor(null)
       setToolReadout(null)
     }
   }, [activeTool, setMeasurementCursor, setToolReadout])
 
+  const applySnap = useCallback((rawPoint: Point2): { point: Point2; snapped: Point2 | null } => {
+    return snapPlanPoint(rawPoint, snapPoints, snapEnabled, 0.3)
+  }, [snapEnabled, snapPoints])
+
   const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
     if (activeTool !== 'text') return
-    const point: Point2 = [e.point.x, e.point.z]
+    const rawPoint: Point2 = [e.point.x, e.point.z]
+    const { point, snapped } = applySnap(rawPoint)
     setCursorPoint(point)
-    setMeasurementCursor([point[0], 0, point[1]])
+    setSnapMarker(snapped)
+    setMeasurementCursor([point[0], activeLevelElevation, point[1]])
     if (!pendingPosition) {
       setToolReadout('Text: click to place annotation')
     }
-  }, [activeTool, pendingPosition, setMeasurementCursor, setToolReadout])
+  }, [activeLevelElevation, activeTool, applySnap, pendingPosition, setMeasurementCursor, setToolReadout])
 
   const handlePointerLeave = useCallback(() => {
     setCursorPoint(null)
+    setSnapMarker(null)
     setMeasurementCursor(null)
   }, [setMeasurementCursor])
 
@@ -59,8 +71,10 @@ export function TextAnnotationPlane() {
     if (activeTool !== 'text') return
     if (pendingPosition) return
 
-    const point: Point2 = [e.point.x, e.point.z]
+    const rawPoint: Point2 = [e.point.x, e.point.z]
+    const { point, snapped } = applySnap(rawPoint)
     setPendingPosition(point)
+    setSnapMarker(snapped)
     setToolReadout('Text: type annotation and press Enter')
   }
 
@@ -121,7 +135,7 @@ export function TextAnnotationPlane() {
       {cursorPoint && !pendingPosition && (
         <mesh position={[cursorPoint[0], planeY + 0.05, cursorPoint[1]]}>
           <sphereGeometry args={[0.06, 12, 12]} />
-          <meshBasicMaterial color="#38bdf8" />
+          <meshBasicMaterial color={snapMarker ? '#00ff88' : '#38bdf8'} />
         </mesh>
       )}
 

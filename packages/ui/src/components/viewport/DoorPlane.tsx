@@ -8,7 +8,7 @@ import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { formatLength } from '../../utils/units'
 import type { DoorElement, WallElement } from '../../services/kernel-bridge'
-import { isDoorElement, isWallElement, useEntityStore } from '../../stores/entity-store'
+import { isDoorElement, isFloorElement, isWallElement, useEntityStore } from '../../stores/entity-store'
 import { useKernel } from '../../hooks/useKernel'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { useLevelStore } from '../../stores/level-store'
@@ -129,20 +129,40 @@ export function DoorPlane() {
     const lvl = levels.find((l) => l.id === activeLevelId)
     return lvl?.elevation ?? 0
   }, [levels, activeLevelId])
+  const levelDataById = useMemo(
+    () => new Map(levels.map((level) => [level.id, { elevation: level.elevation, visibility: level.visibility }])),
+    [levels],
+  )
   const { kernel, ready } = useKernel()
 
   const planeRef = useRef<THREE.Mesh>(null)
   const [candidate, setCandidate] = useState<DoorCandidate | null>(null)
 
-  const walls = useMemo(
+  const wallElements = useMemo(
     () => Array.from(elements.values()).filter(isWallElement),
     [elements],
+  )
+  const walls = useMemo(
+    () => wallElements.filter((wall) => !wall.meta.level_id || wall.meta.level_id === activeLevelId),
+    [activeLevelId, wallElements],
   )
 
   const doors = useMemo(
     () => Array.from(elements.values()).filter(isDoorElement),
     [elements],
   )
+  const surfaceOffsetByLevel = useMemo(() => {
+    const offsets = new Map<string, number>()
+    for (const element of elements.values()) {
+      if (!isFloorElement(element)) continue
+      const levelId = element.meta.level_id
+      if (!levelId) continue
+      offsets.set(levelId, Math.max(offsets.get(levelId) ?? 0, element.thickness))
+    }
+    return offsets
+  }, [elements])
+  const activeLevelSurfaceOffset = surfaceOffsetByLevel.get(activeLevelId) ?? 0
+  const activeSurfaceElevation = activeLevelElevation + activeLevelSurfaceOffset
 
   useEffect(() => {
     if (activeTool !== 'door') {
@@ -165,7 +185,7 @@ export function DoorPlane() {
     if (activeTool !== 'door') return
     const point: Point2 = [e.point.x, e.point.z]
     updateCandidate(point)
-    setMeasurementCursor([point[0], 0, point[1]])
+    setMeasurementCursor([point[0], activeSurfaceElevation, point[1]])
     const nextCandidate = getDoorCandidate(point, walls, {
       width: defaultDoorWidth,
       height: defaultDoorHeight,
@@ -180,6 +200,7 @@ export function DoorPlane() {
       setToolReadout('Door: hover closer to a wall to snap')
     }
   }, [
+    activeSurfaceElevation,
     activeTool,
     defaultDoorHeight,
     defaultDoorSill,
@@ -270,7 +291,7 @@ export function DoorPlane() {
         <mesh
           ref={planeRef}
           rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, activeLevelElevation, 0]}
+          position={[0, activeSurfaceElevation, 0]}
           onClick={handleClick}
           onPointerMove={handlePointerMove}
           onPointerLeave={handlePointerLeave}
@@ -283,7 +304,7 @@ export function DoorPlane() {
       {candidate && activeTool === 'door' && (
         <>
           <group
-            position={[candidate.center[0], activeLevelElevation, candidate.center[1]]}
+            position={[candidate.center[0], activeSurfaceElevation, candidate.center[1]]}
             rotation={[0, Math.atan2(candidate.direction[1], candidate.direction[0]), 0]}
           >
             <mesh position={[0, candidate.sillHeight + candidate.height / 2, 0]}>
@@ -322,7 +343,7 @@ export function DoorPlane() {
               )
             })()}
           </group>
-          <Html position={[candidate.center[0], activeLevelElevation + 0.35, candidate.center[1]]} center>
+          <Html position={[candidate.center[0], activeSurfaceElevation + 0.35, candidate.center[1]]} center>
             <div className="measurement-badge">
               {formatLength(candidate.width, lengthUnit)} • {candidate.swing}
             </div>
@@ -331,16 +352,16 @@ export function DoorPlane() {
       )}
 
       {doors.map((door) => {
-        const hostWall = walls.find((wall) => wall.meta.id === door.wall_id)
+        const hostWall = wallElements.find((wall) => wall.meta.id === door.wall_id)
         const thickness = hostWall ? Math.max(0.05, hostWall.thickness * 0.6) : 0.08
         const swing = normalizeSwing(door.swing)
 
-        // Level-based visibility and elevation
-        const doorLevelId = door.meta.level_id
-        const levelState = useLevelStore.getState()
-        const doorLevel = doorLevelId ? levelState.levels.find((l) => l.id === doorLevelId) : undefined
-        const doorElevation = doorLevel?.elevation ?? 0
-        const doorVisibility = doorLevel?.visibility ?? 'visible'
+        // Level-based visibility and elevation (fallback to host wall for legacy doors without level_id)
+        const doorLevelId = door.meta.level_id ?? hostWall?.meta.level_id
+        const levelData = doorLevelId ? levelDataById.get(doorLevelId) : undefined
+        const slabOffset = doorLevelId ? (surfaceOffsetByLevel.get(doorLevelId) ?? 0) : 0
+        const doorElevation = (levelData?.elevation ?? 0) + slabOffset
+        const doorVisibility = levelData?.visibility ?? 'visible'
         if (doorVisibility === 'hidden') return null
         const doorOpacity = doorVisibility === 'ghosted' ? 0.25 : 0.65
 

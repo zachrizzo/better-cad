@@ -67,8 +67,10 @@ export const LIGHTING_PRESETS: Record<LightingPreset, LightingPresetConfig> = {
 interface SettingsState {
   lengthUnit: LengthUnit
   lightingPreset: LightingPreset
+  wallsVisible: boolean
   setLengthUnit: (unit: LengthUnit) => void
   setLightingPreset: (preset: LightingPreset) => void
+  toggleWallsVisible: () => void
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -76,13 +78,18 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       lengthUnit: 'm',
       lightingPreset: 'daylight',
+      wallsVisible: true,
       setLengthUnit: (lengthUnit) => set({ lengthUnit }),
       setLightingPreset: (lightingPreset) => set({ lightingPreset }),
+      toggleWallsVisible: () => set((state) => ({ wallsVisible: !state.wallsVisible })),
     }),
     {
       name: 'bettercad-settings',
-      partialize: (state) => ({ lengthUnit: state.lengthUnit, lightingPreset: state.lightingPreset }),
+      partialize: (state) => ({
+        lengthUnit: state.lengthUnit,
+        lightingPreset: state.lightingPreset,
+        wallsVisible: state.wallsVisible,
+      }),
     },
   ),
 )
-

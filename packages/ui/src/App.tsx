@@ -1,12 +1,13 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, Grid, Environment } from '@react-three/drei'
+import { OrbitControls, Grid } from '@react-three/drei'
 import { useUIStore } from './stores/ui-store'
 import { useDocumentStore } from './stores/document-store'
 import { useMaterialStore } from './stores/material-store'
 import { useKernel } from './hooks/useKernel'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useUndo } from './hooks/useUndo'
+import { useActiveDrawingSurface } from './hooks/useActiveDrawingSurface'
 import { CadMesh } from './components/viewport/CadMesh'
 import { WallPlane } from './components/viewport/WallPlane'
 import { DrawingPlaneGuide } from './components/viewport/DrawingPlaneGuide'
@@ -55,9 +56,124 @@ import { detectRooms } from './services/room-detection'
 import { ImportDialog } from './components/dialogs/ImportDialog'
 import { ExportDialog } from './components/dialogs/ExportDialog'
 import type { TessellatedMesh, WallElement } from './services/kernel-bridge'
+import { downloadArrayBufferAsFile } from './utils/file-download'
 import './App.css'
 
+// Lazy-load ChatPanel + @anthropic-ai/sdk so they don't run during initial app render
+const ChatPanel = lazy(() =>
+  import('./components/panels/ChatPanel').then((m) => ({ default: m.ChatPanel })),
+)
+
+const TOOL_OPTIONS = [
+  { tool: 'select', label: 'Select', title: 'Select entities', shortcut: 'Esc' },
+  { tool: 'foundation', label: 'Foundation', title: 'Foundation tool', shortcut: 'H' },
+  { tool: 'parking', label: 'Parking', title: 'Parking lot tool', shortcut: 'P' },
+  { tool: 'wall', label: 'Wall', title: 'Wall tool', shortcut: 'W' },
+  { tool: 'door', label: 'Door', title: 'Door tool', shortcut: 'D' },
+  { tool: 'window', label: 'Window', title: 'Window tool', shortcut: 'N' },
+  { tool: 'floor', label: 'Floor', title: 'Floor tool', shortcut: 'F' },
+  { tool: 'stair', label: 'Stair', title: 'Stair tool', shortcut: 'S' },
+  { tool: 'column', label: 'Column', title: 'Column tool', shortcut: 'C' },
+  { tool: 'beam', label: 'Beam', title: 'Beam tool', shortcut: 'B' },
+  { tool: 'roof', label: 'Roof', title: 'Roof tool', shortcut: 'O' },
+  { tool: 'dimension', label: 'Dimension', title: 'Dimension tool', shortcut: 'A' },
+  { tool: 'text', label: 'Text', title: 'Text annotation tool', shortcut: 'T' },
+  { tool: 'sketch', label: 'Sketch', title: 'Sketch tool', shortcut: 'K' },
+  { tool: 'measure', label: 'Measure', title: 'Measure tool', shortcut: 'M' },
+  { tool: 'section', label: 'Section', title: 'Section cut tool', shortcut: '-' },
+] as const
+
+const FOUNDATION_REQUIRED_TOOLS = ['wall', 'door', 'window', 'floor', 'stair', 'column', 'beam', 'roof'] as const
+
+const LIGHTING_OPTIONS: readonly LightingPreset[] = ['daylight', 'evening', 'studio']
+
+const LIGHTING_LABELS: Record<LightingPreset, string> = {
+  daylight: 'Daylight',
+  evening: 'Evening',
+  studio: 'Studio',
+}
+
+const SIDE_PANEL_DEFAULT_WIDTH = 320
+const SIDE_PANEL_MIN_WIDTH = 260
+const SIDE_PANEL_MAX_WIDTH = 520
+
+type MenuAction = {
+  label: string
+  onSelect: () => void
+  title?: string
+  hint?: string
+  active?: boolean
+  disabled?: boolean
+}
+
+type SaveFeedback = {
+  id: number
+  tone: 'info' | 'success' | 'error'
+  message: string
+}
+
+function HeaderMenu({ label, actions }: { label: string; actions: MenuAction[] }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return
+      setOpen(false)
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleEscape)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [open])
+
+  return (
+    <div className="header-menu" ref={menuRef}>
+      <button
+        className={`toolbar-btn header-menu-trigger${open ? ' active' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        title={`${label} menu`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        {label}
+      </button>
+      {open && (
+        <div className="header-menu-popover" role="menu" aria-label={`${label} menu`}>
+          {actions.map((action) => (
+            <button
+              key={`${label}-${action.label}`}
+              className={`header-menu-item${action.active ? ' active' : ''}`}
+              onClick={() => {
+                if (action.disabled) return
+                action.onSelect()
+                setOpen(false)
+              }}
+              title={action.title}
+              disabled={action.disabled}
+              role="menuitem"
+            >
+              <span>{action.label}</span>
+              {action.hint && <span className="header-menu-hint">{action.hint}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function getDrawingPlaneHint(tool: string): string | null {
+  if (tool === 'foundation') return 'Click to set one foundation corner, move cursor, then click opposite corner.'
+  if (tool === 'parking') return 'Click to set one parking lot corner, move cursor, then click opposite corner.'
   if (tool === 'wall') return 'Click to start and keep clicking for chained walls. Hold Shift for orthogonal lock; right-click to end the chain.'
   if (tool === 'door') return 'Hover a wall to preview the door snap, then click to place.'
   if (tool === 'floor') return 'Click to set one floor corner, move cursor, then click opposite corner.'
@@ -66,7 +182,7 @@ function getDrawingPlaneHint(tool: string): string | null {
   if (tool === 'window') return 'Click on a wall to place a window.'
   if (tool === 'column') return 'Click on the ground plane to place a column.'
   if (tool === 'beam') return 'Click start point then end point to place a beam. Hold Shift for orthogonal lock.'
-  if (tool === 'roof') return 'Click to place polygon vertices. Double-click or right-click to close the roof polygon.'
+  if (tool === 'roof') return 'Click to set one roof corner, move cursor, then click opposite corner.'
   if (tool === 'dimension') return 'Click first point, then second point to place a persistent dimension line.'
   if (tool === 'text') return 'Click to place a text annotation, then type and press Enter.'
   if (tool === 'sketch') return 'Parametric sketch mode. Use sub-tools to draw lines, rectangles, circles. Apply constraints in the panel.'
@@ -94,10 +210,12 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
   const entityElements = useEntityStore((s) => s.elements)
   const levels = useLevelStore((s) => s.levels)
   const lightingPreset = useSettingsStore((s) => s.lightingPreset)
+  const wallsVisible = useSettingsStore((s) => s.wallsVisible)
   const lighting = LIGHTING_PRESETS[lightingPreset]
   const activeViewId = useViewStore((s) => s.activeViewId)
   const views = useViewStore((s) => s.views)
   const activeView = activeViewId ? views.get(activeViewId) ?? null : null
+  const { activeSurfaceElevation } = useActiveDrawingSurface()
   const gridCellColor = theme === 'light' ? '#cfd7e6' : '#3a3a50'
   const gridSectionColor = theme === 'light' ? '#9fb1cc' : '#5a5a70'
   const isSelectMode = activeTool === 'select'
@@ -111,22 +229,35 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
     return map
   }, [levels])
 
+  const slabOffsetByLevel = useMemo(() => {
+    const offsets = new Map<string, number>()
+    for (const element of entityElements.values()) {
+      if (!isFloorElement(element)) continue
+      const levelId = element.meta.level_id
+      if (!levelId) continue
+      offsets.set(levelId, Math.max(offsets.get(levelId) ?? 0, element.thickness))
+    }
+    return offsets
+  }, [entityElements])
+
   const elementLevelInfo = useMemo(() => {
     const info = new Map<string, { opacity: number; elevationOffset: number }>()
     for (const [id, el] of entityElements) {
       const levelId = el.meta.level_id
       if (levelId && levelMap.has(levelId)) {
         const lvl = levelMap.get(levelId)!
+        const slabOffset = slabOffsetByLevel.get(levelId) ?? 0
+        const surfaceOffset = (isWallElement(el) || isStairElement(el)) ? slabOffset : 0
         info.set(id, {
           opacity: opacityForVisibility(lvl.visibility),
-          elevationOffset: lvl.elevation,
+          elevationOffset: lvl.elevation + surfaceOffset,
         })
       } else {
         info.set(id, { opacity: 1.0, elevationOffset: 0 })
       }
     }
     return info
-  }, [entityElements, levelMap])
+  }, [entityElements, levelMap, slabOffsetByLevel])
 
   return (
     <>
@@ -156,9 +287,6 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
         args={[lighting.hemisphereSkyColor, lighting.hemisphereGroundColor, lighting.hemisphereIntensity]}
       />
 
-      {/* Environment map for reflections */}
-      <Environment preset={lighting.environmentPreset} background={false} />
-
       {/* Shadow-receiving ground plane */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
         <planeGeometry args={[200, 200]} />
@@ -167,6 +295,7 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
 
       {showGrid && (
         <Grid
+          position={[0, activeSurfaceElevation + 0.001, 0]}
           infiniteGrid
           cellSize={1}
           cellThickness={0.5}
@@ -180,6 +309,8 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
       )}
 
       {Array.from(cadMeshes.entries()).map(([id, mesh]) => {
+        const element = entityElements.get(id)
+        if (!wallsVisible && element && isWallElement(element)) return null
         const lvlInfo = elementLevelInfo.get(id)
         const opacity = lvlInfo?.opacity ?? 1.0
         const elevationOffset = lvlInfo?.elevationOffset ?? 0
@@ -253,8 +384,11 @@ export default function App() {
   const selectBody = useUIStore((s) => s.selectBody)
   const theme = useUIStore((s) => s.theme)
   const toggleTheme = useUIStore((s) => s.toggleTheme)
+  const activeRightTab = useUIStore((s) => s.activeRightTab)
+  const setActiveRightTab = useUIStore((s) => s.setActiveRightTab)
 
   const cadMeshes = useDocumentStore((s) => s.cadMeshes)
+  const clearCadMeshes = useDocumentStore((s) => s.clearCadMeshes)
 
   const defaultWallHeight = useBimStore((s) => s.defaultWallHeight)
   const defaultWallThickness = useBimStore((s) => s.defaultWallThickness)
@@ -271,6 +405,9 @@ export default function App() {
   const defaultBeamElevation = useBimStore((s) => s.defaultBeamElevation)
   const defaultRoofThickness = useBimStore((s) => s.defaultRoofThickness)
   const defaultRoofElevation = useBimStore((s) => s.defaultRoofElevation)
+  const defaultRoofAutoElevation = useBimStore((s) => s.defaultRoofAutoElevation)
+  const defaultRoofType = useBimStore((s) => s.defaultRoofType)
+  const defaultRoofPitchDegrees = useBimStore((s) => s.defaultRoofPitchDegrees)
 
   const activateSketch = useSketchStore((s) => s.activateSketch)
   const deactivateSketch = useSketchStore((s) => s.deactivateSketch)
@@ -292,13 +429,17 @@ export default function App() {
     () => levels.find((l) => l.id === activeLevelId),
     [levels, activeLevelId],
   )
+  const { activeSurfaceElevation, slabOffset } = useActiveDrawingSurface()
 
   const setMaterials = useMaterialStore((s) => s.setMaterials)
   const measurementCursor = useMeasurementStore((s) => s.cursor)
   const toolReadout = useMeasurementStore((s) => s.toolReadout)
+  const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const lightingPreset = useSettingsStore((s) => s.lightingPreset)
   const setLightingPreset = useSettingsStore((s) => s.setLightingPreset)
+  const wallsVisible = useSettingsStore((s) => s.wallsVisible)
+  const toggleWallsVisible = useSettingsStore((s) => s.toggleWallsVisible)
   const activeViewId = useViewStore((s) => s.activeViewId)
   const activeViewName = useViewStore((s) => {
     if (!s.activeViewId) return null
@@ -312,25 +453,62 @@ export default function App() {
   const [hoveredBodyId, setHoveredBodyId] = useState<string | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [clearProjectConfirmOpen, setClearProjectConfirmOpen] = useState(false)
+  const [clearProjectPending, setClearProjectPending] = useState(false)
   const [showSchedules, setShowSchedules] = useState(false)
+  const [sidePanelWidth, setSidePanelWidth] = useState(SIDE_PANEL_DEFAULT_WIDTH)
+  const [sidePanelResizing, setSidePanelResizing] = useState(false)
+  const [savePending, setSavePending] = useState(false)
+  const [saveFeedback, setSaveFeedback] = useState<SaveFeedback | null>(null)
   const toggleSchedules = useCallback(() => setShowSchedules((v) => !v), [])
   const loadInputRef = useRef<HTMLInputElement>(null)
+  const sidePanelResizeStartXRef = useRef(0)
+  const sidePanelResizeStartWidthRef = useRef(SIDE_PANEL_DEFAULT_WIDTH)
+
+  const showSaveFeedback = useCallback((tone: SaveFeedback['tone'], message: string) => {
+    setSaveFeedback({
+      id: Date.now(),
+      tone,
+      message,
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!saveFeedback) return
+    const timeoutId = window.setTimeout(() => {
+      setSaveFeedback((current) => (current?.id === saveFeedback.id ? null : current))
+    }, 3200)
+    return () => window.clearTimeout(timeoutId)
+  }, [saveFeedback])
 
   const handleSaveProject = useCallback(async () => {
-    if (!kernel) return
+    if (!kernel) {
+      showSaveFeedback('error', 'Save failed: kernel is not ready.')
+      return
+    }
+    if (savePending) {
+      showSaveFeedback('info', 'Save already in progress...')
+      return
+    }
+
+    const filename = `${projectName || 'project'}.bcad`
+    setSavePending(true)
+    showSaveFeedback('info', `Saving ${filename}...`)
     try {
       const data = await kernel.saveProject()
-      const blob = new Blob([data], { type: 'application/octet-stream' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${projectName || 'project'}.bcad`
-      a.click()
-      URL.revokeObjectURL(url)
+      if (data.byteLength === 0) {
+        throw new Error('generated file is empty')
+      }
+      downloadArrayBufferAsFile(data, filename)
+      showSaveFeedback('success', `Saved ${filename}`)
     } catch (err) {
       console.error('[BetterCAD] Save failed:', err)
+      const message = err instanceof Error ? err.message : String(err)
+      showSaveFeedback('error', `Save failed: ${message}`)
+    } finally {
+      setSavePending(false)
     }
-  }, [kernel, projectName])
+  }, [kernel, projectName, savePending, showSaveFeedback])
 
   const handleLoadProject = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -339,12 +517,62 @@ export default function App() {
       const buffer = await file.arrayBuffer()
       await kernel.loadProject(buffer)
       useEntityStore.getState().clearProject()
+      clearCadMeshes()
       await syncEntitiesAndRegenerateMeshes(kernel)
     } catch (err) {
       console.error('[BetterCAD] Load failed:', err)
     }
     if (loadInputRef.current) loadInputRef.current.value = ''
-  }, [kernel])
+  }, [clearCadMeshes, kernel])
+
+  const handleClearProject = useCallback(async () => {
+    if (clearProjectPending) return
+
+    setClearProjectPending(true)
+    try {
+      if (!kernel) {
+        useEntityStore.getState().clearProject()
+        clearCadMeshes()
+      } else {
+        await kernel.resetProject(projectName || 'Prototype Project', 'm')
+        const currentLevel = levels.find((l) => l.id === activeLevelId) ?? levels[0]
+        if (currentLevel) {
+          await kernel.createElement({
+            kind: 'level',
+            meta: {
+              id: `level-${crypto.randomUUID()}`,
+              name: currentLevel.name,
+            },
+            elevation: currentLevel.elevation,
+          })
+        }
+        useEntityStore.getState().clearProject()
+        clearCadMeshes()
+        await syncEntitiesAndRegenerateMeshes(kernel)
+      }
+
+      useMeasurementStore.getState().clear()
+      selectBody(null)
+      setHoveredBodyId(null)
+      clearActiveView()
+      setActiveTool('select')
+      setClearProjectConfirmOpen(false)
+    } catch (err) {
+      console.error('[BetterCAD] Clear project failed:', err)
+    } finally {
+      setClearProjectPending(false)
+    }
+  }, [
+    activeLevelId,
+    clearActiveView,
+    clearCadMeshes,
+    clearProjectPending,
+    kernel,
+    levels,
+    projectName,
+    selectBody,
+    setActiveTool,
+  ])
 
   const handleImport = useCallback(async (meshes: TessellatedMesh[]) => {
     const addCadMesh = useDocumentStore.getState().addCadMesh
@@ -353,7 +581,6 @@ export default function App() {
     })
   }, [])
 
-  useKeyboardShortcuts({ onSave: handleSaveProject, onLoad: () => loadInputRef.current?.click() })
   const { performUndo, performRedo } = useUndo()
 
   const ROOM_COLORS = ['#8b5cf6', '#ec4899', '#14b8a6', '#f59e0b', '#3b82f6', '#ef4444', '#10b981', '#6366f1']
@@ -364,7 +591,10 @@ export default function App() {
     const levelWalls = Array.from(allElements.values()).filter(
       (e): e is WallElement => isWallElement(e) && (!e.meta.level_id || e.meta.level_id === activeLevelId),
     )
-    if (levelWalls.length < 3) return
+    if (levelWalls.length < 3) {
+      setToolReadout('Detect Rooms needs at least 3 walls on the active level.')
+      return
+    }
 
     const existingRooms = Array.from(allElements.values()).filter(
       (e) => isRoomElement(e) && (!e.meta.level_id || e.meta.level_id === activeLevelId),
@@ -456,8 +686,11 @@ export default function App() {
     }
   }, [cadMeshes])
 
-  const handleToolChange = (tool: Parameters<typeof setActiveTool>[0]) => {
-    setActiveTool(tool)
+  type ToolName = Parameters<typeof setActiveTool>[0]
+  type ToolRuleState = {
+    disabled: boolean
+    reason?: string
+    fallback?: ToolName
   }
 
   const walls = useMemo(
@@ -469,7 +702,15 @@ export default function App() {
     [entityElements],
   )
   const floors = useMemo(
-    () => Array.from(entityElements.values()).filter(isFloorElement),
+    () => Array.from(entityElements.values()).filter((el) => isFloorElement(el) && !el.meta.type_id),
+    [entityElements],
+  )
+  const parkingLots = useMemo(
+    () => Array.from(entityElements.values()).filter((el) => isFloorElement(el) && el.meta.type_id === 'parking_lot'),
+    [entityElements],
+  )
+  const foundations = useMemo(
+    () => Array.from(entityElements.values()).filter((el) => isFloorElement(el) && el.meta.type_id === 'foundation'),
     [entityElements],
   )
   const stairs = useMemo(
@@ -497,6 +738,123 @@ export default function App() {
     [entityElements],
   )
 
+  const hasFoundationOnActiveLevel = useMemo(
+    () => foundations.some((foundation) => !foundation.meta.level_id || foundation.meta.level_id === activeLevelId),
+    [activeLevelId, foundations],
+  )
+
+  const isOnActiveLevel = useCallback((levelId?: string | null) => (
+    !levelId || levelId === activeLevelId
+  ), [activeLevelId])
+  const wallCountOnActiveLevel = useMemo(
+    () => walls.filter((wall) => isOnActiveLevel(wall.meta.level_id)).length,
+    [isOnActiveLevel, walls],
+  )
+  const columnCountOnActiveLevel = useMemo(
+    () => columnElements.filter((column) => isOnActiveLevel(column.meta.level_id)).length,
+    [columnElements, isOnActiveLevel],
+  )
+  const beamCountOnActiveLevel = useMemo(
+    () => beamElements.filter((beam) => isOnActiveLevel(beam.meta.level_id)).length,
+    [beamElements, isOnActiveLevel],
+  )
+
+  const foundationRequiredToolSet = useMemo(
+    () => new Set<ToolName>(FOUNDATION_REQUIRED_TOOLS as readonly ToolName[]),
+    [],
+  )
+  const toolLabelByTool = useMemo(
+    () => new Map(TOOL_OPTIONS.map((option) => [option.tool as ToolName, option.label])),
+    [],
+  )
+
+  const toolRulesByTool = useMemo(() => {
+    const rules = new Map<ToolName, ToolRuleState>()
+
+    if (!hasFoundationOnActiveLevel) {
+      const foundationReason = 'Add a foundation on this level before using structural tools.'
+      for (const tool of foundationRequiredToolSet) {
+        rules.set(tool, {
+          disabled: true,
+          reason: foundationReason,
+          fallback: 'foundation',
+        })
+      }
+      return rules
+    }
+
+    if (wallCountOnActiveLevel === 0) {
+      const wallReason = 'Add at least one wall on this level before placing doors or windows.'
+      rules.set('door', { disabled: true, reason: wallReason, fallback: 'wall' })
+      rules.set('window', { disabled: true, reason: wallReason, fallback: 'wall' })
+    }
+
+    const beamSupportCountOnActiveLevel = wallCountOnActiveLevel + columnCountOnActiveLevel + beamCountOnActiveLevel
+    if (beamSupportCountOnActiveLevel === 0) {
+      rules.set('beam', {
+        disabled: true,
+        reason: 'Add a wall, column, or existing beam on this level before placing beams.',
+        fallback: 'column',
+      })
+    }
+
+    const roofSupportCountOnActiveLevel = wallCountOnActiveLevel + columnCountOnActiveLevel
+    if (roofSupportCountOnActiveLevel === 0) {
+      rules.set('roof', {
+        disabled: true,
+        reason: 'Add walls or columns on this level before creating a roof.',
+        fallback: 'wall',
+      })
+    }
+
+    return rules
+  }, [
+    beamCountOnActiveLevel,
+    columnCountOnActiveLevel,
+    foundationRequiredToolSet,
+    hasFoundationOnActiveLevel,
+    wallCountOnActiveLevel,
+  ])
+
+  const canDetectRooms = wallCountOnActiveLevel >= 3
+
+  const handleToolChange = useCallback((tool: ToolName) => {
+    const rule = toolRulesByTool.get(tool)
+    if (rule?.disabled) {
+      if (rule.fallback && rule.fallback !== tool) {
+        setActiveTool(rule.fallback)
+      }
+      setToolReadout(rule.reason ?? `${toolLabelByTool.get(tool) ?? tool} is not available right now.`)
+      return
+    }
+    setActiveTool(tool)
+  }, [setActiveTool, setToolReadout, toolLabelByTool, toolRulesByTool])
+
+  useEffect(() => {
+    const activeRule = toolRulesByTool.get(activeTool)
+    if (!activeRule?.disabled) return
+
+    if (activeRule.fallback && activeRule.fallback !== activeTool) {
+      setActiveTool(activeRule.fallback)
+    }
+    const message = activeRule.reason ?? `${toolLabelByTool.get(activeTool) ?? activeTool} is not available right now.`
+    setToolReadout(message)
+  }, [activeTool, setActiveTool, setToolReadout, toolLabelByTool, toolRulesByTool])
+
+  useEffect(() => {
+    if (wallsVisible || !selectedBodyId) return
+    const selectedElement = entityElements.get(selectedBodyId)
+    if (!selectedElement || !isWallElement(selectedElement)) return
+    selectBody(null)
+    setHoveredBodyId((current) => (current === selectedBodyId ? null : current))
+  }, [entityElements, selectBody, selectedBodyId, wallsVisible])
+
+  useKeyboardShortcuts({
+    onSave: handleSaveProject,
+    onLoad: () => loadInputRef.current?.click(),
+    onToolSelect: handleToolChange,
+  })
+
   const viewportBackground = theme === 'light' ? '#edf2fa' : '#1a1a2e'
   const splitDividerColor = theme === 'light' ? '#d0d0d0' : '#3a3a50'
   const drawingPlaneHint = viewMode !== '2d' ? getDrawingPlaneHint(activeTool) : null
@@ -509,6 +867,176 @@ export default function App() {
     if (cursorText && toolReadout) return `${cursorText} • ${toolReadout}`
     return cursorText ?? toolReadout
   }, [lengthUnit, measurementCursor, toolReadout])
+
+  const suppressViewportContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+  }, [])
+
+  const startSidePanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    event.preventDefault()
+    sidePanelResizeStartXRef.current = event.clientX
+    sidePanelResizeStartWidthRef.current = sidePanelWidth
+    setSidePanelResizing(true)
+  }, [sidePanelWidth])
+
+  useEffect(() => {
+    if (!sidePanelResizing) return
+
+    const previousCursor = document.body.style.cursor
+    const previousUserSelect = document.body.style.userSelect
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const deltaX = event.clientX - sidePanelResizeStartXRef.current
+      const nextWidth = Math.min(
+        SIDE_PANEL_MAX_WIDTH,
+        Math.max(SIDE_PANEL_MIN_WIDTH, sidePanelResizeStartWidthRef.current - deltaX),
+      )
+      setSidePanelWidth(nextWidth)
+    }
+
+    const stopResizing = () => {
+      setSidePanelResizing(false)
+    }
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResizing)
+    window.addEventListener('pointercancel', stopResizing)
+    return () => {
+      document.body.style.cursor = previousCursor
+      document.body.style.userSelect = previousUserSelect
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResizing)
+      window.removeEventListener('pointercancel', stopResizing)
+    }
+  }, [sidePanelResizing])
+
+  const fileMenuActions: MenuAction[] = [
+    {
+      label: 'Save Project',
+      hint: 'Ctrl+S',
+      title: 'Save project file',
+      onSelect: () => void handleSaveProject(),
+    },
+    {
+      label: 'Open Project',
+      hint: 'Ctrl+O',
+      title: 'Open .bcad file',
+      onSelect: () => loadInputRef.current?.click(),
+    },
+    {
+      label: 'Import Geometry',
+      title: 'Import STEP or DXF',
+      onSelect: () => setImportDialogOpen(true),
+    },
+    {
+      label: 'Export Geometry',
+      title: 'Export STEP, IFC, glTF, or DXF',
+      onSelect: () => setExportDialogOpen(true),
+    },
+    {
+      label: 'Clear Project...',
+      title: 'Remove all project geometry after confirmation',
+      onSelect: () => setClearProjectConfirmOpen(true),
+    },
+  ]
+
+  const editMenuActions: MenuAction[] = [
+    {
+      label: 'Undo',
+      hint: 'Ctrl+Z',
+      onSelect: () => void performUndo(),
+      disabled: undoStackLen === 0,
+    },
+    {
+      label: 'Redo',
+      hint: 'Ctrl+Shift+Z',
+      onSelect: () => void performRedo(),
+      disabled: redoStackLen === 0,
+    },
+    {
+      label: 'Detect Rooms',
+      onSelect: () => void handleDetectRooms(),
+      title: canDetectRooms
+        ? 'Auto-detect rooms from walls on active level'
+        : 'Detect Rooms needs at least 3 walls on the active level',
+      disabled: !canDetectRooms,
+    },
+  ]
+
+  const drawMenuActions: MenuAction[] = TOOL_OPTIONS.map((option) => {
+    const tool = option.tool as ToolName
+    const rule = toolRulesByTool.get(tool)
+    const blockedReason = rule?.disabled ? rule.reason : null
+    const title = blockedReason ? `${option.title} • ${blockedReason}` : option.title
+
+    return {
+      label: option.label,
+      hint: option.shortcut,
+      title,
+      active: activeTool === option.tool,
+      disabled: Boolean(rule?.disabled),
+      onSelect: () => handleToolChange(tool),
+    }
+  })
+
+  const settingsMenuActions: MenuAction[] = [
+    {
+      label: 'Display Mode: 3D',
+      active: viewMode === '3d',
+      onSelect: () => setViewMode('3d'),
+    },
+    {
+      label: 'Display Mode: 2D',
+      active: viewMode === '2d',
+      onSelect: () => setViewMode('2d'),
+    },
+    {
+      label: 'Display Mode: Split',
+      active: viewMode === 'split',
+      onSelect: () => setViewMode('split'),
+    },
+    {
+      label: showGrid ? 'Grid: On' : 'Grid: Off',
+      hint: 'G',
+      active: showGrid,
+      onSelect: toggleGrid,
+    },
+    {
+      label: wallsVisible ? 'Hide Walls (Interior View)' : 'Show Walls',
+      active: !wallsVisible,
+      onSelect: toggleWallsVisible,
+      title: wallsVisible ? 'Hide structural walls in 3D to inspect interiors' : 'Show structural walls in 3D',
+    },
+    {
+      label: snapEnabled ? 'Snap: On' : 'Snap: Off',
+      active: snapEnabled,
+      onSelect: toggleSnap,
+    },
+    {
+      label: showSchedules ? 'Schedules: On' : 'Schedules: Off',
+      active: showSchedules,
+      onSelect: toggleSchedules,
+    },
+    ...(activeViewId
+      ? [{
+        label: 'Return to 3D from Active View',
+        onSelect: clearActiveView,
+        title: 'Exit active section/elevation view',
+      }]
+      : []),
+    {
+      label: theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme',
+      onSelect: toggleTheme,
+    },
+    ...LIGHTING_OPTIONS.map((preset) => ({
+      label: `Lighting: ${LIGHTING_LABELS[preset]}`,
+      active: lightingPreset === preset,
+      onSelect: () => setLightingPreset(preset),
+    })),
+  ]
 
   return (
     <div className={`app-layout${theme === 'light' ? ' theme-light' : ''}`}>
@@ -531,67 +1059,29 @@ export default function App() {
         </div>
       )}
 
+      {saveFeedback && (
+        <div className={`file-save-feedback ${saveFeedback.tone}`} role="status" aria-live="polite">
+          {saveFeedback.message}
+        </div>
+      )}
+
       <div className="toolbar">
-        <span className="toolbar-title">BetterCAD Prototype</span>
+        <div className="toolbar-top-row">
+          <div className="toolbar-brand-row">
+            <span className="toolbar-title">BetterCAD Prototype</span>
+            <span className="toolbar-meta-chip">Project: {projectName}</span>
+            <span className="toolbar-meta-chip">Level: {activeLevel?.name ?? 'Ground'}</span>
+          </div>
+        </div>
 
-        <div className="toolbar-separator" />
-
-        <button className="toolbar-btn" onClick={() => void handleSaveProject()} title="Save project (Ctrl+S)">Save</button>
-        <button className="toolbar-btn" onClick={() => loadInputRef.current?.click()} title="Open project (Ctrl+O)">Open</button>
-        <button className="toolbar-btn" onClick={() => setImportDialogOpen(true)} title="Import file (STEP, DXF)">Import</button>
-        <button className="toolbar-btn" onClick={() => setExportDialogOpen(true)} title="Export file (STEP, IFC, glTF, DXF)">Export</button>
-
-        <div className="toolbar-separator" />
-
-        <button className="toolbar-btn" onClick={() => void performUndo()} disabled={undoStackLen === 0} title="Undo (Ctrl+Z)">Undo</button>
-        <button className="toolbar-btn" onClick={() => void performRedo()} disabled={redoStackLen === 0} title="Redo (Ctrl+Shift+Z)">Redo</button>
-
-        <div className="toolbar-separator" />
-
-        <button className={`toolbar-btn ${activeTool === 'select' ? 'active' : ''}`} onClick={() => handleToolChange('select')} title="Select (Escape)">Select</button>
-        <button className={`toolbar-btn ${activeTool === 'wall' ? 'active' : ''}`} onClick={() => handleToolChange('wall')} title="Wall tool (W)">Wall</button>
-        <button className={`toolbar-btn ${activeTool === 'door' ? 'active' : ''}`} onClick={() => handleToolChange('door')} title="Door tool (D)">Door</button>
-        <button className={`toolbar-btn ${activeTool === 'window' ? 'active' : ''}`} onClick={() => handleToolChange('window')} title="Window (N)">Window</button>
-        <button className={`toolbar-btn ${activeTool === 'floor' ? 'active' : ''}`} onClick={() => handleToolChange('floor')} title="Floor tool (F)">Floor</button>
-        <button className={`toolbar-btn ${activeTool === 'stair' ? 'active' : ''}`} onClick={() => handleToolChange('stair')} title="Stair tool (S)">Stair</button>
-        <button className={`toolbar-btn ${activeTool === 'column' ? 'active' : ''}`} onClick={() => handleToolChange('column')} title="Column tool (C)">Column</button>
-        <button className={`toolbar-btn ${activeTool === 'beam' ? 'active' : ''}`} onClick={() => handleToolChange('beam')} title="Beam tool (B)">Beam</button>
-        <button className={`toolbar-btn ${activeTool === 'roof' ? 'active' : ''}`} onClick={() => handleToolChange('roof')} title="Roof tool (O)">Roof</button>
-        <button className={`toolbar-btn ${activeTool === 'dimension' ? 'active' : ''}`} onClick={() => handleToolChange('dimension')} title="Dimension tool (A)">Dimension</button>
-        <button className={`toolbar-btn ${activeTool === 'text' ? 'active' : ''}`} onClick={() => handleToolChange('text')} title="Text annotation (T)">Text</button>
-        <button className={`toolbar-btn ${activeTool === 'sketch' ? 'active' : ''}`} onClick={() => handleToolChange('sketch')} title="Sketch tool (K)">Sketch</button>
-        <button className={`toolbar-btn ${activeTool === 'measure' ? 'active' : ''}`} onClick={() => handleToolChange('measure')} title="Measure tool (M)">Measure</button>
-        <button className={`toolbar-btn ${activeTool === 'section' ? 'active' : ''}`} onClick={() => handleToolChange('section')} title="Section cut tool">Section</button>
-        <button className="toolbar-btn" onClick={() => void handleDetectRooms()} title="Auto-detect rooms from walls on active level">Rooms</button>
-        {activeViewId && (
-          <button className="toolbar-btn active" onClick={clearActiveView} title="Return to normal 3D view" style={{ background: '#f59e0b', borderColor: '#f59e0b' }}>Back to 3D</button>
-        )}
-        <button className={`toolbar-btn ${showGrid ? 'active' : ''}`} onClick={toggleGrid} title="Toggle grid (G)">Grid</button>
-        <button className={`toolbar-btn ${snapEnabled ? 'active' : ''}`} onClick={toggleSnap}>Snap</button>
-        <button className={`toolbar-btn ${showSchedules ? 'active' : ''}`} onClick={toggleSchedules} title="Schedules & Quantities">Schedules</button>
-
-        <div className="toolbar-separator" />
-
-        <button className={`toolbar-btn ${viewMode === '3d' ? 'active' : ''}`} onClick={() => setViewMode('3d')}>3D</button>
-        <button className={`toolbar-btn ${viewMode === '2d' ? 'active' : ''}`} onClick={() => setViewMode('2d')}>2D</button>
-        <button className={`toolbar-btn ${viewMode === 'split' ? 'active' : ''}`} onClick={() => setViewMode('split')}>Split</button>
-
-        <div className="toolbar-separator" />
-
-        <button className="toolbar-btn" onClick={toggleTheme} title="Toggle dark/light theme">{theme === 'dark' ? 'Light' : 'Dark'}</button>
-
-        <div className="toolbar-separator" />
-
-        <select
-          className="toolbar-select"
-          value={lightingPreset}
-          onChange={(e) => setLightingPreset(e.target.value as LightingPreset)}
-          title="Lighting preset"
-        >
-          <option value="daylight">Daylight</option>
-          <option value="evening">Evening</option>
-          <option value="studio">Studio</option>
-        </select>
+        <div className="toolbar-nav-row">
+          <div className="toolbar-menu-bar">
+            <HeaderMenu label="File" actions={fileMenuActions} />
+            <HeaderMenu label="Edit" actions={editMenuActions} />
+            <HeaderMenu label="Draw" actions={drawMenuActions} />
+            <HeaderMenu label="Settings" actions={settingsMenuActions} />
+          </div>
+        </div>
       </div>
 
       {/* Sketch sub-toolbar */}
@@ -599,15 +1089,19 @@ export default function App() {
 
       <div className="viewport-area">
         {viewMode === '2d' ? (
-          <div className="viewport">
+          <div className="viewport" onContextMenu={suppressViewportContextMenu}>
             <Viewport2D background={viewportBackground} />
           </div>
         ) : viewMode === 'split' ? (
           <>
-            <div className="viewport" style={{ flex: 1 }}>
+            <div className="viewport" style={{ flex: 1 }} onContextMenu={suppressViewportContextMenu}>
               <Viewport2D background={viewportBackground} />
             </div>
-            <div className="viewport" style={{ flex: 1, borderLeft: `1px solid ${splitDividerColor}` }}>
+            <div
+              className="viewport"
+              style={{ flex: 1, borderLeft: `1px solid ${splitDividerColor}` }}
+              onContextMenu={suppressViewportContextMenu}
+            >
               <Canvas
                 shadows
                 camera={{ position: [5, 5, 5], fov: 50 }}
@@ -627,7 +1121,10 @@ export default function App() {
               </Canvas>
               {drawingPlaneHint && (
                 <div className="viewport-hint">
-                  <strong>Drawing Plane: {activeLevel?.name ?? 'Ground'} (XZ), Y={formatLength(activeLevel?.elevation ?? 0, lengthUnit)}</strong>
+                  <strong>
+                    Drawing Plane: {activeLevel?.name ?? 'Ground'} (XZ), Y={formatLength(activeSurfaceElevation, lengthUnit)}
+                    {slabOffset > 0 ? ' (on slab)' : ''}
+                  </strong>
                   <span>{drawingPlaneHint}</span>
                   {measurementReadout && <span className="viewport-hint-metrics">{measurementReadout}</span>}
                 </div>
@@ -635,7 +1132,7 @@ export default function App() {
             </div>
           </>
         ) : (
-          <div className="viewport">
+          <div className="viewport" onContextMenu={suppressViewportContextMenu}>
             <Canvas
               shadows
               camera={{ position: [5, 5, 5], fov: 50 }}
@@ -655,17 +1152,61 @@ export default function App() {
             </Canvas>
             {drawingPlaneHint && (
               <div className="viewport-hint">
-                <strong>Drawing Plane: {activeLevel?.name ?? 'Ground'} (XZ), Y={formatLength(activeLevel?.elevation ?? 0, lengthUnit)}</strong>
+                <strong>
+                  Drawing Plane: {activeLevel?.name ?? 'Ground'} (XZ), Y={formatLength(activeSurfaceElevation, lengthUnit)}
+                  {slabOffset > 0 ? ' (on slab)' : ''}
+                </strong>
                 <span>{drawingPlaneHint}</span>
                 {measurementReadout && <span className="viewport-hint-metrics">{measurementReadout}</span>}
               </div>
             )}
           </div>
         )}
-        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {isSketchMode ? <ConstraintPanel /> : <PropertyPanel />}
-          <ViewPanel />
-        </div>
+        <div
+          className={`side-panel-resize-handle${sidePanelResizing ? ' dragging' : ''}`}
+          onPointerDown={startSidePanelResize}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize side panel"
+          title="Drag to resize side panel"
+        />
+        <aside className="side-panel-shell" style={{ width: sidePanelWidth }}>
+          {!isSketchMode && (
+            <div className="side-panel-tabs">
+              <button
+                className={`side-panel-tab${activeRightTab === 'properties' ? ' active' : ''}`}
+                onClick={() => setActiveRightTab('properties')}
+              >
+                Properties
+              </button>
+              <button
+                className={`side-panel-tab${activeRightTab === 'view' ? ' active' : ''}`}
+                onClick={() => setActiveRightTab('view')}
+              >
+                View
+              </button>
+              <button
+                className={`side-panel-tab${activeRightTab === 'chat' ? ' active' : ''}`}
+                onClick={() => setActiveRightTab('chat')}
+              >
+                ✨ AI Chat
+              </button>
+            </div>
+          )}
+          <div className="side-panel-content">
+            {isSketchMode ? (
+              <ConstraintPanel />
+            ) : activeRightTab === 'properties' ? (
+              <PropertyPanel />
+            ) : activeRightTab === 'view' ? (
+              <ViewPanel />
+            ) : null}
+            {/* ChatPanel always mounted — hidden via CSS to preserve state */}
+            <Suspense fallback={<div className="chat-loading">Loading AI Chat...</div>}>
+              {kernel && <ChatPanel kernel={kernel} visible={!isSketchMode && activeRightTab === 'chat'} />}
+            </Suspense>
+          </div>
+        </aside>
       </div>
 
       <input
@@ -689,6 +1230,29 @@ export default function App() {
         kernel={kernel}
       />
 
+      {clearProjectConfirmOpen && (
+        <div
+          className="dialog-overlay"
+          onClick={() => {
+            if (!clearProjectPending) setClearProjectConfirmOpen(false)
+          }}
+        >
+          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Clear Project?</h3>
+            <p>This removes all model elements and imported geometry from the current project.</p>
+            <p>This action cannot be undone.</p>
+            <div className="dialog-actions">
+              <button onClick={() => setClearProjectConfirmOpen(false)} disabled={clearProjectPending}>
+                Cancel
+              </button>
+              <button className="dialog-btn-danger" onClick={() => void handleClearProject()} disabled={clearProjectPending}>
+                {clearProjectPending ? 'Clearing...' : 'Clear Project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSchedules && <SchedulePanel onClose={toggleSchedules} />}
 
       <div className="status-bar">
@@ -699,6 +1263,8 @@ export default function App() {
           {measurementReadout && <span>{measurementReadout}</span>}
           {walls.length > 0 && <span>Walls: {walls.length}</span>}
           {doors.length > 0 && <span>Doors: {doors.length}</span>}
+          {foundations.length > 0 && <span>Foundations: {foundations.length}</span>}
+          {parkingLots.length > 0 && <span>Parking Lots: {parkingLots.length}</span>}
           {floors.length > 0 && <span>Floors: {floors.length}</span>}
           {stairs.length > 0 && <span>Stairs: {stairs.length}</span>}
           {windowElements.length > 0 && <span>Windows: {windowElements.length}</span>}
@@ -708,13 +1274,19 @@ export default function App() {
           {roomElements.length > 0 && <span>Rooms: {roomElements.length}</span>}
           {selectedBodyId && <span>Selected: {selectedBodyId} (Del remove | Ctrl+D copy | R rotate | drag gizmo to move)</span>}
           {activeTool === 'measure' && <span>Click two points to measure</span>}
+          {activeTool === 'foundation' && <span>Place a foundation slab first; other structural tools require support.</span>}
           {activeTool === 'door' && <span>Hover a wall, preview snap, then click to place door - swing:{defaultDoorSwing}</span>}
           {activeTool === 'window' && <span>Hover a wall, then click to place a window</span>}
           {activeTool === 'floor' && <span>Click two opposite corners to place a rectangular slab - T:{formatLength(defaultFloorThickness, lengthUnit)}</span>}
+          {activeTool === 'parking' && <span>Click two opposite corners to place a rectangular parking lot slab - T:{formatLength(defaultFloorThickness, lengthUnit)}</span>}
           {activeTool === 'stair' && <span>Click start then end of stair run - W:{formatLength(defaultStairWidth, lengthUnit)} R:{defaultStairRisers} H:{formatLength(defaultStairHeight, lengthUnit)}</span>}
           {activeTool === 'column' && <span>Click to place column - W:{formatLength(defaultColumnWidth, lengthUnit)} D:{formatLength(defaultColumnDepth, lengthUnit)} H:{formatLength(defaultColumnHeight, lengthUnit)}</span>}
           {activeTool === 'beam' && <span>Click start then end - W:{formatLength(defaultBeamWidth, lengthUnit)} D:{formatLength(defaultBeamDepth, lengthUnit)} Elev:{formatLength(defaultBeamElevation, lengthUnit)}</span>}
-          {activeTool === 'roof' && <span>Click polygon vertices, dbl-click/right-click to close - T:{formatLength(defaultRoofThickness, lengthUnit)} Elev:{formatLength(defaultRoofElevation, lengthUnit)}</span>}
+          {activeTool === 'roof' && (
+            <span>
+              Click two opposite corners - {defaultRoofType} Pitch:{defaultRoofPitchDegrees.toFixed(0)}° T:{formatLength(defaultRoofThickness, lengthUnit)} Elev:{formatLength(defaultRoofElevation, lengthUnit)}{defaultRoofAutoElevation ? ' (auto)' : ''}
+            </span>
+          )}
           {activeTool === 'wall' && <span>Shift: orthogonal lock - Right-click: finish wall chain - H:{formatLength(defaultWallHeight, lengthUnit)} T:{formatLength(defaultWallThickness, lengthUnit)}</span>}
           {activeTool === 'sketch' && <span>Sketch: Pts:{sketchPoints.size} Ln:{sketchLines.size} Cstr:{sketchConstraints.size} [{sketchSolverStatus}]</span>}
           {activeTool === 'section' && <span>Click two points to define section cut line</span>}
@@ -725,6 +1297,7 @@ export default function App() {
           <span>View: {viewMode.toUpperCase()}</span>
           <span>Units: {lengthUnit.toUpperCase()}</span>
           <span>{showGrid ? 'Grid ON' : 'Grid OFF'}</span>
+          <span>{wallsVisible ? 'Walls ON' : 'Walls OFF'}</span>
           <span>{snapEnabled ? 'Snap ON' : 'Snap OFF'}</span>
           <span>{kernelStatus}</span>
         </div>

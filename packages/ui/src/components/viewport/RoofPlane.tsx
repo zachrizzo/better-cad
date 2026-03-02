@@ -6,45 +6,138 @@ import { useUIStore } from '../../stores/ui-store'
 import { useBimStore } from '../../stores/bim-store'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { useLevelStore } from '../../stores/level-store'
+import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
 import { formatLength } from '../../utils/units'
 import type { RoofElement } from '../../services/kernel-bridge'
-import { isRoofElement, useEntityStore } from '../../stores/entity-store'
+import { isBeamElement, isColumnElement, isFloorElement, isRoofElement, isStairElement, isWallElement, useEntityStore } from '../../stores/entity-store'
 import { useKernel } from '../../hooks/useKernel'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
+import { polygonsOverlapArea, type Point2 as CollisionPoint2 } from '../../utils/plan-collision'
+import { rectFromCorners, rectLoop3D } from '../../utils/rect-from-corners'
 
-const MIN_POLYGON_VERTICES = 3
-const CLOSE_DISTANCE = 0.3
+const MIN_ROOF_DIMENSION = 0.2
+const MAX_ROOF_PITCH_DEGREES = 75
+const AUTO_ROOF_CLEARANCE = 0.01
 
 type Point2 = [number, number]
 type PlanePointerEvent = ThreeEvent<PointerEvent>
+type RoofType = RoofElement['roof_type']
 
-function polygonArea(pts: Point2[]): number {
-  let area = 0
-  for (let i = 0; i < pts.length; i++) {
-    const j = (i + 1) % pts.length
-    area += pts[i][0] * pts[j][1]
-    area -= pts[j][0] * pts[i][1]
-  }
-  return Math.abs(area) / 2
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
 }
 
-function RoofMesh({ boundary, thickness, elevation, color }: {
+function normalizeRoofType(type: RoofElement['roof_type'] | undefined): RoofType {
+  if (type === 'shed' || type === 'gable' || type === 'hip') return type
+  return 'flat'
+}
+
+function normalizeAngleDegrees(angle: number): number {
+  let normalized = angle % 360
+  if (normalized < 0) normalized += 360
+  return normalized
+}
+
+function RoofMesh({ boundary, thickness, elevation, roofType, pitchDegrees, ridgeAngleDegrees, color, opacity = 0.85 }: {
   boundary: Point2[]
   thickness: number
   elevation: number
+  roofType: RoofType
+  pitchDegrees: number
+  ridgeAngleDegrees: number
   color: string
+  opacity?: number
 }) {
   const geometry = useMemo(() => {
     if (boundary.length < 3) return null
+
+    // RoofElement boundary is stored in world plan coords (X,Z).
+    // ExtrudeGeometry works in XY, and we rotate geometry into scene later.
+    // Local y is negated so world z stays aligned after rotation.
+    const localBoundary: Point2[] = boundary.map(([x, z]) => [x, -z])
+
     const shape = new THREE.Shape()
-    shape.moveTo(boundary[0][0], boundary[0][1])
-    for (let i = 1; i < boundary.length; i++) {
-      shape.lineTo(boundary[i][0], boundary[i][1])
+    shape.moveTo(localBoundary[0][0], localBoundary[0][1])
+    for (let i = 1; i < localBoundary.length; i++) {
+      shape.lineTo(localBoundary[i][0], localBoundary[i][1])
     }
     shape.closePath()
-    const extrudeSettings = { depth: thickness, bevelEnabled: false }
-    return new THREE.ExtrudeGeometry(shape, extrudeSettings)
-  }, [boundary, thickness])
+
+    const extrudeSettings = { depth: thickness, bevelEnabled: false, steps: 1 }
+    const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings)
+
+    const normalizedRoofType = normalizeRoofType(roofType)
+    const normalizedPitch = clamp(pitchDegrees, 0, MAX_ROOF_PITCH_DEGREES)
+    if (normalizedRoofType === 'flat' || normalizedPitch <= 0.001) {
+      geom.computeVertexNormals()
+      return geom
+    }
+
+    const ridgeWorldAngle = THREE.MathUtils.degToRad(normalizeAngleDegrees(ridgeAngleDegrees))
+    const ridgeWorldX = Math.cos(ridgeWorldAngle)
+    const ridgeWorldZ = Math.sin(ridgeWorldAngle)
+    // Transform world ridge direction (x,z) -> local (x,y) using yLocal = -zWorld.
+    const ridgeDirX = ridgeWorldX
+    const ridgeDirY = -ridgeWorldZ
+    const slopeDirX = -ridgeDirY
+    const slopeDirY = ridgeDirX
+
+    let minAlong = Number.POSITIVE_INFINITY
+    let maxAlong = Number.NEGATIVE_INFINITY
+    let minPerp = Number.POSITIVE_INFINITY
+    let maxPerp = Number.NEGATIVE_INFINITY
+
+    for (const [x, y] of localBoundary) {
+      const along = x * slopeDirX + y * slopeDirY
+      const perp = x * ridgeDirX + y * ridgeDirY
+      minAlong = Math.min(minAlong, along)
+      maxAlong = Math.max(maxAlong, along)
+      minPerp = Math.min(minPerp, perp)
+      maxPerp = Math.max(maxPerp, perp)
+    }
+
+    const alongSpan = Math.max(0, maxAlong - minAlong)
+    const perpSpan = Math.max(0, maxPerp - minPerp)
+    if (alongSpan < 1e-6) {
+      geom.computeVertexNormals()
+      return geom
+    }
+
+    const tanPitch = Math.tan(THREE.MathUtils.degToRad(normalizedPitch))
+    const linearRise = tanPitch * alongSpan
+    const hipRise = tanPitch * Math.max(1e-6, Math.min(alongSpan, perpSpan))
+    const thicknessSafe = Math.max(1e-6, thickness)
+
+    const pos = geom.getAttribute('position') as THREE.BufferAttribute
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const z = pos.getZ(i)
+      const along = x * slopeDirX + y * slopeDirY
+      const t = alongSpan > 1e-6 ? clamp((along - minAlong) / alongSpan, 0, 1) : 0.5
+
+      let displacement = 0
+      if (normalizedRoofType === 'shed') {
+        displacement = t * linearRise
+      } else if (normalizedRoofType === 'gable') {
+        displacement = (1 - Math.abs(2 * t - 1)) * linearRise
+      } else if (normalizedRoofType === 'hip') {
+        const perp = x * ridgeDirX + y * ridgeDirY
+        const u = perpSpan > 1e-6 ? clamp((perp - minPerp) / perpSpan, 0, 1) : 0.5
+        const edgeFactor = clamp(Math.min(t, 1 - t, u, 1 - u) / 0.5, 0, 1)
+        displacement = edgeFactor * hipRise
+      }
+
+      // Keep roof underside level: apply slope only toward the top surface.
+      const topFactor = clamp(z / thicknessSafe, 0, 1)
+      pos.setZ(i, z + displacement * topFactor)
+    }
+
+    pos.needsUpdate = true
+    geom.computeVertexNormals()
+    return geom
+  }, [boundary, thickness, roofType, pitchDegrees, ridgeAngleDegrees])
 
   if (!geometry) return null
 
@@ -54,24 +147,42 @@ function RoofMesh({ boundary, thickness, elevation, color }: {
       position={[0, elevation, 0]}
       rotation={[-Math.PI / 2, 0, 0]}
     >
-      <meshStandardMaterial color={color} transparent opacity={0.85} />
+      <meshStandardMaterial color={color} transparent opacity={opacity} depthWrite={opacity >= 0.99} side={THREE.DoubleSide} />
     </mesh>
   )
 }
 
 export function RoofPlane() {
   const activeTool = useUIStore((s) => s.activeTool)
+  const snapEnabled = useUIStore((s) => s.snapEnabled)
   const defaultRoofThickness = useBimStore((s) => s.defaultRoofThickness)
   const defaultRoofElevation = useBimStore((s) => s.defaultRoofElevation)
+  const defaultRoofAutoElevation = useBimStore((s) => s.defaultRoofAutoElevation)
+  const defaultRoofType = useBimStore((s) => s.defaultRoofType)
+  const defaultRoofPitchDegrees = useBimStore((s) => s.defaultRoofPitchDegrees)
+  const defaultRoofRidgeAngleDegrees = useBimStore((s) => s.defaultRoofRidgeAngleDegrees)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const elements = useEntityStore((s) => s.elements)
+  const activeLevelId = useLevelStore((s) => s.activeLevelId)
+  const levels = useLevelStore((s) => s.levels)
+  const activeLevelElevation = useMemo(() => {
+    const level = levels.find((l) => l.id === activeLevelId)
+    return level?.elevation ?? 0
+  }, [levels, activeLevelId])
+  const levelDataById = useMemo(
+    () => new Map(levels.map((level) => [level.id, { elevation: level.elevation, visibility: level.visibility }])),
+    [levels],
+  )
   const { kernel, ready } = useKernel()
 
   const planeRef = useRef<THREE.Mesh>(null)
-  const [vertices, setVertices] = useState<Point2[]>([])
+  const [startCorner, setStartCorner] = useState<Point2 | null>(null)
+  const [previewCorner, setPreviewCorner] = useState<Point2 | null>(null)
   const [cursorPoint, setCursorPoint] = useState<Point2 | null>(null)
+  const [snapMarker, setSnapMarker] = useState<Point2 | null>(null)
+  const snapPoints = usePlanSnapPoints()
 
   const roofCount = useMemo(
     () => Array.from(elements.values()).filter(isRoofElement).length,
@@ -82,62 +193,190 @@ export function RoofPlane() {
     () => Array.from(elements.values()).filter(isRoofElement),
     [elements],
   )
+  const roofsOnActiveLevel = useMemo(
+    () => placedRoofs.filter((roof) => !roof.meta.level_id || roof.meta.level_id === activeLevelId),
+    [activeLevelId, placedRoofs],
+  )
+
+  const supportTopByLevel = useMemo(() => {
+    const levelMaxSlabOffset = new Map<string, number>()
+    for (const element of elements.values()) {
+      if (!isFloorElement(element)) continue
+      const levelId = element.meta.level_id
+      if (!levelId) continue
+      levelMaxSlabOffset.set(levelId, Math.max(levelMaxSlabOffset.get(levelId) ?? 0, element.thickness))
+    }
+
+    const supportTop = new Map<string, number>()
+    for (const level of levels) {
+      supportTop.set(level.id, levelMaxSlabOffset.get(level.id) ?? 0)
+    }
+
+    for (const element of elements.values()) {
+      const levelId = element.meta.level_id
+      if (!levelId) continue
+
+      const slabOffset = levelMaxSlabOffset.get(levelId) ?? 0
+      const current = supportTop.get(levelId) ?? slabOffset
+      let candidate = current
+
+      if (isWallElement(element)) {
+        candidate = slabOffset + element.height
+      } else if (isColumnElement(element)) {
+        candidate = slabOffset + element.height
+      } else if (isStairElement(element)) {
+        candidate = slabOffset + element.total_height
+      } else if (isBeamElement(element)) {
+        candidate = Math.max(element.start[2], element.end[2]) + element.depth / 2
+      } else {
+        continue
+      }
+
+      supportTop.set(levelId, Math.max(current, candidate))
+    }
+
+    return supportTop
+  }, [elements, levels])
+
+  const activeSupportTop = supportTopByLevel.get(activeLevelId) ?? 0
+  const effectiveDefaultRoofOffset = defaultRoofAutoElevation
+    ? Math.max(defaultRoofElevation, activeSupportTop + AUTO_ROOF_CLEARANCE)
+    : defaultRoofElevation
+
+  const placedRoofVisuals = useMemo(
+    () => placedRoofs.flatMap((roof) => {
+      const levelData = roof.meta.level_id ? levelDataById.get(roof.meta.level_id) : undefined
+      const visibility = levelData?.visibility ?? 'visible'
+      if (visibility === 'hidden') return []
+
+      const levelSupportTop = roof.meta.level_id ? (supportTopByLevel.get(roof.meta.level_id) ?? 0) : 0
+      const autoElevation = roof.auto_elevation !== false
+      const roofOffsetRaw = Number.isFinite(roof.elevation) ? roof.elevation : 0
+      const roofOffset = autoElevation ? Math.max(roofOffsetRaw, levelSupportTop + AUTO_ROOF_CLEARANCE) : roofOffsetRaw
+
+      return [{
+        roof,
+        elevation: (levelData?.elevation ?? 0) + roofOffset,
+        roofType: normalizeRoofType(roof.roof_type),
+        pitchDegrees: Number.isFinite(roof.pitch_degrees) ? roof.pitch_degrees : defaultRoofPitchDegrees,
+        ridgeAngleDegrees: Number.isFinite(roof.ridge_angle_degrees) ? roof.ridge_angle_degrees : 0,
+        opacity: visibility === 'ghosted' ? 0.28 : 0.85,
+      }]
+    }),
+    [defaultRoofPitchDegrees, levelDataById, placedRoofs, supportTopByLevel],
+  )
+
+  const roofDrawElevation = activeLevelElevation + effectiveDefaultRoofOffset
 
   useEffect(() => {
     if (activeTool !== 'roof') {
-      setVertices([])
+      setStartCorner(null)
+      setPreviewCorner(null)
       setCursorPoint(null)
+      setSnapMarker(null)
       setMeasurementCursor(null)
       setToolReadout(null)
     }
   }, [activeTool, setMeasurementCursor, setToolReadout])
 
-  const isNearFirstVertex = useCallback((point: Point2): boolean => {
-    if (vertices.length < MIN_POLYGON_VERTICES) return false
-    const dx = point[0] - vertices[0][0]
-    const dy = point[1] - vertices[0][1]
-    return Math.sqrt(dx * dx + dy * dy) < CLOSE_DISTANCE
-  }, [vertices])
+  const applySnap = useCallback((rawPoint: Point2): { point: Point2; snapped: Point2 | null } => {
+    return snapPlanPoint(rawPoint, snapPoints, snapEnabled, 0.3)
+  }, [snapEnabled, snapPoints])
 
   const updateReadout = useCallback((point: Point2) => {
-    if (vertices.length === 0) {
+    const roofType = normalizeRoofType(defaultRoofType)
+    const roofPitch = clamp(defaultRoofPitchDegrees, 0, MAX_ROOF_PITCH_DEGREES).toFixed(1)
+    const roofElevationLabel = defaultRoofAutoElevation
+      ? `${formatLength(effectiveDefaultRoofOffset, lengthUnit)} (auto)`
+      : formatLength(defaultRoofElevation, lengthUnit)
+
+    if (!startCorner) {
       setToolReadout(
-        `Roof T:${formatLength(defaultRoofThickness, lengthUnit)} Elev:${formatLength(defaultRoofElevation, lengthUnit)} -- click to start polygon`,
+        `Roof ${roofType} T:${formatLength(defaultRoofThickness, lengthUnit)} Pitch:${roofPitch}° Elev:${roofElevationLabel} • pick first corner`,
       )
       return
     }
 
-    const previewPoly = [...vertices, point]
-    const area = polygonArea(previewPoly)
-    const nearClose = isNearFirstVertex(point)
-
+    const rect = rectFromCorners(startCorner, point)
     setToolReadout(
-      `Roof ${vertices.length} pts A:${area.toFixed(2)} m\u00B2 T:${formatLength(defaultRoofThickness, lengthUnit)}${nearClose ? ' -- click/dbl-click to close' : ' -- click to add point, right-click/dbl-click to close'}`,
+      `Roof ${roofType} W:${formatLength(rect.width, lengthUnit)} D:${formatLength(rect.depth, lengthUnit)} A:${rect.area.toFixed(2)} m² T:${formatLength(defaultRoofThickness, lengthUnit)}`,
     )
-  }, [defaultRoofThickness, defaultRoofElevation, lengthUnit, setToolReadout, vertices, isNearFirstVertex])
+  }, [
+    defaultRoofAutoElevation,
+    defaultRoofElevation,
+    defaultRoofPitchDegrees,
+    defaultRoofThickness,
+    defaultRoofType,
+    effectiveDefaultRoofOffset,
+    lengthUnit,
+    setToolReadout,
+    startCorner,
+  ])
 
-  const finishPolygon = useCallback((pts: Point2[]) => {
-    if (pts.length < MIN_POLYGON_VERTICES) {
-      setVertices([])
-      setToolReadout('Roof needs at least 3 points')
+  const handlePointerMove = useCallback((e: PlanePointerEvent) => {
+    if (activeTool !== 'roof') return
+    const rawPoint: Point2 = [e.point.x, e.point.z]
+    const { point, snapped } = applySnap(rawPoint)
+    setCursorPoint(point)
+    setSnapMarker(snapped)
+    setMeasurementCursor([point[0], roofDrawElevation, point[1]])
+    if (startCorner) {
+      setPreviewCorner(point)
+    }
+    updateReadout(point)
+  }, [activeTool, applySnap, roofDrawElevation, setMeasurementCursor, startCorner, updateReadout])
+
+  const handleClick = useCallback((e: PlanePointerEvent) => {
+    e.stopPropagation()
+    if (activeTool !== 'roof') return
+
+    const rawPoint: Point2 = [e.point.x, e.point.z]
+    const { point, snapped } = applySnap(rawPoint)
+    setCursorPoint(point)
+    setSnapMarker(snapped)
+    setMeasurementCursor([point[0], roofDrawElevation, point[1]])
+
+    if (!startCorner) {
+      setStartCorner(point)
+      setPreviewCorner(point)
+      setToolReadout(`Roof start X:${formatLength(point[0], lengthUnit)} Z:${formatLength(point[1], lengthUnit)}`)
       return
     }
 
-    const area = polygonArea(pts)
+    const rect = rectFromCorners(startCorner, point)
+    if (rect.width < MIN_ROOF_DIMENSION || rect.depth < MIN_ROOF_DIMENSION) {
+      setToolReadout(`Roof too small • minimum side is ${formatLength(MIN_ROOF_DIMENSION, lengthUnit)}`)
+      return
+    }
+
+    const intersectsExistingRoof = roofsOnActiveLevel.some((roof) => (
+      polygonsOverlapArea(rect.boundary as CollisionPoint2[], roof.boundary as CollisionPoint2[])
+    ))
+    if (intersectsExistingRoof) {
+      setToolReadout('Roof blocked: footprint intersects an existing roof on this level')
+      return
+    }
+
     const roofElement: RoofElement = {
       kind: 'roof',
       meta: {
         id: `roof-${crypto.randomUUID()}`,
         name: `Roof ${roofCount + 1}`,
+        level_id: activeLevelId,
       },
-      boundary: pts,
+      boundary: rect.boundary,
       thickness: defaultRoofThickness,
-      elevation: defaultRoofElevation,
+      elevation: effectiveDefaultRoofOffset,
+      auto_elevation: defaultRoofAutoElevation,
+      roof_type: normalizeRoofType(defaultRoofType),
+      pitch_degrees: clamp(defaultRoofPitchDegrees, 0, MAX_ROOF_PITCH_DEGREES),
+      ridge_angle_degrees: normalizeAngleDegrees(defaultRoofRidgeAngleDegrees),
     }
 
-    setVertices([])
+    setStartCorner(null)
+    setPreviewCorner(null)
     setToolReadout(
-      `Roof placed ${pts.length} pts A:${area.toFixed(2)} m\u00B2 T:${formatLength(defaultRoofThickness, lengthUnit)}`,
+      `Roof placed W:${formatLength(rect.width, lengthUnit)} D:${formatLength(rect.depth, lengthUnit)} A:${rect.area.toFixed(2)} m² ${roofElement.roof_type} Pitch:${roofElement.pitch_degrees.toFixed(1)}°`,
     )
 
     if (!ready || !kernel) {
@@ -153,100 +392,64 @@ export function RoofPlane() {
         console.error('[BetterCAD] Failed to create roof entity:', err)
       }
     })()
-  }, [defaultRoofThickness, defaultRoofElevation, roofCount, kernel, ready, lengthUnit, setToolReadout])
-
-  const handlePointerMove = useCallback((e: PlanePointerEvent) => {
-    if (activeTool !== 'roof') return
-    const point: Point2 = [e.point.x, e.point.z]
-    setCursorPoint(point)
-    setMeasurementCursor([point[0], 0, point[1]])
-    updateReadout(point)
-  }, [activeTool, setMeasurementCursor, updateReadout])
-
-  const handleClick = useCallback((e: PlanePointerEvent) => {
-    e.stopPropagation()
-    if (activeTool !== 'roof') return
-
-    const point: Point2 = [e.point.x, e.point.z]
-    setCursorPoint(point)
-    setMeasurementCursor([point[0], 0, point[1]])
-
-    if (vertices.length >= MIN_POLYGON_VERTICES && isNearFirstVertex(point)) {
-      finishPolygon(vertices)
-      return
-    }
-
-    setVertices((prev) => [...prev, point])
-  }, [activeTool, vertices, isNearFirstVertex, finishPolygon, setMeasurementCursor])
-
-  const handleDoubleClick = useCallback((e: PlanePointerEvent) => {
-    e.stopPropagation()
-    if (activeTool !== 'roof') return
-    if (vertices.length >= MIN_POLYGON_VERTICES) {
-      finishPolygon(vertices)
-    }
-  }, [activeTool, vertices, finishPolygon])
+  }, [
+    activeLevelId,
+    activeTool,
+    applySnap,
+    defaultRoofAutoElevation,
+    defaultRoofPitchDegrees,
+    defaultRoofRidgeAngleDegrees,
+    defaultRoofThickness,
+    defaultRoofType,
+    effectiveDefaultRoofOffset,
+    kernel,
+    lengthUnit,
+    ready,
+    roofCount,
+    roofDrawElevation,
+    roofsOnActiveLevel,
+    setMeasurementCursor,
+    setToolReadout,
+    startCorner,
+  ])
 
   const handleCancel = useCallback((e: PlanePointerEvent) => {
     e.stopPropagation()
     e.nativeEvent.preventDefault()
-    if (vertices.length >= MIN_POLYGON_VERTICES) {
-      finishPolygon(vertices)
-    } else {
-      setVertices([])
-      setToolReadout('Roof placement canceled')
-    }
-  }, [vertices, finishPolygon, setToolReadout])
+    setStartCorner(null)
+    setPreviewCorner(null)
+    setSnapMarker(null)
+    setToolReadout('Roof placement canceled')
+  }, [setToolReadout])
 
   const handlePointerLeave = useCallback(() => {
     setCursorPoint(null)
+    setSnapMarker(null)
     setMeasurementCursor(null)
   }, [setMeasurementCursor])
 
-  const previewLoop = useMemo(() => {
-    if (vertices.length === 0) return null
-    const elevation = defaultRoofElevation
-    const pts: [number, number, number][] = vertices.map(
-      (v) => [v[0], elevation + 0.02, v[1]],
-    )
-    if (cursorPoint) {
-      pts.push([cursorPoint[0], elevation + 0.02, cursorPoint[1]])
-    }
-    // Close the loop back to start
-    pts.push([vertices[0][0], elevation + 0.02, vertices[0][1]])
-    return pts
-  }, [vertices, cursorPoint, defaultRoofElevation])
-
-  const previewArea = useMemo(() => {
-    if (vertices.length < 2 || !cursorPoint) return null
-    const pts = [...vertices, cursorPoint]
-    return polygonArea(pts)
-  }, [vertices, cursorPoint])
-
-  const previewCenter = useMemo(() => {
-    if (vertices.length === 0) return null
-    const allPts = cursorPoint ? [...vertices, cursorPoint] : vertices
-    let cx = 0
-    let cy = 0
-    for (const p of allPts) {
-      cx += p[0]
-      cy += p[1]
-    }
-    cx /= allPts.length
-    cy /= allPts.length
-    return [cx, defaultRoofElevation + 0.5, cy] as [number, number, number]
-  }, [vertices, cursorPoint, defaultRoofElevation])
+  const previewData = startCorner && previewCorner
+    ? (() => {
+      const rect = rectFromCorners(startCorner, previewCorner)
+      if (rect.width < 1e-6 || rect.depth < 1e-6) return null
+      return { ...rect, loop: rectLoop3D(rect, 0.02) }
+    })()
+    : null
 
   if (activeTool !== 'roof') {
     return (
       <>
-        {placedRoofs.map((roof) => (
+        {placedRoofVisuals.map(({ roof, elevation, roofType, pitchDegrees, ridgeAngleDegrees, opacity }) => (
           <RoofMesh
             key={roof.meta.id}
             boundary={roof.boundary}
             thickness={roof.thickness}
-            elevation={roof.elevation}
+            elevation={elevation}
+            roofType={roofType}
+            pitchDegrees={pitchDegrees}
+            ridgeAngleDegrees={ridgeAngleDegrees}
             color="#92400e"
+            opacity={opacity}
           />
         ))}
       </>
@@ -255,22 +458,25 @@ export function RoofPlane() {
 
   return (
     <>
-      {placedRoofs.map((roof) => (
+      {placedRoofVisuals.map(({ roof, elevation, roofType, pitchDegrees, ridgeAngleDegrees, opacity }) => (
         <RoofMesh
           key={roof.meta.id}
           boundary={roof.boundary}
           thickness={roof.thickness}
-          elevation={roof.elevation}
+          elevation={elevation}
+          roofType={roofType}
+          pitchDegrees={pitchDegrees}
+          ridgeAngleDegrees={ridgeAngleDegrees}
           color="#92400e"
+          opacity={opacity}
         />
       ))}
 
       <mesh
         ref={planeRef}
         rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, defaultRoofElevation, 0]}
+        position={[0, roofDrawElevation, 0]}
         onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         onContextMenu={handleCancel}
@@ -280,31 +486,29 @@ export function RoofPlane() {
       </mesh>
 
       {cursorPoint && (
-        <mesh position={[cursorPoint[0], defaultRoofElevation + 0.04, cursorPoint[1]]}>
+        <mesh position={[cursorPoint[0], roofDrawElevation + 0.04, cursorPoint[1]]}>
           <sphereGeometry args={[0.05, 12, 12]} />
-          <meshBasicMaterial
-            color={isNearFirstVertex(cursorPoint) ? '#f59e0b' : '#b45309'}
+          <meshBasicMaterial color={snapMarker ? '#00ff88' : '#b45309'} />
+        </mesh>
+      )}
+
+      {previewData && (
+        <>
+          <mesh position={[previewData.center[0], roofDrawElevation + 0.01, previewData.center[1]]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[previewData.width, previewData.depth]} />
+            <meshBasicMaterial color="#b45309" transparent opacity={0.15} side={THREE.DoubleSide} />
+          </mesh>
+          <Line
+            points={previewData.loop.map(([x, y, z]) => [x, roofDrawElevation + y, z] as [number, number, number])}
+            color="#b45309"
+            lineWidth={2}
           />
-        </mesh>
-      )}
-
-      {vertices.map((v, i) => (
-        <mesh key={i} position={[v[0], defaultRoofElevation + 0.04, v[1]]}>
-          <sphereGeometry args={[0.06, 12, 12]} />
-          <meshBasicMaterial color={i === 0 ? '#f59e0b' : '#b45309'} />
-        </mesh>
-      ))}
-
-      {previewLoop && previewLoop.length >= 2 && (
-        <Line points={previewLoop} color="#b45309" lineWidth={2} />
-      )}
-
-      {previewCenter && previewArea !== null && previewArea > 0.01 && (
-        <Html position={previewCenter} center>
-          <div className="measurement-badge">
-            {previewArea.toFixed(2)} m{'\u00B2'}
-          </div>
-        </Html>
+          <Html position={[previewData.center[0], roofDrawElevation + 0.3, previewData.center[1]]} center>
+            <div className="measurement-badge">
+              {formatLength(previewData.width, lengthUnit)} x {formatLength(previewData.depth, lengthUnit)}
+            </div>
+          </Html>
+        </>
       )}
     </>
   )

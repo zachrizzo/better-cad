@@ -1,0 +1,13 @@
+{
+  "name": "bettercad-ai-proxy",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node bettercad-ai-proxy.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest",
+    "ws": "^8.18.0",
+    "zod": "^4.0.0"
+  }
+}

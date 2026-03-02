@@ -1,16 +1,18 @@
 import * as THREE from 'three'
 import { Line } from '@react-three/drei'
 import { useUIStore } from '../../stores/ui-store'
+import { useActiveDrawingSurface } from '../../hooks/useActiveDrawingSurface'
 
 const GUIDE_HALF_SIZE = 40
 
 function isDrawingTool(tool: string): boolean {
-  return tool === 'sketch' || tool === 'wall' || tool === 'door' || tool === 'floor' || tool === 'stair' || tool === 'measure'
+  return tool === 'sketch' || tool === 'foundation' || tool === 'parking' || tool === 'wall' || tool === 'door' || tool === 'floor' || tool === 'stair' || tool === 'measure'
 }
 
 export function DrawingPlaneGuide() {
   const activeTool = useUIStore((s) => s.activeTool)
   const theme = useUIStore((s) => s.theme)
+  const { activeSurfaceElevation } = useActiveDrawingSurface()
 
   if (!isDrawingTool(activeTool)) return null
 
@@ -18,7 +20,7 @@ export function DrawingPlaneGuide() {
   const lineColor = theme === 'light' ? '#1d4ed8' : '#67e8f9'
 
   return (
-    <group position={[0, 0.001, 0]}>
+    <group position={[0, activeSurfaceElevation + 0.001, 0]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
         <planeGeometry args={[GUIDE_HALF_SIZE * 2, GUIDE_HALF_SIZE * 2]} />
         <meshBasicMaterial

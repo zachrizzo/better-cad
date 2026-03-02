@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 export type SketchExtrudeMode = 'walls' | 'solid'
+export type StairType = 'straight' | 'spiral'
+export type RoofType = 'flat' | 'shed' | 'gable' | 'hip'
 
 export interface WallData {
   id: string
@@ -38,6 +40,9 @@ interface BimState {
   defaultStairWidth: number
   defaultStairRisers: number
   defaultStairHeight: number
+  defaultStairType: StairType
+  defaultSpiralTurns: number
+  defaultStairSideWallThickness: number
   defaultWindowWidth: number
   defaultWindowHeight: number
   defaultWindowSill: number
@@ -49,6 +54,10 @@ interface BimState {
   defaultBeamElevation: number
   defaultRoofThickness: number
   defaultRoofElevation: number
+  defaultRoofAutoElevation: boolean
+  defaultRoofType: RoofType
+  defaultRoofPitchDegrees: number
+  defaultRoofRidgeAngleDegrees: number
   autoExtrudeSketch: boolean
   sketchExtrudeMode: SketchExtrudeMode
   addWall: (wall: WallData) => void
@@ -67,6 +76,9 @@ interface BimState {
   setDefaultStairWidth: (width: number) => void
   setDefaultStairRisers: (risers: number) => void
   setDefaultStairHeight: (height: number) => void
+  setDefaultStairType: (stairType: StairType) => void
+  setDefaultSpiralTurns: (turns: number) => void
+  setDefaultStairSideWallThickness: (thickness: number) => void
   setDefaultWindowWidth: (width: number) => void
   setDefaultWindowHeight: (height: number) => void
   setDefaultWindowSill: (sillHeight: number) => void
@@ -78,6 +90,10 @@ interface BimState {
   setDefaultBeamElevation: (elevation: number) => void
   setDefaultRoofThickness: (thickness: number) => void
   setDefaultRoofElevation: (elevation: number) => void
+  setDefaultRoofAutoElevation: (enabled: boolean) => void
+  setDefaultRoofType: (roofType: RoofType) => void
+  setDefaultRoofPitchDegrees: (pitchDegrees: number) => void
+  setDefaultRoofRidgeAngleDegrees: (angleDegrees: number) => void
   setAutoExtrudeSketch: (enabled: boolean) => void
   setSketchExtrudeMode: (mode: SketchExtrudeMode) => void
 }
@@ -98,6 +114,9 @@ export const useBimStore = create<BimState>()(
       defaultStairWidth: 1.1,
       defaultStairRisers: 16,
       defaultStairHeight: 3.0,
+      defaultStairType: 'straight',
+      defaultSpiralTurns: 1.0,
+      defaultStairSideWallThickness: 0.12,
       defaultWindowWidth: 1.2,
       defaultWindowHeight: 1.2,
       defaultWindowSill: 0.9,
@@ -109,6 +128,10 @@ export const useBimStore = create<BimState>()(
       defaultBeamElevation: 3.0,
       defaultRoofThickness: 0.3,
       defaultRoofElevation: 3.0,
+      defaultRoofAutoElevation: true,
+      defaultRoofType: 'gable',
+      defaultRoofPitchDegrees: 30,
+      defaultRoofRidgeAngleDegrees: 0,
       autoExtrudeSketch: false,
       sketchExtrudeMode: 'walls',
       addWall: (wall) =>
@@ -160,6 +183,17 @@ export const useBimStore = create<BimState>()(
       setDefaultStairWidth: (width) => set({ defaultStairWidth: Math.max(0.2, width) }),
       setDefaultStairRisers: (risers) => set({ defaultStairRisers: Math.max(2, Math.min(64, Math.round(risers))) }),
       setDefaultStairHeight: (height) => set({ defaultStairHeight: Math.max(0.2, height) }),
+      setDefaultStairType: (stairType) => set({ defaultStairType: stairType }),
+      setDefaultSpiralTurns: (turns) =>
+        set({
+          defaultSpiralTurns: (() => {
+            const clamped = Math.max(-5, Math.min(5, turns))
+            if (Math.abs(clamped) < 0.1) return clamped < 0 ? -0.1 : 0.1
+            return clamped
+          })(),
+        }),
+      setDefaultStairSideWallThickness: (thickness) =>
+        set({ defaultStairSideWallThickness: Math.max(0, thickness) }),
       setDefaultWindowWidth: (width) => set({ defaultWindowWidth: Math.max(0.01, width) }),
       setDefaultWindowHeight: (height) => set({ defaultWindowHeight: Math.max(0.01, height) }),
       setDefaultWindowSill: (sillHeight) => set({ defaultWindowSill: Math.max(0, sillHeight) }),
@@ -171,6 +205,15 @@ export const useBimStore = create<BimState>()(
       setDefaultBeamElevation: (elevation) => set({ defaultBeamElevation: Math.max(0, elevation) }),
       setDefaultRoofThickness: (thickness) => set({ defaultRoofThickness: Math.max(0.01, thickness) }),
       setDefaultRoofElevation: (elevation) => set({ defaultRoofElevation: Math.max(0, elevation) }),
+      setDefaultRoofAutoElevation: (enabled) => set({ defaultRoofAutoElevation: enabled }),
+      setDefaultRoofType: (roofType) => set({ defaultRoofType: roofType }),
+      setDefaultRoofPitchDegrees: (pitchDegrees) =>
+        set({ defaultRoofPitchDegrees: Math.max(0, Math.min(75, pitchDegrees)) }),
+      setDefaultRoofRidgeAngleDegrees: (angleDegrees) => {
+        let normalized = angleDegrees % 360
+        if (normalized < 0) normalized += 360
+        set({ defaultRoofRidgeAngleDegrees: normalized })
+      },
       setAutoExtrudeSketch: (enabled) => set({ autoExtrudeSketch: enabled }),
       setSketchExtrudeMode: (mode) => set({ sketchExtrudeMode: mode }),
     }),
@@ -187,6 +230,9 @@ export const useBimStore = create<BimState>()(
         defaultStairWidth: state.defaultStairWidth,
         defaultStairRisers: state.defaultStairRisers,
         defaultStairHeight: state.defaultStairHeight,
+        defaultStairType: state.defaultStairType,
+        defaultSpiralTurns: state.defaultSpiralTurns,
+        defaultStairSideWallThickness: state.defaultStairSideWallThickness,
         defaultWindowWidth: state.defaultWindowWidth,
         defaultWindowHeight: state.defaultWindowHeight,
         defaultWindowSill: state.defaultWindowSill,
@@ -198,6 +244,10 @@ export const useBimStore = create<BimState>()(
         defaultBeamElevation: state.defaultBeamElevation,
         defaultRoofThickness: state.defaultRoofThickness,
         defaultRoofElevation: state.defaultRoofElevation,
+        defaultRoofAutoElevation: state.defaultRoofAutoElevation,
+        defaultRoofType: state.defaultRoofType,
+        defaultRoofPitchDegrees: state.defaultRoofPitchDegrees,
+        defaultRoofRidgeAngleDegrees: state.defaultRoofRidgeAngleDegrees,
         autoExtrudeSketch: state.autoExtrudeSketch,
         sketchExtrudeMode: state.sketchExtrudeMode,
       }),

@@ -46,12 +46,13 @@ impl WallParams {
         let nx = -dy / len * self.thickness / 2.0;
         let ny = dx / len * self.thickness / 2.0;
 
-        // 4 corners of the wall footprint
+        // 4 corners of the wall footprint in CCW order on the XY plane.
+        // Keeping a consistent winding prevents inside-out face normals after extrusion.
         let points = vec![
             (self.start[0] + nx, self.start[1] + ny),
-            (self.end[0] + nx, self.end[1] + ny),
-            (self.end[0] - nx, self.end[1] - ny),
             (self.start[0] - nx, self.start[1] - ny),
+            (self.end[0] - nx, self.end[1] - ny),
+            (self.end[0] + nx, self.end[1] + ny),
         ];
 
         bcad_kernel::geometry::extrude_sketch_points(&points, self.height)
@@ -192,11 +193,12 @@ fn wall_piece_mesh(
     let ex = wall.start[0] + ux * end_t;
     let ey = wall.start[1] + uy * end_t;
 
+    // Keep wall piece profile winding consistent with WallParams::to_solid.
     let points = vec![
         (sx + nx, sy + ny),
-        (ex + nx, ey + ny),
-        (ex - nx, ey - ny),
         (sx - nx, sy - ny),
+        (ex - nx, ey - ny),
+        (ex + nx, ey + ny),
     ];
 
     let solid = bcad_kernel::geometry::extrude_sketch_points(&points, height)?;

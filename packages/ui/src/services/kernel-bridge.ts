@@ -58,6 +58,10 @@ export interface RoofElement {
   boundary: [number, number][]
   thickness: number
   elevation: number
+  auto_elevation: boolean
+  roof_type: 'flat' | 'shed' | 'gable' | 'hip'
+  pitch_degrees: number
+  ridge_angle_degrees: number
 }
 
 export interface StairElement {
@@ -68,6 +72,9 @@ export interface StairElement {
   width: number
   risers: number
   total_height: number
+  stair_type?: 'straight' | 'spiral'
+  spiral_turns?: number
+  side_wall_thickness?: number
 }
 
 export interface ColumnElement {

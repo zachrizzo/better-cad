@@ -1,7 +1,12 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useViewStore } from '../../stores/view-store'
 import { useUIStore } from '../../stores/ui-store'
+import { useSettingsStore } from '../../stores/settings-store'
 import type { SavedView } from '../../stores/view-store'
+
+type ElevationDirection = 'north' | 'south' | 'east' | 'west'
+
+const ELEVATION_DIRECTIONS: ElevationDirection[] = ['north', 'south', 'east', 'west']
 
 function directionLabel(dir?: string): string {
   switch (dir) {
@@ -25,6 +30,9 @@ export function ViewPanel() {
   const removeView = useViewStore((s) => s.removeView)
   const addView = useViewStore((s) => s.addView)
   const setActiveTool = useUIStore((s) => s.setActiveTool)
+  const wallsVisible = useSettingsStore((s) => s.wallsVisible)
+  const toggleWallsVisible = useSettingsStore((s) => s.toggleWallsVisible)
+  const [elevationDirection, setElevationDirection] = useState<ElevationDirection>('north')
 
   const handleActivate = useCallback(
     (id: string) => {
@@ -43,8 +51,9 @@ export function ViewPanel() {
   }, [setActiveTool, clearActiveView])
 
   const handleNewElevation = useCallback(
-    (direction: 'north' | 'south' | 'east' | 'west') => {
-      const viewCount = views.size
+    (direction: ElevationDirection) => {
+      const existingViews = Array.from(useViewStore.getState().views.values())
+      const elevationCount = existingViews.filter((view) => view.type === 'elevation').length
       // Camera positioned far away looking from the given cardinal direction
       let cameraPosition: [number, number, number]
       const cameraTarget: [number, number, number] = [0, 3, 0]
@@ -67,7 +76,7 @@ export function ViewPanel() {
 
       const view: SavedView = {
         id: `elevation-${crypto.randomUUID()}`,
-        name: `${direction.charAt(0).toUpperCase() + direction.slice(1)} Elevation ${viewCount + 1}`,
+        name: `${directionLabel(direction)} Elevation ${elevationCount + 1}`,
         type: 'elevation',
         direction,
         cameraPosition,
@@ -77,24 +86,41 @@ export function ViewPanel() {
       addView(view)
       setActiveView(view.id)
     },
-    [views.size, addView, setActiveView],
+    [addView, setActiveView],
   )
 
   const handleBackTo3D = useCallback(() => {
     clearActiveView()
   }, [clearActiveView])
 
-  const viewList = Array.from(views.values())
+  const viewList = useMemo(
+    () => Array.from(views.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    [views],
+  )
+  const sectionCount = useMemo(
+    () => viewList.filter((view) => view.type === 'section').length,
+    [viewList],
+  )
+  const elevationCount = useMemo(
+    () => viewList.filter((view) => view.type === 'elevation').length,
+    [viewList],
+  )
 
   return (
     <div className="view-panel">
       <div className="property-panel-title">Views</div>
+      <div className="view-panel-meta">
+        {sectionCount} section{sectionCount === 1 ? '' : 's'} • {elevationCount} elevation{elevationCount === 1 ? '' : 's'}
+      </div>
+      <div className="view-panel-help">
+        Save camera views for section cuts and fixed elevations.
+      </div>
 
       {activeViewId && (
         <button
-          className="toolbar-btn view-back-btn"
+          className="toolbar-btn view-panel-back-btn"
           onClick={handleBackTo3D}
-          style={{ marginBottom: 8, width: '100%' }}
+          title="Return to the default 3D perspective"
         >
           Back to 3D
         </button>
@@ -102,48 +128,75 @@ export function ViewPanel() {
 
       <div className="view-panel-actions">
         <button
-          className="constraint-btn"
+          className={`toolbar-btn view-panel-action-btn${!wallsVisible ? ' active' : ''}`}
+          onClick={toggleWallsVisible}
+          title={wallsVisible ? 'Hide structural walls in 3D to inspect interiors' : 'Show structural walls in 3D'}
+        >
+          {wallsVisible ? 'Hide Walls (Interior View)' : 'Show Walls'}
+        </button>
+        <button
+          className="toolbar-btn view-panel-action-btn"
           onClick={handleNewSection}
           title="Place a section cut line on the plan"
         >
-          + Section
+          New Section Cut
         </button>
-        <div className="view-panel-elevation-group">
-          <span className="view-panel-elevation-label">Elevation:</span>
-          <button className="constraint-btn" onClick={() => handleNewElevation('north')} title="North elevation">N</button>
-          <button className="constraint-btn" onClick={() => handleNewElevation('south')} title="South elevation">S</button>
-          <button className="constraint-btn" onClick={() => handleNewElevation('east')} title="East elevation">E</button>
-          <button className="constraint-btn" onClick={() => handleNewElevation('west')} title="West elevation">W</button>
+        <div className="view-panel-elevation-builder">
+          <label className="view-panel-elevation-label" htmlFor="view-panel-direction-select">New Elevation</label>
+          <div className="view-panel-elevation-controls">
+            <select
+              id="view-panel-direction-select"
+              className="view-panel-select"
+              value={elevationDirection}
+              onChange={(e) => setElevationDirection(e.target.value as ElevationDirection)}
+            >
+              {ELEVATION_DIRECTIONS.map((direction) => (
+                <option key={direction} value={direction}>
+                  {directionLabel(direction)}
+                </option>
+              ))}
+            </select>
+            <button
+              className="toolbar-btn view-panel-action-btn"
+              onClick={() => handleNewElevation(elevationDirection)}
+              title={`Create and activate a ${directionLabel(elevationDirection).toLowerCase()} elevation`}
+            >
+              Add
+            </button>
+          </div>
         </div>
       </div>
 
       {viewList.length === 0 && (
-        <div className="view-panel-empty">No saved views yet.</div>
+        <div className="view-panel-empty">
+          No saved views yet. Create a section cut or an elevation to pin a reusable camera.
+        </div>
       )}
 
       <div className="view-panel-list">
         {viewList.map((v) => (
-          <div
-            key={v.id}
-            className={`view-panel-item${activeViewId === v.id ? ' active' : ''}`}
-            onClick={() => handleActivate(v.id)}
-          >
-            <span className="view-panel-item-icon">
-              {v.type === 'section' ? '\u2702' : '\u25A1'}
-            </span>
-            <span className="view-panel-item-name">{v.name}</span>
-            {v.type === 'elevation' && v.direction && (
-              <span className="view-panel-item-tag">{directionLabel(v.direction)}</span>
-            )}
+          <div key={v.id} className={`view-panel-item${activeViewId === v.id ? ' active' : ''}`}>
             <button
-              className="constraint-delete-btn"
-              onClick={(e) => {
-                e.stopPropagation()
+              className="view-panel-item-main"
+              onClick={() => handleActivate(v.id)}
+              title={activeViewId === v.id ? 'Deactivate this view' : 'Activate this view'}
+            >
+              <span className="view-panel-item-icon">
+                {v.type === 'section' ? '\u2702' : '\u25A1'}
+              </span>
+              <span className="view-panel-item-name">{v.name}</span>
+              {v.type === 'elevation' && v.direction && (
+                <span className="view-panel-item-tag">{directionLabel(v.direction)}</span>
+              )}
+            </button>
+            <button
+              className="toolbar-btn view-panel-delete-btn"
+              onClick={() => {
                 removeView(v.id)
               }}
-              title="Delete view"
+              title={`Delete ${v.name}`}
             >
-              X
+              Delete
             </button>
           </div>
         ))}

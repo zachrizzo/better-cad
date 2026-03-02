@@ -5,7 +5,7 @@ import { useKernel } from '../../hooks/useKernel'
 import { useSettingsStore } from '../../stores/settings-store'
 import { formatLength } from '../../utils/units'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
-import type { PrototypeElement } from '../../services/kernel-bridge'
+import type { DoorElement, PrototypeElement, WindowElement } from '../../services/kernel-bridge'
 
 const VIS_LABEL: Record<LevelVisibility, string> = {
   visible: 'V',
@@ -93,26 +93,54 @@ export function LevelManager() {
       return
     }
 
+    const cloneIdBySourceId = new Map<string, string>()
     for (const el of elementsOnSource) {
-      const cloneId = `${el.kind}-${crypto.randomUUID()}`
+      cloneIdBySourceId.set(el.meta.id, `${el.kind}-${crypto.randomUUID()}`)
+    }
+
+    const clonePriority = (kind: string): number => {
+      if (kind === 'wall') return 0
+      if (kind === 'door' || kind === 'window') return 2
+      return 1
+    }
+    const sorted = [...elementsOnSource].sort((a, b) => clonePriority(a.kind) - clonePriority(b.kind))
+
+    for (const el of sorted) {
+      const cloneId = cloneIdBySourceId.get(el.meta.id) ?? `${el.kind}-${crypto.randomUUID()}`
       const clonedMeta = {
         ...el.meta,
         id: cloneId,
         name: `${el.meta.name} (copy)`,
         level_id: targetLevelId,
+        host_id: el.meta.host_id ? (cloneIdBySourceId.get(el.meta.host_id) ?? el.meta.host_id) : el.meta.host_id,
+        parent_id: el.meta.parent_id ? (cloneIdBySourceId.get(el.meta.parent_id) ?? el.meta.parent_id) : el.meta.parent_id,
       }
 
       let clonedElement: PrototypeElement
-      if (el.kind === 'wall') {
-        clonedElement = { ...el, meta: clonedMeta }
-      } else if (el.kind === 'floor') {
-        clonedElement = { ...el, meta: clonedMeta }
-      } else if (el.kind === 'stair') {
-        clonedElement = { ...el, meta: clonedMeta }
-      } else if (el.kind === 'door') {
-        // Doors reference a wall_id, so they can't simply be copied to another level
-        // without also having the host wall. Skip for now or clone with same host.
-        continue
+      if (el.kind === 'door') {
+        const door = el as DoorElement
+        const mappedWallId = cloneIdBySourceId.get(door.wall_id)
+        if (!mappedWallId) {
+          console.warn('[BetterCAD] Skipping door clone without cloned host wall:', door.meta.id)
+          continue
+        }
+        clonedElement = {
+          ...door,
+          meta: { ...clonedMeta, host_id: mappedWallId },
+          wall_id: mappedWallId,
+        }
+      } else if (el.kind === 'window') {
+        const windowEl = el as WindowElement
+        const mappedWallId = cloneIdBySourceId.get(windowEl.wall_id)
+        if (!mappedWallId) {
+          console.warn('[BetterCAD] Skipping window clone without cloned host wall:', windowEl.meta.id)
+          continue
+        }
+        clonedElement = {
+          ...windowEl,
+          meta: { ...clonedMeta, host_id: mappedWallId },
+          wall_id: mappedWallId,
+        }
       } else {
         clonedElement = { ...el, meta: clonedMeta } as PrototypeElement
       }

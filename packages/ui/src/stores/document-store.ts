@@ -14,6 +14,7 @@ interface DocumentState {
   setProjectName: (name: string) => void
   addCadMesh: (id: string, mesh: CadMeshData) => void
   removeCadMesh: (id: string) => void
+  clearCadMeshes: () => void
   setBoxParams: (params: { width: number; height: number; depth: number }) => void
 }
 
@@ -35,5 +36,6 @@ export const useDocumentStore = create<DocumentState>((set) => ({
       next.delete(id)
       return { cadMeshes: next }
     }),
+  clearCadMeshes: () => set({ cadMeshes: new Map() }),
   setBoxParams: (params) => set({ boxParams: params }),
 }))

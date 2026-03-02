@@ -21,5 +21,13 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['@bettercad/wasm'],
+    // Keep @react-three/fiber external when esbuild bundles @react-three/drei so
+    // both share the same module instance (and thus the same React context).
+    // Without this, Vite inlines a second copy of R3F inside the drei pre-bundle,
+    // producing two separate `React.createContext(null)` objects — Canvas provides
+    // the store to one, but drei's useStore() reads from the other → null → crash.
+    esbuildOptions: {
+      external: ['@react-three/fiber'],
+    },
   },
 })

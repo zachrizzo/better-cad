@@ -198,12 +198,23 @@ async function rotateSelectedElement(): Promise<void> {
 interface ShortcutCallbacks {
   onSave?: () => void
   onLoad?: () => void
+  onToolSelect?: (tool: ToolType) => void
 }
+
+type ToolType = 'select' | 'foundation' | 'parking' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section'
 
 export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
   const setActiveTool = useUIStore((s) => s.setActiveTool)
 
   useEffect(() => {
+    const selectTool = (tool: ToolType) => {
+      if (callbacks?.onToolSelect) {
+        callbacks.onToolSelect(tool)
+      } else {
+        setActiveTool(tool)
+      }
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
@@ -230,12 +241,24 @@ export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
 
       switch (e.key) {
         case 'Escape':
-          setActiveTool('select')
+          selectTool('select')
+          break
+        case 'h':
+        case 'H':
+          if (!e.ctrlKey && !e.metaKey) {
+            selectTool('foundation')
+          }
+          break
+        case 'p':
+        case 'P':
+          if (!e.ctrlKey && !e.metaKey) {
+            selectTool('parking')
+          }
           break
         case 'w':
         case 'W':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('wall')
+            selectTool('wall')
           }
           break
         case 'g':
@@ -245,61 +268,61 @@ export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
         case 'm':
         case 'M':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('measure')
+            selectTool('measure')
           }
           break
         case 'd':
         case 'D':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('door')
+            selectTool('door')
           }
           break
         case 'f':
         case 'F':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('floor')
+            selectTool('floor')
           }
           break
         case 's':
         case 'S':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('stair')
+            selectTool('stair')
           }
           break
         case 'n':
         case 'N':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('window')
+            selectTool('window')
           }
           break
         case 'c':
         case 'C':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('column')
+            selectTool('column')
           }
           break
         case 'b':
         case 'B':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('beam')
+            selectTool('beam')
           }
           break
         case 'o':
         case 'O':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('roof')
+            selectTool('roof')
           }
           break
         case 'a':
         case 'A':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('dimension')
+            selectTool('dimension')
           }
           break
         case 't':
         case 'T':
           if (!e.ctrlKey && !e.metaKey) {
-            setActiveTool('text')
+            selectTool('text')
           }
           break
         case 'r':
@@ -338,5 +361,5 @@ export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [setActiveTool, callbacks?.onSave, callbacks?.onLoad])
+  }, [setActiveTool, callbacks?.onSave, callbacks?.onLoad, callbacks?.onToolSelect])
 }

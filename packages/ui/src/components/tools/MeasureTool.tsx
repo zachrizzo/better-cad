@@ -4,6 +4,8 @@ import { Line, Html } from '@react-three/drei'
 import { useUIStore } from '../../stores/ui-store'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
+import { useActiveDrawingSurface } from '../../hooks/useActiveDrawingSurface'
 import { formatLength } from '../../utils/units'
 
 // Measure tool state: two points clicked, shows distance
@@ -42,33 +44,45 @@ export function useMeasureTool() {
 // Invisible plane for capturing measure tool clicks in the 3D viewport
 export function MeasurePlane() {
   const activeTool = useUIStore((s) => s.activeTool)
+  const snapEnabled = useUIStore((s) => s.snapEnabled)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
+  const snapPoints = usePlanSnapPoints()
+  const { activeSurfaceElevation } = useActiveDrawingSurface()
   const planeRef = useRef<THREE.Mesh>(null)
   const [pt1, setPt1] = useState<[number, number, number] | null>(null)
   const [pt2, setPt2] = useState<[number, number, number] | null>(null)
   const [cursorPos, setCursorPos] = useState<[number, number, number] | null>(null)
+  const [snapMarker, setSnapMarker] = useState<[number, number] | null>(null)
 
   useEffect(() => {
     if (activeTool !== 'measure') {
+      setSnapMarker(null)
       setMeasurementCursor(null)
       setToolReadout(null)
     }
   }, [activeTool, setMeasurementCursor, setToolReadout])
 
+  const applySnap = useCallback((point: [number, number, number]): [number, number, number] => {
+    const { point: snappedPoint, snapped } = snapPlanPoint([point[0], point[2]], snapPoints, snapEnabled, 0.3)
+    setSnapMarker(snapped)
+    return [snappedPoint[0], activeSurfaceElevation, snappedPoint[1]]
+  }, [activeSurfaceElevation, snapEnabled, snapPoints])
+
   const handleClick = (e: { point?: THREE.Vector3 }) => {
     if (activeTool !== 'measure') return
-    const point = e.point as THREE.Vector3
-    if (!point) return
-    setMeasurementCursor([point.x, point.y, point.z])
+    const hitPoint = e.point as THREE.Vector3
+    if (!hitPoint) return
+    const point = applySnap([hitPoint.x, hitPoint.y, hitPoint.z])
+    setMeasurementCursor(point)
 
     if (!pt1) {
-      setPt1([point.x, point.y, point.z])
+      setPt1(point)
       setPt2(null)
-      setToolReadout(`Measure start X:${formatLength(point.x, lengthUnit)} Z:${formatLength(point.z, lengthUnit)}`)
+      setToolReadout(`Measure start X:${formatLength(point[0], lengthUnit)} Z:${formatLength(point[2], lengthUnit)}`)
     } else {
-      const p2: [number, number, number] = [point.x, point.y, point.z]
+      const p2: [number, number, number] = point
       setPt2(p2)
       const dx = p2[0] - pt1[0]
       const dy = p2[1] - pt1[1]
@@ -81,20 +95,22 @@ export function MeasurePlane() {
         setPt1(null)
         setPt2(null)
         setCursorPos(null)
+        setSnapMarker(null)
         setToolReadout(null)
       }, 3000)
     }
   }
 
   const handlePointerMove = (e: { point?: THREE.Vector3 }) => {
-    const point = e.point as THREE.Vector3
-    if (activeTool !== 'measure' || !point) return
-    setMeasurementCursor([point.x, point.y, point.z])
+    const hitPoint = e.point as THREE.Vector3
+    if (activeTool !== 'measure' || !hitPoint) return
+    const point = applySnap([hitPoint.x, hitPoint.y, hitPoint.z])
+    setMeasurementCursor(point)
+    setCursorPos(point)
     if (pt1 && !pt2) {
-      setCursorPos([point.x, point.y, point.z])
-      const dx = point.x - pt1[0]
-      const dy = point.y - pt1[1]
-      const dz = point.z - pt1[2]
+      const dx = point[0] - pt1[0]
+      const dy = point[1] - pt1[1]
+      const dz = point[2] - pt1[2]
       const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
       setToolReadout(`Measure preview: ${formatLength(d, lengthUnit)}`)
     } else if (!pt1) {
@@ -103,6 +119,8 @@ export function MeasurePlane() {
   }
 
   const handlePointerLeave = () => {
+    setSnapMarker(null)
+    setCursorPos(null)
     setMeasurementCursor(null)
     if (!pt1) setToolReadout(null)
   }
@@ -118,7 +136,7 @@ export function MeasurePlane() {
       <mesh
         ref={planeRef}
         rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0, 0]}
+        position={[0, activeSurfaceElevation, 0]}
         onClick={handleClick}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
@@ -162,6 +180,13 @@ export function MeasurePlane() {
           dashSize={0.2}
           gapSize={0.1}
         />
+      )}
+
+      {cursorPos && (
+        <mesh position={[cursorPos[0], cursorPos[1], cursorPos[2]]}>
+          <sphereGeometry args={[0.05, 10, 10]} />
+          <meshBasicMaterial color={snapMarker ? '#00ff88' : '#22d3ee'} />
+        </mesh>
       )}
 
       {/* Distance label - rendered as a small sphere at midpoint with color indicating measurement */}

@@ -7,6 +7,7 @@ import { useKernel } from '../../hooks/useKernel'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { formatLength } from '../../utils/units'
+import { usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
 import { isWallElement, isDimensionElement, useEntityStore } from '../../stores/entity-store'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { useLevelStore } from '../../stores/level-store'
@@ -19,6 +20,7 @@ type Point2 = [number, number]
 
 export function DimensionPlane() {
   const activeTool = useUIStore((s) => s.activeTool)
+  const snapEnabled = useUIStore((s) => s.snapEnabled)
   const { kernel, ready } = useKernel()
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
@@ -40,6 +42,7 @@ export function DimensionPlane() {
     () => Array.from(elements.values()).filter(isWallElement),
     [elements],
   )
+  const planSnapPoints = usePlanSnapPoints()
 
   // Snap points: wall endpoints, door/window edges
   const snapPoints = useMemo<Point2[]>(() => {
@@ -47,10 +50,14 @@ export function DimensionPlane() {
     wallElements.forEach((wall: WallElement) => {
       points.push(wall.start, wall.end)
     })
+    points.push(...planSnapPoints)
     return points
-  }, [wallElements])
+  }, [wallElements, planSnapPoints])
 
   const snapToNearest = useCallback((raw: Point2): { point: Point2; snapped: Point2 | null } => {
+    if (!snapEnabled) {
+      return { point: raw, snapped: null }
+    }
     let nearest: Point2 | null = null
     let nearestDist = Infinity
     for (const sp of snapPoints) {
@@ -64,7 +71,7 @@ export function DimensionPlane() {
       return { point: nearest, snapped: nearest }
     }
     return { point: raw, snapped: null }
-  }, [snapPoints])
+  }, [snapPoints, snapEnabled])
 
   useEffect(() => {
     if (activeTool !== 'dimension') {
@@ -82,7 +89,7 @@ export function DimensionPlane() {
     const { point, snapped } = snapToNearest(raw)
     setCursorPoint(point)
     setSnapMarker(snapped)
-    setMeasurementCursor([point[0], 0, point[1]])
+    setMeasurementCursor([point[0], activeLevelElevation, point[1]])
 
     if (p1) {
       const dist = Math.hypot(point[0] - p1[0], point[1] - p1[1])
@@ -90,7 +97,7 @@ export function DimensionPlane() {
     } else {
       setToolReadout('Dimension: pick first point')
     }
-  }, [activeTool, p1, snapToNearest, lengthUnit, setMeasurementCursor, setToolReadout])
+  }, [activeLevelElevation, activeTool, p1, snapToNearest, lengthUnit, setMeasurementCursor, setToolReadout])
 
   const handlePointerLeave = useCallback(() => {
     setCursorPoint(null)

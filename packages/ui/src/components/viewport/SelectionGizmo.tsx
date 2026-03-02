@@ -38,6 +38,9 @@ function getElementCenter(el: PrototypeElement): [number, number] | null {
     return [sx / el.boundary.length, sy / el.boundary.length]
   }
   if (isStairElement(el)) {
+    if ((el.stair_type ?? 'straight') === 'spiral') {
+      return [el.start[0], el.start[1]]
+    }
     const mx = (el.start[0] + el.end[0]) / 2
     const my = (el.start[1] + el.end[1]) / 2
     return [mx, my]

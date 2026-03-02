@@ -68,11 +68,44 @@ pub struct FloorElement {
     pub thickness: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoofType {
+    Flat,
+    Shed,
+    Gable,
+    Hip,
+}
+
+impl Default for RoofType {
+    fn default() -> Self {
+        Self::Flat
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoofElement {
     pub meta: ElementMeta,
     pub boundary: Vec<[f64; 2]>,
     pub thickness: f64,
+    #[serde(default)]
+    pub elevation: f64,
+    #[serde(default = "default_roof_auto_elevation")]
+    pub auto_elevation: bool,
+    #[serde(default)]
+    pub roof_type: RoofType,
+    #[serde(default = "default_roof_pitch_degrees")]
+    pub pitch_degrees: f64,
+    #[serde(default)]
+    pub ridge_angle_degrees: f64,
+}
+
+fn default_roof_auto_elevation() -> bool {
+    true
+}
+
+fn default_roof_pitch_degrees() -> f64 {
+    30.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +168,19 @@ pub struct WindowElement {
     pub sill_height: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StairType {
+    Straight,
+    Spiral,
+}
+
+impl Default for StairType {
+    fn default() -> Self {
+        Self::Straight
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StairElement {
     pub meta: ElementMeta,
@@ -144,10 +190,24 @@ pub struct StairElement {
     pub risers: u32,
     #[serde(default = "default_stair_height")]
     pub total_height: f64,
+    #[serde(default)]
+    pub stair_type: StairType,
+    #[serde(default = "default_spiral_turns")]
+    pub spiral_turns: f64,
+    #[serde(default = "default_stair_side_wall_thickness")]
+    pub side_wall_thickness: f64,
 }
 
 fn default_stair_height() -> f64 {
     3.0
+}
+
+fn default_spiral_turns() -> f64 {
+    1.0
+}
+
+fn default_stair_side_wall_thickness() -> f64 {
+    0.12
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

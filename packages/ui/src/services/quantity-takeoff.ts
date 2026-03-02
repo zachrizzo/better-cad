@@ -6,6 +6,7 @@ import type {
   FloorElement,
   StairElement,
 } from './kernel-bridge'
+import { downloadBlobAsFile } from '../utils/file-download'
 
 // --- Schedule row interfaces ---
 
@@ -198,7 +199,20 @@ export function getMaterialTakeoff(elements: Map<string, PrototypeElement>): Mat
     } else if (isWindow(el)) {
       bucket.totalArea += el.width * el.height
     } else if (isStair(el)) {
-      const runLen = Math.hypot(el.end[0] - el.start[0], el.end[1] - el.start[1])
+      const runLen = (() => {
+        if ((el.stair_type ?? 'straight') !== 'spiral') {
+          return Math.hypot(el.end[0] - el.start[0], el.end[1] - el.start[1])
+        }
+        const outerRadius = Math.hypot(el.end[0] - el.start[0], el.end[1] - el.start[1])
+        const centerRadius = Math.max(0.05, outerRadius - el.width * 0.5)
+        const turns = (() => {
+          const raw = el.spiral_turns ?? 1
+          const clamped = Math.max(-5, Math.min(5, raw))
+          if (Math.abs(clamped) < 0.1) return clamped < 0 ? -0.1 : 0.1
+          return clamped
+        })()
+        return Math.abs(turns) * Math.PI * 2 * centerRadius
+      })()
       bucket.totalArea += runLen * el.width
     }
   }
@@ -230,10 +244,5 @@ export function toCsv(headers: string[], rows: (string | number)[][]): string {
 
 export function downloadCsv(filename: string, csvContent: string): void {
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadBlobAsFile(blob, filename)
 }

@@ -4,6 +4,7 @@ import { useThree } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
 import { useUIStore } from '../../stores/ui-store'
 import { useViewStore } from '../../stores/view-store'
+import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
 import type { SavedView } from '../../stores/view-store'
 
 /**
@@ -14,21 +15,27 @@ import type { SavedView } from '../../stores/view-store'
 export function SectionPlane() {
   const activeTool = useUIStore((s) => s.activeTool)
   const setActiveTool = useUIStore((s) => s.setActiveTool)
+  const snapEnabled = useUIStore((s) => s.snapEnabled)
   const addView = useViewStore((s) => s.addView)
   const setActiveView = useViewStore((s) => s.setActiveView)
+  const snapPoints = usePlanSnapPoints()
   const { camera, raycaster, pointer } = useThree()
 
   const [firstPoint, setFirstPoint] = useState<[number, number] | null>(null)
   const [cursorPoint, setCursorPoint] = useState<[number, number] | null>(null)
   const groundPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0))
 
+  const applySnap = useCallback((rawPoint: [number, number]): [number, number] => {
+    return snapPlanPoint(rawPoint, snapPoints, snapEnabled, 0.3).point
+  }, [snapEnabled, snapPoints])
+
   const getGroundIntersection = useCallback((): [number, number] | null => {
     raycaster.setFromCamera(pointer, camera)
     const target = new THREE.Vector3()
     const hit = raycaster.ray.intersectPlane(groundPlane.current, target)
     if (!hit) return null
-    return [target.x, target.z]
-  }, [camera, raycaster, pointer])
+    return applySnap([target.x, target.z])
+  }, [applySnap, camera, raycaster, pointer])
 
   const handlePointerMove = useCallback(() => {
     if (activeTool !== 'section') return

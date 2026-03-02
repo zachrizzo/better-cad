@@ -712,7 +712,14 @@ impl IfcWriter {
         storey_placement: u32,
         body_ctx: u32,
     ) -> u32 {
-        let placement = self.write_local_placement(Some(storey_placement), 0.0, 0.0, 0.0);
+        let placement =
+            self.write_local_placement(Some(storey_placement), 0.0, 0.0, roof.elevation);
+        let roof_type = match roof.roof_type {
+            bcad_domain::RoofType::Flat => ".FLAT_ROOF.",
+            bcad_domain::RoofType::Shed => ".SHED_ROOF.",
+            bcad_domain::RoofType::Gable => ".GABLE_ROOF.",
+            bcad_domain::RoofType::Hip => ".HIP_ROOF.",
+        };
 
         let profile = self.write_arbitrary_profile(&roof.boundary);
         let solid = self.write_extruded_area_solid(profile, roof.thickness);
@@ -723,12 +730,13 @@ impl IfcWriter {
         self.emit(
             roof_id,
             format!(
-                "IFCROOF('{}',#{},'{}','Roof',$,#{},#{},$,.FLAT_ROOF.)",
+                "IFCROOF('{}',#{},'{}','Roof',$,#{},#{},$,{})",
                 guid,
                 owner_history,
                 roof.meta.name,
                 placement,
-                shape
+                shape,
+                roof_type
             ),
         );
 
@@ -836,11 +844,15 @@ impl IfcWriter {
 
         let guid = make_ifc_guid(&format!("stair_{}", stair.meta.id));
         let stair_id = self.alloc();
+        let stair_kind = match stair.stair_type {
+            bcad_domain::StairType::Straight => ".STRAIGHT_RUN_STAIR.",
+            bcad_domain::StairType::Spiral => ".SPIRAL_STAIR.",
+        };
         self.emit(
             stair_id,
             format!(
-                "IFCSTAIR('{}',#{},'{}','Stair',$,#{},#{},$,.STRAIGHT_RUN_STAIR.)",
-                guid, owner_history, stair.meta.name, placement, shape
+                "IFCSTAIR('{}',#{},'{}','Stair',$,#{},#{},$,{})",
+                guid, owner_history, stair.meta.name, placement, shape, stair_kind
             ),
         );
 
@@ -1082,6 +1094,9 @@ mod tests {
                 width: 1.0,
                 risers: 15,
                 total_height: 3.0,
+                stair_type: bcad_domain::StairType::Straight,
+                spiral_turns: 1.0,
+                side_wall_thickness: 0.12,
             }),
             Element::Room(RoomElement {
                 meta: ElementMeta::new("Living Room"),

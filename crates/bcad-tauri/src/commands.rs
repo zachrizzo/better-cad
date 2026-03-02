@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use bcad_domain::{Element, FloorElement, PrototypeProject, PrototypeState, StairElement, WallElement};
+use bcad_domain::{Element, FloorElement, PrototypeProject, PrototypeState, StairElement, StairType, WallElement};
 use bcad_kernel::tessellation::TessellatedMesh;
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -79,6 +79,28 @@ fn floor_mesh(floor: &FloorElement) -> Result<TessellatedMesh, String> {
     bcad_kernel::tessellation::tessellate(&solid).map_err(|e| e.to_string())
 }
 
+fn normalize_spiral_turns(turns: f64) -> f64 {
+    let clamped = turns.clamp(-5.0, 5.0);
+    if clamped.abs() < 0.1 {
+        if clamped < 0.0 {
+            -0.1
+        } else {
+            0.1
+        }
+    } else {
+        clamped
+    }
+}
+
+fn extrude_plan_mesh(points: &[(f64, f64)], height: f64, z_base: f64) -> Result<TessellatedMesh, String> {
+    let solid = bcad_kernel::geometry::extrude_sketch_points(points, height).map_err(|e| e.to_string())?;
+    let mut mesh = bcad_kernel::tessellation::tessellate(&solid).map_err(|e| e.to_string())?;
+    if z_base.abs() > 1e-9 {
+        translate_mesh(&mut mesh, 0.0, 0.0, z_base as f32);
+    }
+    Ok(mesh)
+}
+
 fn stair_step_mesh(
     stair: &StairElement,
     seg_start: f64,
@@ -110,16 +132,42 @@ fn stair_step_mesh(
         (sx - nx, sy - ny),
     ];
 
-    let solid = bcad_kernel::geometry::extrude_sketch_points(&points, step_height)
-        .map_err(|e| e.to_string())?;
-    let mut mesh = bcad_kernel::tessellation::tessellate(&solid).map_err(|e| e.to_string())?;
-    if z_base.abs() > 1e-9 {
-        translate_mesh(&mut mesh, 0.0, 0.0, z_base as f32);
-    }
-    Ok(mesh)
+    extrude_plan_mesh(&points, step_height, z_base)
 }
 
-fn stair_mesh(stair: &StairElement) -> Result<TessellatedMesh, String> {
+fn annular_sector_points(
+    center: [f64; 2],
+    inner_radius: f64,
+    outer_radius: f64,
+    start_angle: f64,
+    end_angle: f64,
+) -> Vec<(f64, f64)> {
+    let sweep = (end_angle - start_angle).abs();
+    let segments = ((sweep / (std::f64::consts::PI / 12.0)).ceil() as usize).max(2);
+    let mut points: Vec<(f64, f64)> = Vec::with_capacity((segments + 1) * 2);
+
+    for i in 0..=segments {
+        let t = i as f64 / segments as f64;
+        let angle = start_angle + (end_angle - start_angle) * t;
+        points.push((
+            center[0] + angle.cos() * outer_radius,
+            center[1] + angle.sin() * outer_radius,
+        ));
+    }
+
+    for i in (0..=segments).rev() {
+        let t = i as f64 / segments as f64;
+        let angle = start_angle + (end_angle - start_angle) * t;
+        points.push((
+            center[0] + angle.cos() * inner_radius,
+            center[1] + angle.sin() * inner_radius,
+        ));
+    }
+
+    points
+}
+
+fn straight_stair_mesh(stair: &StairElement) -> Result<TessellatedMesh, String> {
     let dx = stair.end[0] - stair.start[0];
     let dy = stair.end[1] - stair.start[1];
     let run_len = (dx * dx + dy * dy).sqrt();
@@ -131,21 +179,99 @@ fn stair_mesh(stair: &StairElement) -> Result<TessellatedMesh, String> {
     let step_depth = run_len / risers as f64;
     let step_height = stair.total_height / risers as f64;
 
-    let mut step_meshes = Vec::new();
+    let mut meshes = Vec::with_capacity(risers + 2);
     for i in 0..risers {
         let seg_start = i as f64 * step_depth;
         let seg_end = (i + 1) as f64 * step_depth;
         let z_base = i as f64 * step_height;
-        step_meshes.push(stair_step_mesh(
-            stair,
-            seg_start,
-            seg_end,
-            z_base,
-            step_height,
-        )?);
+        meshes.push(stair_step_mesh(stair, seg_start, seg_end, z_base, step_height)?);
     }
 
-    combine_meshes(&step_meshes)
+    let side_wall_thickness = stair.side_wall_thickness.max(0.0);
+    if side_wall_thickness > 1e-6 {
+        let ux = dx / run_len;
+        let uy = dy / run_len;
+        let nx = -uy;
+        let ny = ux;
+        let half_width = stair.width * 0.5;
+        let half_wall = side_wall_thickness * 0.5;
+
+        for side in [1.0_f64, -1.0_f64] {
+            let center_offset = side * (half_width + half_wall);
+            let min_offset = center_offset - half_wall;
+            let max_offset = center_offset + half_wall;
+            let points = vec![
+                (stair.start[0] + nx * min_offset, stair.start[1] + ny * min_offset),
+                (stair.end[0] + nx * min_offset, stair.end[1] + ny * min_offset),
+                (stair.end[0] + nx * max_offset, stair.end[1] + ny * max_offset),
+                (stair.start[0] + nx * max_offset, stair.start[1] + ny * max_offset),
+            ];
+            meshes.push(extrude_plan_mesh(&points, stair.total_height, 0.0)?);
+        }
+    }
+
+    combine_meshes(&meshes)
+}
+
+fn spiral_stair_mesh(stair: &StairElement) -> Result<TessellatedMesh, String> {
+    let center = stair.start;
+    let dx = stair.end[0] - center[0];
+    let dy = stair.end[1] - center[1];
+    let outer_radius = (dx * dx + dy * dy).sqrt();
+    if outer_radius < 1e-8 {
+        return Err("spiral stair has zero radius".into());
+    }
+
+    let inner_radius_cap = (outer_radius - 0.01).max(0.01);
+    let inner_radius = (outer_radius - stair.width).max(0.05).min(inner_radius_cap);
+    let risers = stair.risers.max(1) as usize;
+    let step_height = stair.total_height / risers as f64;
+    let start_angle = dy.atan2(dx);
+    let turns = normalize_spiral_turns(stair.spiral_turns);
+    let total_angle = turns * std::f64::consts::PI * 2.0;
+
+    let mut meshes = Vec::with_capacity(risers + 2);
+    for i in 0..risers {
+        let a0 = start_angle + total_angle * (i as f64 / risers as f64);
+        let a1 = start_angle + total_angle * ((i + 1) as f64 / risers as f64);
+        let z_base = i as f64 * step_height;
+        let points = annular_sector_points(center, inner_radius, outer_radius, a0, a1);
+        meshes.push(extrude_plan_mesh(&points, step_height, z_base)?);
+    }
+
+    let side_wall_thickness = stair.side_wall_thickness.max(0.0);
+    if side_wall_thickness > 1e-6 {
+        let end_angle = start_angle + total_angle;
+        let outer_points = annular_sector_points(
+            center,
+            outer_radius,
+            outer_radius + side_wall_thickness,
+            start_angle,
+            end_angle,
+        );
+        meshes.push(extrude_plan_mesh(&outer_points, stair.total_height, 0.0)?);
+
+        let inner_wall_inner_radius = inner_radius - side_wall_thickness;
+        if inner_wall_inner_radius > 0.01 {
+            let inner_points = annular_sector_points(
+                center,
+                inner_wall_inner_radius,
+                inner_radius,
+                start_angle,
+                end_angle,
+            );
+            meshes.push(extrude_plan_mesh(&inner_points, stair.total_height, 0.0)?);
+        }
+    }
+
+    combine_meshes(&meshes)
+}
+
+fn stair_mesh(stair: &StairElement) -> Result<TessellatedMesh, String> {
+    match stair.stair_type {
+        StairType::Straight => straight_stair_mesh(stair),
+        StairType::Spiral => spiral_stair_mesh(stair),
+    }
 }
 
 // ---------------------------------------------------------------------------

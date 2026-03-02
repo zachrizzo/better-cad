@@ -27,6 +27,24 @@ interface PlanLine {
   end: [number, number]
 }
 
+function normalizeSpiralTurns(turns: number | undefined): number {
+  const raw = turns ?? 1
+  const clamped = Math.max(-5, Math.min(5, raw))
+  if (Math.abs(clamped) < 0.1) return clamped < 0 ? -0.1 : 0.1
+  return clamped
+}
+
+function arcPoints2D(center: [number, number], radius: number, startAngle: number, endAngle: number, segments: number): [number, number][] {
+  const points: [number, number][] = []
+  const sweep = endAngle - startAngle
+  for (let i = 0; i <= segments; i += 1) {
+    const t = i / Math.max(1, segments)
+    const angle = startAngle + sweep * t
+    points.push([center[0] + Math.cos(angle) * radius, center[1] + Math.sin(angle) * radius])
+  }
+  return points
+}
+
 function normalizeSwing(swing?: string): 'left' | 'right' {
   return swing === 'left' ? 'left' : 'right'
 }
@@ -175,9 +193,9 @@ function PlanLines() {
         if (floor.boundary.length < 3) return null
         const pts = floor.boundary.map((pt) => [pt[0], pt[1], 0] as [number, number, number])
         pts.push([floor.boundary[0][0], floor.boundary[0][1], 0])
-        return { id: floor.meta.id, points: pts }
+        return { id: floor.meta.id, points: pts, typeId: floor.meta.type_id ?? null }
       })
-      .filter((loop): loop is { id: string; points: [number, number, number][] } => loop !== null)
+      .filter((loop): loop is { id: string; points: [number, number, number][]; typeId: string | null } => loop !== null)
   }, [floors])
 
   const stairPreview = useMemo(() => {
@@ -185,6 +203,44 @@ function PlanLines() {
     const riserLines: PlanLine[] = []
 
     stairs.forEach((stair: StairElement) => {
+      if ((stair.stair_type ?? 'straight') === 'spiral') {
+        const center: [number, number] = [stair.start[0], stair.start[1]]
+        const radiusVector: [number, number] = [stair.end[0] - center[0], stair.end[1] - center[1]]
+        const outerRadius = Math.hypot(radiusVector[0], radiusVector[1])
+        if (outerRadius < 1e-8) return
+
+        const innerRadius = Math.max(0.05, outerRadius - stair.width)
+        const startAngle = Math.atan2(radiusVector[1], radiusVector[0])
+        const turns = normalizeSpiralTurns(stair.spiral_turns)
+        const endAngle = startAngle + turns * Math.PI * 2
+        const sweep = endAngle - startAngle
+        const arcSegments = Math.max(24, Math.ceil((Math.abs(sweep) / (Math.PI * 2)) * 96))
+        const outerArc = arcPoints2D(center, outerRadius, startAngle, endAngle, arcSegments)
+        const innerArc = arcPoints2D(center, innerRadius, startAngle, endAngle, arcSegments)
+
+        for (let i = 0; i < outerArc.length - 1; i += 1) {
+          edgeLines.push({ start: outerArc[i], end: outerArc[i + 1] })
+        }
+        for (let i = 0; i < innerArc.length - 1; i += 1) {
+          edgeLines.push({ start: innerArc[i], end: innerArc[i + 1] })
+        }
+        edgeLines.push({ start: innerArc[0], end: outerArc[0] })
+        edgeLines.push({ start: innerArc[innerArc.length - 1], end: outerArc[outerArc.length - 1] })
+
+        const risers = Math.max(1, stair.risers)
+        for (let i = 0; i <= risers; i += 1) {
+          const t = i / risers
+          const angle = startAngle + sweep * t
+          const cos = Math.cos(angle)
+          const sin = Math.sin(angle)
+          riserLines.push({
+            start: [center[0] + cos * innerRadius, center[1] + sin * innerRadius],
+            end: [center[0] + cos * outerRadius, center[1] + sin * outerRadius],
+          })
+        }
+        return
+      }
+
       const dx = stair.end[0] - stair.start[0]
       const dz = stair.end[1] - stair.start[1]
       const len = Math.hypot(dx, dz)
@@ -369,8 +425,11 @@ function PlanLines() {
         <Line
           key={loop.id}
           points={loop.points}
-          color="#4ade80"
+          color={loop.typeId === 'parking_lot' ? '#64748b' : '#4ade80'}
           lineWidth={1.6}
+          dashed={loop.typeId === 'parking_lot'}
+          dashSize={loop.typeId === 'parking_lot' ? 0.18 : undefined}
+          gapSize={loop.typeId === 'parking_lot' ? 0.1 : undefined}
         />
       ))}
       {stairPreview.edgeLines.map((line, i) => (

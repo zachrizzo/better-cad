@@ -6,9 +6,10 @@ import { useUIStore } from '../../stores/ui-store'
 import { useBimStore } from '../../stores/bim-store'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { useLevelStore } from '../../stores/level-store'
 import { formatLength } from '../../utils/units'
 import type { WindowElement, WallElement } from '../../services/kernel-bridge'
-import { isWindowElement, isWallElement, useEntityStore } from '../../stores/entity-store'
+import { isFloorElement, isWindowElement, isWallElement, useEntityStore } from '../../stores/entity-store'
 import { useKernel } from '../../hooks/useKernel'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 
@@ -85,20 +86,46 @@ export function WindowPlane() {
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const elements = useEntityStore((s) => s.elements)
+  const activeLevelId = useLevelStore((s) => s.activeLevelId)
+  const levels = useLevelStore((s) => s.levels)
+  const activeLevelElevation = useMemo(() => {
+    const level = levels.find((l) => l.id === activeLevelId)
+    return level?.elevation ?? 0
+  }, [levels, activeLevelId])
+  const levelDataById = useMemo(
+    () => new Map(levels.map((level) => [level.id, { elevation: level.elevation, visibility: level.visibility }])),
+    [levels],
+  )
   const { kernel, ready } = useKernel()
 
   const planeRef = useRef<THREE.Mesh>(null)
   const [candidate, setCandidate] = useState<WindowCandidate | null>(null)
 
-  const walls = useMemo(
+  const wallElements = useMemo(
     () => Array.from(elements.values()).filter(isWallElement),
     [elements],
+  )
+  const walls = useMemo(
+    () => wallElements.filter((wall) => !wall.meta.level_id || wall.meta.level_id === activeLevelId),
+    [activeLevelId, wallElements],
   )
 
   const windows = useMemo(
     () => Array.from(elements.values()).filter(isWindowElement),
     [elements],
   )
+  const surfaceOffsetByLevel = useMemo(() => {
+    const offsets = new Map<string, number>()
+    for (const element of elements.values()) {
+      if (!isFloorElement(element)) continue
+      const levelId = element.meta.level_id
+      if (!levelId) continue
+      offsets.set(levelId, Math.max(offsets.get(levelId) ?? 0, element.thickness))
+    }
+    return offsets
+  }, [elements])
+  const activeLevelSurfaceOffset = surfaceOffsetByLevel.get(activeLevelId) ?? 0
+  const activeSurfaceElevation = activeLevelElevation + activeLevelSurfaceOffset
 
   useEffect(() => {
     if (activeTool !== 'window') {
@@ -120,7 +147,7 @@ export function WindowPlane() {
     if (activeTool !== 'window') return
     const point: Point2 = [e.point.x, e.point.z]
     updateCandidate(point)
-    setMeasurementCursor([point[0], 0, point[1]])
+    setMeasurementCursor([point[0], activeSurfaceElevation, point[1]])
     const nextCandidate = getWindowCandidate(point, walls, {
       width: defaultWindowWidth,
       height: defaultWindowHeight,
@@ -134,6 +161,7 @@ export function WindowPlane() {
       setToolReadout('Window: hover closer to a wall to snap')
     }
   }, [
+    activeSurfaceElevation,
     activeTool,
     defaultWindowHeight,
     defaultWindowSill,
@@ -178,6 +206,7 @@ export function WindowPlane() {
         id: windowId,
         name: `Window ${windows.length + 1}`,
         host_id: windowCandidate.wallId,
+        level_id: activeLevelId,
       },
       wall_id: windowCandidate.wallId,
       position_along_wall: windowCandidate.positionAlongWall,
@@ -195,6 +224,7 @@ export function WindowPlane() {
       }
     })()
   }, [
+    activeLevelId,
     activeTool,
     defaultWindowHeight,
     defaultWindowSill,
@@ -219,7 +249,7 @@ export function WindowPlane() {
         <mesh
           ref={planeRef}
           rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0, 0]}
+          position={[0, activeSurfaceElevation, 0]}
           onClick={handleClick}
           onPointerMove={handlePointerMove}
           onPointerLeave={handlePointerLeave}
@@ -232,7 +262,7 @@ export function WindowPlane() {
       {candidate && activeTool === 'window' && (
         <>
           <group
-            position={[candidate.center[0], 0, candidate.center[1]]}
+            position={[candidate.center[0], activeSurfaceElevation, candidate.center[1]]}
             rotation={[0, Math.atan2(candidate.direction[1], candidate.direction[0]), 0]}
           >
             <mesh position={[0, candidate.sillHeight + candidate.height / 2, 0]}>
@@ -256,7 +286,7 @@ export function WindowPlane() {
               lineWidth={2.5}
             />
           </group>
-          <Html position={[candidate.center[0], candidate.sillHeight + candidate.height + 0.2, candidate.center[1]]} center>
+          <Html position={[candidate.center[0], activeSurfaceElevation + candidate.sillHeight + candidate.height + 0.2, candidate.center[1]]} center>
             <div className="measurement-badge">
               {formatLength(candidate.width, lengthUnit)} x {formatLength(candidate.height, lengthUnit)} @ {formatLength(candidate.sillHeight, lengthUnit)}
             </div>
@@ -265,8 +295,15 @@ export function WindowPlane() {
       )}
 
       {windows.map((win) => {
-        const hostWall = walls.find((wall) => wall.meta.id === win.wall_id)
+        const hostWall = wallElements.find((wall) => wall.meta.id === win.wall_id)
         const thickness = hostWall ? Math.max(0.04, hostWall.thickness * 0.5) : 0.06
+        const windowLevelId = win.meta.level_id ?? hostWall?.meta.level_id
+        const levelData = windowLevelId ? levelDataById.get(windowLevelId) : undefined
+        const visibility = levelData?.visibility ?? 'visible'
+        if (visibility === 'hidden') return null
+        const slabOffset = windowLevelId ? (surfaceOffsetByLevel.get(windowLevelId) ?? 0) : 0
+        const levelElevation = (levelData?.elevation ?? 0) + slabOffset
+        const windowOpacity = visibility === 'ghosted' ? 0.28 : 0.5
 
         const [sx, sz] = hostWall ? hostWall.start : [0, 0]
         const [ex, ez] = hostWall ? hostWall.end : [1, 0]
@@ -279,12 +316,12 @@ export function WindowPlane() {
         return (
           <group
             key={win.meta.id}
-            position={[center[0], 0, center[1]]}
+            position={[center[0], levelElevation, center[1]]}
             rotation={[0, Math.atan2(dir[1], dir[0]), 0]}
           >
             <mesh position={[0, win.sill_height + win.height / 2, 0]}>
               <boxGeometry args={[win.width, win.height, thickness]} />
-              <meshStandardMaterial color="#93c5fd" opacity={0.5} transparent />
+              <meshStandardMaterial color="#93c5fd" opacity={windowOpacity} transparent depthWrite={windowOpacity >= 0.99} />
             </mesh>
             <Line
               points={[

@@ -306,7 +306,11 @@ export function cleanupWalls(
       const newId = `wall-${crypto.randomUUID()}`
       const newWall: WallElement = {
         kind: 'wall',
-        meta: { id: newId, name: `${host.meta.name} (split ${k})` },
+        meta: {
+          ...host.meta,
+          id: newId,
+          name: `${host.meta.name} (split ${k})`,
+        },
         start: points[k],
         end: points[k + 1],
         height: host.height,

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { KernelBackend } from '../../services/kernel-bridge'
+import { downloadArrayBufferAsFile } from '../../utils/file-download'
 
 interface ExportDialogProps {
   open: boolean
@@ -24,13 +25,7 @@ export function ExportDialog({ open, onClose, kernel }: ExportDialogProps) {
       const data = await kernel.exportFile(format)
       const extMap: Record<string, string> = { step: 'step', dxf: 'dxf', ifc: 'ifc', gltf: 'glb' }
       const ext = extMap[format] ?? format
-      const blob = new Blob([data], { type: 'application/octet-stream' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `export.${ext}`
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadArrayBufferAsFile(data, `export.${ext}`)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

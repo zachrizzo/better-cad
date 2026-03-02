@@ -6,12 +6,15 @@ import { useUIStore } from '../../stores/ui-store'
 import { useBimStore } from '../../stores/bim-store'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
 import { formatLength } from '../../utils/units'
 import type { FloorElement } from '../../services/kernel-bridge'
 import { isFloorElement, useEntityStore } from '../../stores/entity-store'
 import { useKernel } from '../../hooks/useKernel'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { useLevelStore } from '../../stores/level-store'
+import { polygonsOverlapArea, type Point2 as CollisionPoint2 } from '../../utils/plan-collision'
+import { rectFromCorners, rectLoop3D } from '../../utils/rect-from-corners'
 
 const MIN_FLOOR_DIMENSION = 0.2
 
@@ -20,6 +23,11 @@ type PlanePointerEvent = ThreeEvent<PointerEvent>
 
 export function FloorPlane() {
   const activeTool = useUIStore((s) => s.activeTool)
+  const isFoundationTool = activeTool === 'foundation'
+  const isParkingTool = activeTool === 'parking'
+  const isFloorTool = activeTool === 'floor'
+  const isFloorLikeTool = isFoundationTool || isParkingTool || isFloorTool
+  const snapEnabled = useUIStore((s) => s.snapEnabled)
   const defaultFloorThickness = useBimStore((s) => s.defaultFloorThickness)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
@@ -37,102 +45,129 @@ export function FloorPlane() {
   const [startCorner, setStartCorner] = useState<Point2 | null>(null)
   const [previewCorner, setPreviewCorner] = useState<Point2 | null>(null)
   const [cursorPoint, setCursorPoint] = useState<Point2 | null>(null)
+  const [snapMarker, setSnapMarker] = useState<Point2 | null>(null)
+  const snapPoints = usePlanSnapPoints()
 
+  const floorElements = useMemo(() => Array.from(elements.values()).filter(isFloorElement), [elements])
+  const slabsOnActiveLevel = useMemo(
+    () => floorElements.filter((floor) => !floor.meta.level_id || floor.meta.level_id === activeLevelId),
+    [activeLevelId, floorElements],
+  )
+  const foundationCount = useMemo(
+    () => floorElements.filter((floor) => floor.meta.type_id === 'foundation').length,
+    [floorElements],
+  )
+  const parkingCount = useMemo(
+    () => floorElements.filter((floor) => floor.meta.type_id === 'parking_lot').length,
+    [floorElements],
+  )
   const floorCount = useMemo(
-    () => Array.from(elements.values()).filter(isFloorElement).length,
-    [elements],
+    () => floorElements.filter((floor) => !floor.meta.type_id).length,
+    [floorElements],
   )
 
+  const slabLabel = isFoundationTool ? 'Foundation' : isParkingTool ? 'Parking Lot' : 'Floor'
+  const slabPrefix = isFoundationTool ? 'foundation' : isParkingTool ? 'parking-lot' : 'floor'
+  const slabCount = isFoundationTool ? foundationCount : isParkingTool ? parkingCount : floorCount
+
   useEffect(() => {
-    if (activeTool !== 'floor') {
+    if (!isFloorLikeTool) {
       setStartCorner(null)
       setPreviewCorner(null)
       setCursorPoint(null)
+      setSnapMarker(null)
       setMeasurementCursor(null)
       setToolReadout(null)
     }
-  }, [activeTool, setMeasurementCursor, setToolReadout])
+  }, [isFloorLikeTool, setMeasurementCursor, setToolReadout])
+
+  const applySnap = useCallback((rawPoint: Point2) => {
+    return snapPlanPoint(rawPoint, snapPoints, snapEnabled, 0.3)
+  }, [snapEnabled, snapPoints])
 
   const updateReadout = useCallback((point: Point2) => {
     if (!startCorner) {
       setToolReadout(
-        `Floor thickness ${formatLength(defaultFloorThickness, lengthUnit)} • pick first corner`,
+        `${slabLabel} thickness ${formatLength(defaultFloorThickness, lengthUnit)} • pick first corner`,
       )
       return
     }
 
-    const width = Math.abs(point[0] - startCorner[0])
-    const depth = Math.abs(point[1] - startCorner[1])
-    const area = width * depth
+    const rect = rectFromCorners(startCorner, point)
     setToolReadout(
-      `Floor W:${formatLength(width, lengthUnit)} D:${formatLength(depth, lengthUnit)} A:${area.toFixed(2)} m² T:${formatLength(defaultFloorThickness, lengthUnit)}`,
+      `${slabLabel} W:${formatLength(rect.width, lengthUnit)} D:${formatLength(rect.depth, lengthUnit)} A:${rect.area.toFixed(2)} m² T:${formatLength(defaultFloorThickness, lengthUnit)}`,
     )
-  }, [defaultFloorThickness, lengthUnit, setToolReadout, startCorner])
+  }, [defaultFloorThickness, lengthUnit, setToolReadout, slabLabel, startCorner])
 
   const handlePointerMove = useCallback((e: PlanePointerEvent) => {
-    if (activeTool !== 'floor') return
-    const point: Point2 = [e.point.x, e.point.z]
+    if (!isFloorLikeTool) return
+    const rawPoint: Point2 = [e.point.x, e.point.z]
+    const { point, snapped } = applySnap(rawPoint)
     setCursorPoint(point)
-    setMeasurementCursor([point[0], 0, point[1]])
+    setSnapMarker(snapped)
+    setMeasurementCursor([point[0], activeLevelElevation, point[1]])
     if (startCorner) {
       setPreviewCorner(point)
     }
     updateReadout(point)
-  }, [activeTool, setMeasurementCursor, startCorner, updateReadout])
+  }, [activeLevelElevation, applySnap, isFloorLikeTool, setMeasurementCursor, startCorner, updateReadout])
 
   const handleClick = useCallback((e: PlanePointerEvent) => {
     e.stopPropagation()
-    if (activeTool !== 'floor') return
+    if (!isFloorLikeTool) return
 
-    const point: Point2 = [e.point.x, e.point.z]
+    const rawPoint: Point2 = [e.point.x, e.point.z]
+    const { point, snapped } = applySnap(rawPoint)
     setCursorPoint(point)
-    setMeasurementCursor([point[0], 0, point[1]])
+    setSnapMarker(snapped)
+    setMeasurementCursor([point[0], activeLevelElevation, point[1]])
 
     if (!startCorner) {
       setStartCorner(point)
       setPreviewCorner(point)
       setToolReadout(
-        `Floor start X:${formatLength(point[0], lengthUnit)} Z:${formatLength(point[1], lengthUnit)}`,
+        `${slabLabel} start X:${formatLength(point[0], lengthUnit)} Z:${formatLength(point[1], lengthUnit)}`,
       )
       return
     }
 
-    const minX = Math.min(startCorner[0], point[0])
-    const maxX = Math.max(startCorner[0], point[0])
-    const minZ = Math.min(startCorner[1], point[1])
-    const maxZ = Math.max(startCorner[1], point[1])
-    const width = maxX - minX
-    const depth = maxZ - minZ
+    const rect = rectFromCorners(startCorner, point)
+    const { width, depth } = rect
 
     if (width < MIN_FLOOR_DIMENSION || depth < MIN_FLOOR_DIMENSION) {
-      setToolReadout(`Floor too small • minimum side is ${formatLength(MIN_FLOOR_DIMENSION, lengthUnit)}`)
+      setToolReadout(`${slabLabel} too small • minimum side is ${formatLength(MIN_FLOOR_DIMENSION, lengthUnit)}`)
+      return
+    }
+
+    const candidateBoundary = rect.boundary as CollisionPoint2[]
+    const intersectsExistingSlab = slabsOnActiveLevel.some((existing) => (
+      polygonsOverlapArea(candidateBoundary, existing.boundary as CollisionPoint2[])
+    ))
+    if (intersectsExistingSlab) {
+      setToolReadout(`${slabLabel} blocked • cannot intersect an existing slab on this level`)
       return
     }
 
     const floorElement: FloorElement = {
       kind: 'floor',
       meta: {
-        id: `floor-${crypto.randomUUID()}`,
-        name: `Floor ${floorCount + 1}`,
+        id: `${slabPrefix}-${crypto.randomUUID()}`,
+        name: `${slabLabel} ${slabCount + 1}`,
         level_id: activeLevelId,
+        type_id: isFoundationTool ? 'foundation' : isParkingTool ? 'parking_lot' : undefined,
       },
-      boundary: [
-        [minX, minZ],
-        [maxX, minZ],
-        [maxX, maxZ],
-        [minX, maxZ],
-      ],
+      boundary: rect.boundary,
       thickness: defaultFloorThickness,
     }
 
     setStartCorner(null)
     setPreviewCorner(null)
     setToolReadout(
-      `Floor placed W:${formatLength(width, lengthUnit)} D:${formatLength(depth, lengthUnit)} T:${formatLength(defaultFloorThickness, lengthUnit)}`,
+      `${slabLabel} placed W:${formatLength(width, lengthUnit)} D:${formatLength(depth, lengthUnit)} T:${formatLength(defaultFloorThickness, lengthUnit)}`,
     )
 
     if (!ready || !kernel) {
-      console.warn('[BetterCAD] Kernel not ready; floor entity was not persisted')
+      console.warn('[BetterCAD] Kernel not ready; slab entity was not persisted')
       return
     }
 
@@ -141,16 +176,23 @@ export function FloorPlane() {
         await kernel.createElement(floorElement)
         await syncEntitiesAndRegenerateMeshes(kernel)
       } catch (err) {
-        console.error('[BetterCAD] Failed to create floor entity:', err)
+        console.error('[BetterCAD] Failed to create slab entity:', err)
       }
     })()
   }, [
-    activeTool,
+    applySnap,
+    activeLevelElevation,
     defaultFloorThickness,
-    floorCount,
+    isFloorLikeTool,
+    isFoundationTool,
+    isParkingTool,
     kernel,
     lengthUnit,
     ready,
+    slabCount,
+    slabLabel,
+    slabPrefix,
+    slabsOnActiveLevel,
     setMeasurementCursor,
     setToolReadout,
     startCorner,
@@ -161,37 +203,23 @@ export function FloorPlane() {
     e.nativeEvent.preventDefault()
     setStartCorner(null)
     setPreviewCorner(null)
-    setToolReadout('Floor placement canceled')
-  }, [setToolReadout])
+    setSnapMarker(null)
+    setToolReadout(`${slabLabel} placement canceled`)
+  }, [setToolReadout, slabLabel])
 
   const handlePointerLeave = useCallback(() => {
     setCursorPoint(null)
+    setSnapMarker(null)
     setMeasurementCursor(null)
   }, [setMeasurementCursor])
 
-  if (activeTool !== 'floor') return null
+  if (!isFloorLikeTool) return null
 
   const previewData = startCorner && previewCorner
     ? (() => {
-      const minX = Math.min(startCorner[0], previewCorner[0])
-      const maxX = Math.max(startCorner[0], previewCorner[0])
-      const minZ = Math.min(startCorner[1], previewCorner[1])
-      const maxZ = Math.max(startCorner[1], previewCorner[1])
-      const width = maxX - minX
-      const depth = maxZ - minZ
-      if (width < 1e-6 || depth < 1e-6) return null
-      return {
-        width,
-        depth,
-        center: [(minX + maxX) / 2, (minZ + maxZ) / 2] as Point2,
-        loop: [
-          [minX, 0.02, minZ],
-          [maxX, 0.02, minZ],
-          [maxX, 0.02, maxZ],
-          [minX, 0.02, maxZ],
-          [minX, 0.02, minZ],
-        ] as [number, number, number][],
-      }
+      const rect = rectFromCorners(startCorner, previewCorner)
+      if (rect.width < 1e-6 || rect.depth < 1e-6) return null
+      return { ...rect, loop: rectLoop3D(rect, 0.02) }
     })()
     : null
 
@@ -215,7 +243,7 @@ export function FloorPlane() {
       {cursorPoint && (
         <mesh position={[cursorPoint[0], planeY + 0.04, cursorPoint[1]]}>
           <sphereGeometry args={[0.05, 12, 12]} />
-          <meshBasicMaterial color="#10b981" />
+          <meshBasicMaterial color={snapMarker ? '#00ff88' : (isFoundationTool ? '#f59e0b' : isParkingTool ? '#64748b' : '#10b981')} />
         </mesh>
       )}
 
@@ -223,11 +251,11 @@ export function FloorPlane() {
         <>
           <mesh position={[previewData.center[0], planeY + 0.01, previewData.center[1]]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[previewData.width, previewData.depth]} />
-            <meshBasicMaterial color="#34d399" transparent opacity={0.15} side={THREE.DoubleSide} />
+            <meshBasicMaterial color={isFoundationTool ? '#f59e0b' : isParkingTool ? '#94a3b8' : '#34d399'} transparent opacity={0.15} side={THREE.DoubleSide} />
           </mesh>
           <Line
             points={previewData.loop.map(([x, y, z]) => [x, planeY + y, z] as [number, number, number])}
-            color="#10b981"
+            color={isFoundationTool ? '#f59e0b' : isParkingTool ? '#64748b' : '#10b981'}
             lineWidth={2}
           />
           <Html position={[previewData.center[0], planeY + 0.3, previewData.center[1]]} center>
