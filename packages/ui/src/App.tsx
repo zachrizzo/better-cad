@@ -28,6 +28,7 @@ import { TextAnnotationPlane, TextAnnotationOverlay3D } from './components/viewp
 import { FurniturePlane } from './components/viewport/FurniturePlane'
 import { MeasurePlane } from './components/tools/MeasureTool'
 import { SelectionGizmo } from './components/viewport/SelectionGizmo'
+import { Elements3DGroup } from './components/viewport/elements3d/Elements3DGroup'
 import { Viewport2D } from './components/viewport/Viewport2D'
 import { PropertyPanel } from './components/layout/PropertyPanel'
 import { ConstraintPanel } from './components/panels/ConstraintPanel'
@@ -355,6 +356,9 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
           />
         )
       })}
+
+      {/* 3D parametric elements (furniture, plumbing, electrical, HVAC, fire safety, accessibility) */}
+      <Elements3DGroup elementLevelInfo={elementLevelInfo} />
 
       <DrawingPlaneGuide />
       <WallPlane />

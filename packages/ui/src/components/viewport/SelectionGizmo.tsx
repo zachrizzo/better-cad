@@ -14,6 +14,12 @@ import {
   isFoundationElement,
   isDoorElement,
   isWindowElement,
+  isFurnitureElement,
+  isPlumbingElement,
+  isElectricalElement,
+  isHvacElement,
+  isFireSafetyElement,
+  isAccessibilityElement,
 } from '../../stores/entity-store'
 import type {
   PrototypeElement,
@@ -24,6 +30,12 @@ import type {
   BeamElement,
   RoofElement,
   FoundationElement,
+  FurnitureElement,
+  PlumbingElement,
+  ElectricalElement,
+  HvacElement,
+  FireSafetyElement,
+  AccessibilityElement,
 } from '../../services/kernel-bridge'
 import { getKernel, type KernelBackend } from '../../services/kernel-bridge'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
@@ -100,6 +112,13 @@ function getElementCenter(el: PrototypeElement): [number, number] | null {
     }
     return [sx / f.boundary.length, sy / f.boundary.length]
   }
+  // Parametric placement elements — all have position: [x, y]
+  if (isFurnitureElement(el)) return [el.position[0], el.position[1]]
+  if (isPlumbingElement(el)) return [el.position[0], el.position[1]]
+  if (isElectricalElement(el)) return [el.position[0], el.position[1]]
+  if (isHvacElement(el)) return [el.position[0], el.position[1]]
+  if (isFireSafetyElement(el)) return [el.position[0], el.position[1]]
+  if (isAccessibilityElement(el)) return [el.position[0], el.position[1]]
   return null
 }
 
@@ -112,6 +131,12 @@ function getElementHeight(el: PrototypeElement): number {
   if (isBeamElement(el)) return el.depth
   if (isRoofElement(el)) return el.thickness
   if (isFoundationElement(el)) return (el as FoundationElement).thickness
+  if (isFurnitureElement(el)) return 0.75
+  if (isPlumbingElement(el)) return 0.85
+  if (isElectricalElement(el)) return 0.3
+  if (isHvacElement(el)) return 0.25
+  if (isFireSafetyElement(el)) return 0.5
+  if (isAccessibilityElement(el)) return 0.5
   return 1
 }
 
@@ -123,7 +148,11 @@ function supportsRotation(el: PrototypeElement): boolean {
     isStairElement(el) ||
     isBeamElement(el) ||
     isRoofElement(el) ||
-    isFoundationElement(el)
+    isFoundationElement(el) ||
+    isFurnitureElement(el) ||
+    isPlumbingElement(el) ||
+    isHvacElement(el) ||
+    isAccessibilityElement(el)
   )
 }
 
@@ -331,6 +360,20 @@ function GizmoInner({
               ([x, y]) => [x + kernelDx, y + kernelDy] as [number, number],
             ),
           }
+        } else if (
+          isFurnitureElement(el) ||
+          isPlumbingElement(el) ||
+          isElectricalElement(el) ||
+          isHvacElement(el) ||
+          isFireSafetyElement(el) ||
+          isAccessibilityElement(el)
+        ) {
+          // All placement elements have position: [x, y]
+          const pos = (el as FurnitureElement | PlumbingElement | ElectricalElement | HvacElement | FireSafetyElement | AccessibilityElement).position
+          updated = {
+            ...el,
+            position: [pos[0] + kernelDx, pos[1] + kernelDy] as [number, number],
+          }
         }
 
         if (!updated) return
@@ -400,6 +443,20 @@ function GizmoInner({
           updated = {
             ...f,
             boundary: f.boundary.map(([x, y]) => rotatePoint(x, y, cx, cy, angle)),
+          }
+        } else if (
+          isFurnitureElement(el) ||
+          isPlumbingElement(el) ||
+          isElectricalElement(el) ||
+          isHvacElement(el) ||
+          isFireSafetyElement(el) ||
+          isAccessibilityElement(el)
+        ) {
+          // For placement elements, rotation is a single number (additive)
+          const currentRot = (el as FurnitureElement | PlumbingElement | ElectricalElement | HvacElement | FireSafetyElement | AccessibilityElement).rotation
+          updated = {
+            ...el,
+            rotation: currentRot + angle,
           }
         }
 
