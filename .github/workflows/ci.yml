@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust-check:
+    name: Rust Check (native + WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Add WASM target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Check (WASM target, exclude Tauri)
+        run: cargo check --workspace --exclude bcad-tauri --target wasm32-unknown-unknown
+      - name: Check (native, full workspace)
+        run: cargo check --workspace
+
+  rust-test:
+    name: Rust Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests (exclude Tauri)
+        run: cargo test --workspace --exclude bcad-tauri
+
+  wasm-build:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build WASM package
+        run: wasm-pack build crates/bcad-wasm --target web --out-dir ../../packages/wasm-pkg
+      - name: Upload wasm-pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: packages/wasm-pkg/
+
+  ui-build:
+    name: UI Build
+    runs-on: ubuntu-latest
+    needs: wasm-build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Download wasm-pkg artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: packages/wasm-pkg/
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: UI typecheck
+        run: pnpm --filter @bettercad/ui typecheck
+      - name: UI build
+        run: pnpm --filter @bettercad/ui build

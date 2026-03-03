@@ -1,14 +1,24 @@
 import { create } from 'zustand'
 import type {
+  AccessibilityElement,
   BeamElement,
   ColumnElement,
   DimensionElement,
   DoorElement,
+  ElectricalElement,
+  FireSafetyElement,
   FloorElement,
+  FurnitureElement,
+  HvacElement,
+  KeynoteElement,
+  LeaderAnnotationElement,
+  PlumbingElement,
   PrototypeElement,
   RoofElement,
   RoomElement,
+  SiteDetailElement,
   StairElement,
+  TagElement,
   TextAnnotationElement,
   WallElement,
   WindowElement,
@@ -206,6 +216,10 @@ export function isBeamElement(element: PrototypeElement): element is BeamElement
   return element.kind === 'beam'
 }
 
+export function isFoundationElement(element: PrototypeElement): element is PrototypeElement & { kind: 'foundation' } {
+  return element.kind === 'foundation'
+}
+
 export function isRoofElement(element: PrototypeElement): element is RoofElement {
   return element.kind === 'roof'
 }
@@ -221,3 +235,14 @@ export function isDimensionElement(element: PrototypeElement): element is Dimens
 export function isTextAnnotationElement(element: PrototypeElement): element is TextAnnotationElement {
   return element.kind === 'text_annotation'
 }
+
+export const isElectricalElement = (e: PrototypeElement): e is ElectricalElement => e.kind === 'electrical'
+export const isPlumbingElement = (e: PrototypeElement): e is PlumbingElement => e.kind === 'plumbing'
+export const isFurnitureElement = (e: PrototypeElement): e is FurnitureElement => e.kind === 'furniture'
+export const isSiteDetailElement = (e: PrototypeElement): e is SiteDetailElement => e.kind === 'site_detail'
+export const isLeaderAnnotationElement = (e: PrototypeElement): e is LeaderAnnotationElement => e.kind === 'leader_annotation'
+export const isKeynoteElement = (e: PrototypeElement): e is KeynoteElement => e.kind === 'keynote'
+export const isTagElement = (e: PrototypeElement): e is TagElement => e.kind === 'tag'
+export const isHvacElement = (e: PrototypeElement): e is HvacElement => e.kind === 'hvac'
+export const isFireSafetyElement = (e: PrototypeElement): e is FireSafetyElement => e.kind === 'fire_safety'
+export const isAccessibilityElement = (e: PrototypeElement): e is AccessibilityElement => e.kind === 'accessibility'

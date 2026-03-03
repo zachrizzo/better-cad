@@ -1,17 +1,789 @@
 //! IFC (Industry Foundation Classes) import/export.
 //!
-//! Exports BetterCAD elements to IFC 2x3 SPF (STEP Physical File) format.
-//! This is a text-based format that can be read by Revit, ArchiCAD, etc.
+//! Exports BetterCAD elements to IFC4 SPF (STEP Physical File) format.
+//! Imports IFC4 (and IFC2X3) files via a lightweight SPF parser.
+//! This text-based format can be read by Revit, ArchiCAD, etc.
 
-use bcad_domain::Element;
+use bcad_domain::{
+    BeamElement, ColumnElement, DoorElement, DoorSwing, Element, ElementMeta, FloorElement,
+    FoundationElement, LevelElement, RoofElement, RoofType, RoomElement, StairElement, StairType,
+    WallElement, WindowElement,
+};
+use std::collections::HashMap;
 
-pub fn import_ifc(_data: &[u8]) -> Result<(), crate::IoError> {
-    Err(crate::IoError::FormatError(
-        "IFC import not yet implemented".into(),
-    ))
+// ---------------------------------------------------------------------------
+// IFC Import
+// ---------------------------------------------------------------------------
+
+/// A warning generated during IFC import when geometry is too complex or
+/// an entity cannot be fully mapped.
+#[derive(Debug, Clone)]
+pub struct ImportWarning {
+    pub entity_id: u32,
+    pub message: String,
 }
 
-/// Export BetterCAD elements to IFC 2x3 SPF format.
+/// Result of an IFC import operation.
+pub struct IfcImportResult {
+    pub elements: Vec<Element>,
+    pub warnings: Vec<ImportWarning>,
+}
+
+/// Parsed raw SPF entity: entity type name + raw attribute string.
+struct RawEntity {
+    entity_type: String,
+    raw_attrs: String,
+}
+
+/// Import IFC (IFC4 or IFC2X3) SPF data into BetterCAD elements.
+///
+/// Uses a 3-phase approach:
+/// 1. Line scan: parse DATA section into entity map
+/// 2. Entity resolution: map IFC entities to domain elements
+/// 3. Relationship resolution: assign level_id and wall_id via rels
+pub fn import_ifc(data: &[u8]) -> Result<IfcImportResult, crate::IoError> {
+    let text = std::str::from_utf8(data)
+        .map_err(|e| crate::IoError::FormatError(format!("Invalid UTF-8: {}", e)))?;
+
+    // Phase 1: Line scan — parse DATA section
+    let entities = parse_spf_data_section(text)?;
+
+    // Phase 2: Entity resolution
+    let mut elements: Vec<Element> = Vec::new();
+    let mut warnings: Vec<ImportWarning> = Vec::new();
+    // Maps from IFC entity ID to our domain element index
+    let mut ifc_to_element_idx: HashMap<u32, usize> = HashMap::new();
+    // Maps from IFC entity ID to level element id
+    let mut ifc_storey_to_level_id: HashMap<u32, String> = HashMap::new();
+
+    // Pass 1: IfcBuildingStorey → LevelElement
+    for (&eid, raw) in &entities {
+        let etype = raw.entity_type.to_uppercase();
+        if etype == "IFCBUILDINGSTOREY" {
+            let attrs = split_spf_attrs(&raw.raw_attrs);
+            let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                .unwrap_or_else(|| format!("Level #{}", eid));
+            let elevation = attrs
+                .get(9)
+                .and_then(|s| s.trim().parse::<f64>().ok())
+                .unwrap_or(0.0);
+
+            let mut meta = ElementMeta::new(&name);
+            meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+            let level = Element::Level(LevelElement { meta, elevation });
+            let idx = elements.len();
+            ifc_storey_to_level_id.insert(eid, level.id().to_string());
+            ifc_to_element_idx.insert(eid, idx);
+            elements.push(level);
+        }
+    }
+
+    // Pass 2: Building elements
+    for (&eid, raw) in &entities {
+        let etype = raw.entity_type.to_uppercase();
+        let attrs = split_spf_attrs(&raw.raw_attrs);
+
+        match etype.as_str() {
+            "IFCWALL" | "IFCWALLSTANDARDCASE" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Wall #{}", eid));
+                let placement_ref = parse_entity_ref(&attrs.get(5).cloned().unwrap_or_default());
+                let (x, y, _z) = resolve_placement_location(&entities, placement_ref);
+                let (dir_x, dir_y) = resolve_placement_direction(&entities, placement_ref);
+
+                // Try to get dimensions from the product shape
+                let shape_ref = parse_entity_ref(&attrs.get(6).cloned().unwrap_or_default());
+                let (length, height, thickness) =
+                    resolve_wall_dimensions(&entities, shape_ref, &mut warnings, eid);
+
+                let end_x = x + dir_x * length;
+                let end_y = y + dir_y * length;
+
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+                let wall = Element::Wall(WallElement {
+                    meta,
+                    start: [x, y],
+                    end: [end_x, end_y],
+                    height,
+                    thickness,
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(wall);
+            }
+            "IFCSLAB" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Slab #{}", eid));
+                // Check predefined type — last attr
+                let predefined = attrs.last().cloned().unwrap_or_default().to_uppercase();
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+
+                if predefined.contains("BASESLAB") {
+                    let elem = Element::Foundation(FoundationElement {
+                        meta,
+                        boundary: vec![
+                            [0.0, 0.0],
+                            [4.0, 0.0],
+                            [4.0, 4.0],
+                            [0.0, 4.0],
+                        ],
+                        thickness: 0.3,
+                    });
+                    let idx = elements.len();
+                    ifc_to_element_idx.insert(eid, idx);
+                    elements.push(elem);
+                    warnings.push(ImportWarning {
+                        entity_id: eid,
+                        message: "Foundation slab imported with default boundary".into(),
+                    });
+                } else {
+                    // .FLOOR. or default
+                    let elem = Element::Floor(FloorElement {
+                        meta,
+                        boundary: vec![
+                            [0.0, 0.0],
+                            [4.0, 0.0],
+                            [4.0, 4.0],
+                            [0.0, 4.0],
+                        ],
+                        thickness: 0.3,
+                    });
+                    let idx = elements.len();
+                    ifc_to_element_idx.insert(eid, idx);
+                    elements.push(elem);
+                    warnings.push(ImportWarning {
+                        entity_id: eid,
+                        message: "Floor slab imported with default boundary".into(),
+                    });
+                }
+            }
+            "IFCROOF" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Roof #{}", eid));
+                let predefined = attrs.last().cloned().unwrap_or_default().to_uppercase();
+                let roof_type = if predefined.contains("GABLE") {
+                    RoofType::Gable
+                } else if predefined.contains("HIP") {
+                    RoofType::Hip
+                } else if predefined.contains("SHED") {
+                    RoofType::Shed
+                } else {
+                    RoofType::Flat
+                };
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+                let elem = Element::Roof(RoofElement {
+                    meta,
+                    boundary: vec![
+                        [0.0, 0.0],
+                        [4.0, 0.0],
+                        [4.0, 4.0],
+                        [0.0, 4.0],
+                    ],
+                    thickness: 0.3,
+                    elevation: 3.0,
+                    auto_elevation: true,
+                    roof_type,
+                    pitch_degrees: 30.0,
+                    ridge_angle_degrees: 0.0,
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(elem);
+                warnings.push(ImportWarning {
+                    entity_id: eid,
+                    message: "Roof imported with default boundary".into(),
+                });
+            }
+            "IFCCOLUMN" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Column #{}", eid));
+                let placement_ref = parse_entity_ref(&attrs.get(5).cloned().unwrap_or_default());
+                let (x, y, _z) = resolve_placement_location(&entities, placement_ref);
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+                let elem = Element::Column(ColumnElement {
+                    meta,
+                    center: [x, y],
+                    width: 0.3,
+                    depth: 0.3,
+                    height: 3.0,
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(elem);
+            }
+            "IFCBEAM" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Beam #{}", eid));
+                let placement_ref = parse_entity_ref(&attrs.get(5).cloned().unwrap_or_default());
+                let (x, y, z) = resolve_placement_location(&entities, placement_ref);
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+                let elem = Element::Beam(BeamElement {
+                    meta,
+                    start: [x, y, z],
+                    end: [x + 3.0, y, z],
+                    width: 0.2,
+                    depth: 0.4,
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(elem);
+                warnings.push(ImportWarning {
+                    entity_id: eid,
+                    message: "Beam imported with default length 3m".into(),
+                });
+            }
+            "IFCDOOR" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Door #{}", eid));
+                let height = attrs
+                    .get(8)
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .unwrap_or(2.1);
+                let width = attrs
+                    .get(9)
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .unwrap_or(0.9);
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+                let elem = Element::Door(DoorElement {
+                    meta,
+                    wall_id: String::new(), // resolved in phase 3
+                    position_along_wall: 0.5,
+                    width,
+                    height,
+                    sill_height: 0.0,
+                    swing: DoorSwing::Right,
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(elem);
+            }
+            "IFCWINDOW" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Window #{}", eid));
+                let height = attrs
+                    .get(8)
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .unwrap_or(1.0);
+                let width = attrs
+                    .get(9)
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .unwrap_or(1.2);
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+                let elem = Element::Window(WindowElement {
+                    meta,
+                    wall_id: String::new(), // resolved in phase 3
+                    position_along_wall: 0.5,
+                    width,
+                    height,
+                    sill_height: 0.9,
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(elem);
+            }
+            "IFCSTAIR" | "IFCSTAIRFLIGHT" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Stair #{}", eid));
+                let predefined = attrs.last().cloned().unwrap_or_default().to_uppercase();
+                let stair_type = if predefined.contains("SPIRAL") {
+                    StairType::Spiral
+                } else {
+                    StairType::Straight
+                };
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+                let elem = Element::Stair(StairElement {
+                    meta,
+                    start: [0.0, 0.0],
+                    end: [3.0, 0.0],
+                    width: 1.0,
+                    risers: 15,
+                    total_height: 3.0,
+                    stair_type,
+                    spiral_turns: 1.0,
+                    side_wall_thickness: 0.12,
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(elem);
+                warnings.push(ImportWarning {
+                    entity_id: eid,
+                    message: "Stair imported with default geometry".into(),
+                });
+            }
+            "IFCSPACE" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Room #{}", eid));
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.get(0).cloned().unwrap_or_default());
+                let elem = Element::Room(RoomElement {
+                    meta,
+                    boundary: vec![
+                        [0.0, 0.0],
+                        [4.0, 0.0],
+                        [4.0, 3.0],
+                        [0.0, 3.0],
+                    ],
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(elem);
+                warnings.push(ImportWarning {
+                    entity_id: eid,
+                    message: "Space imported with default boundary".into(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    // Phase 3: Relationship resolution
+    for raw in entities.values() {
+        let etype = raw.entity_type.to_uppercase();
+
+        // IfcRelContainedInSpatialStructure → assign level_id
+        if etype == "IFCRELCONTAINEDINSPATIALSTRUCTURE" {
+            let attrs = split_spf_attrs(&raw.raw_attrs);
+            // Last attr is the spatial element ref
+            let storey_ref = parse_entity_ref(&attrs.last().cloned().unwrap_or_default());
+            if let Some(level_id) = storey_ref.and_then(|r| ifc_storey_to_level_id.get(&r)) {
+                // attr 4 is the related elements set
+                if let Some(set_str) = attrs.get(4) {
+                    for ref_id in parse_entity_ref_list(set_str) {
+                        if let Some(&idx) = ifc_to_element_idx.get(&ref_id) {
+                            assign_level_to_element(&mut elements[idx], level_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // IfcRelVoidsElement → track wall→opening mapping
+        // IfcRelFillsElement → assign wall_id to doors/windows
+        if etype == "IFCRELFILLSELEMENT" {
+            let attrs = split_spf_attrs(&raw.raw_attrs);
+            // attr 4 = opening ref, attr 5 = filling element ref
+            let _opening_ref = parse_entity_ref(&attrs.get(4).cloned().unwrap_or_default());
+            let filling_ref = parse_entity_ref(&attrs.get(5).cloned().unwrap_or_default());
+            // Walk back to find the wall through IfcRelVoidsElement
+            if let Some(filling_id) = filling_ref {
+                if let Some(&idx) = ifc_to_element_idx.get(&filling_id) {
+                    // We'll handle wall assignment in a simplified manner below
+                    let _ = idx;
+                }
+            }
+        }
+    }
+
+    // For doors/windows without wall_id, try to find a wall to attach to
+    // This is a simplified approach - find the first wall on the same level
+    let wall_ids: Vec<(String, usize)> = elements
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| match e {
+            Element::Wall(w) => Some((w.meta.id.clone(), i)),
+            _ => None,
+        })
+        .collect();
+
+    for element in elements.iter_mut() {
+        match element {
+            Element::Door(door) if door.wall_id.is_empty() => {
+                if let Some((wid, _)) = wall_ids.first() {
+                    door.wall_id = wid.clone();
+                    door.meta.host_id = Some(wid.clone().into());
+                }
+            }
+            Element::Window(window) if window.wall_id.is_empty() => {
+                if let Some((wid, _)) = wall_ids.first() {
+                    window.wall_id = wid.clone();
+                    window.meta.host_id = Some(wid.clone().into());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(IfcImportResult { elements, warnings })
+}
+
+// ---------------------------------------------------------------------------
+// SPF Parsing Helpers
+// ---------------------------------------------------------------------------
+
+/// Parse the DATA section of an SPF file into a map of entity_id -> RawEntity.
+fn parse_spf_data_section(text: &str) -> Result<HashMap<u32, RawEntity>, crate::IoError> {
+    let mut entities = HashMap::new();
+    let mut in_data = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed == "DATA;" {
+            in_data = true;
+            continue;
+        }
+        if trimmed == "ENDSEC;" && in_data {
+            break;
+        }
+        if !in_data {
+            continue;
+        }
+
+        // Match lines like: #42=IFCWALL('GUID',$,$,$,$,#5,#6,$,.STANDARD.);
+        if let Some(entity) = parse_spf_line(trimmed) {
+            entities.insert(entity.0, entity.1);
+        }
+    }
+
+    Ok(entities)
+}
+
+/// Parse a single SPF entity line: #N=ENTITYTYPE(attrs);
+fn parse_spf_line(line: &str) -> Option<(u32, RawEntity)> {
+    let line = line.trim();
+    if !line.starts_with('#') {
+        return None;
+    }
+    // Strip trailing semicolon
+    let line = line.strip_suffix(';').unwrap_or(line);
+
+    let eq_pos = line.find('=')?;
+    let id_str = &line[1..eq_pos];
+    let id: u32 = id_str.parse().ok()?;
+
+    let rest = &line[eq_pos + 1..];
+    let paren_pos = rest.find('(')?;
+    let entity_type = rest[..paren_pos].to_string();
+
+    // Extract everything between the outermost parens
+    let raw_attrs = if rest.ends_with(')') {
+        rest[paren_pos + 1..rest.len() - 1].to_string()
+    } else {
+        rest[paren_pos + 1..].to_string()
+    };
+
+    Some((id, RawEntity { entity_type, raw_attrs }))
+}
+
+/// Split SPF attributes by comma, respecting nested parentheses.
+fn split_spf_attrs(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for ch in s.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                result.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.is_empty() || !result.is_empty() {
+        result.push(current.trim().to_string());
+    }
+    result
+}
+
+/// Unquote an SPF string value: 'Hello' -> Some("Hello"), $ -> None
+fn unquote_spf(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s == "$" || s.is_empty() {
+        return None;
+    }
+    if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
+        return Some(s[1..s.len() - 1].to_string());
+    }
+    Some(s.to_string())
+}
+
+/// Parse an entity reference like "#42" -> Some(42)
+fn parse_entity_ref(s: &str) -> Option<u32> {
+    let s = s.trim();
+    if s.starts_with('#') {
+        s[1..].parse().ok()
+    } else {
+        None
+    }
+}
+
+/// Parse a list of entity references from a set like "(#1,#2,#3)"
+fn parse_entity_ref_list(s: &str) -> Vec<u32> {
+    let s = s.trim();
+    let s = s.strip_prefix('(').unwrap_or(s);
+    let s = s.strip_suffix(')').unwrap_or(s);
+    s.split(',')
+        .filter_map(|part| parse_entity_ref(part.trim()))
+        .collect()
+}
+
+/// Resolve placement location by following IfcLocalPlacement -> IfcAxis2Placement3D -> IfcCartesianPoint
+fn resolve_placement_location(entities: &HashMap<u32, RawEntity>, placement_ref: Option<u32>) -> (f64, f64, f64) {
+    let Some(pid) = placement_ref else {
+        return (0.0, 0.0, 0.0);
+    };
+    let Some(placement_entity) = entities.get(&pid) else {
+        return (0.0, 0.0, 0.0);
+    };
+    if placement_entity.entity_type.to_uppercase() != "IFCLOCALPLACEMENT" {
+        return (0.0, 0.0, 0.0);
+    }
+    let attrs = split_spf_attrs(&placement_entity.raw_attrs);
+    // Second attr is the IfcAxis2Placement3D ref
+    let axis_ref = parse_entity_ref(&attrs.get(1).cloned().unwrap_or_default());
+    let Some(axis_id) = axis_ref else {
+        return (0.0, 0.0, 0.0);
+    };
+    let Some(axis_entity) = entities.get(&axis_id) else {
+        return (0.0, 0.0, 0.0);
+    };
+    if axis_entity.entity_type.to_uppercase() != "IFCAXIS2PLACEMENT3D" {
+        return (0.0, 0.0, 0.0);
+    }
+    let axis_attrs = split_spf_attrs(&axis_entity.raw_attrs);
+    // First attr is the IfcCartesianPoint ref
+    let point_ref = parse_entity_ref(&axis_attrs.get(0).cloned().unwrap_or_default());
+    let Some(point_id) = point_ref else {
+        return (0.0, 0.0, 0.0);
+    };
+    let Some(point_entity) = entities.get(&point_id) else {
+        return (0.0, 0.0, 0.0);
+    };
+    if point_entity.entity_type.to_uppercase() != "IFCCARTESIANPOINT" {
+        return (0.0, 0.0, 0.0);
+    }
+    parse_point_coords(&point_entity.raw_attrs)
+}
+
+/// Resolve placement direction from IfcLocalPlacement -> IfcAxis2Placement3D -> RefDirection
+fn resolve_placement_direction(entities: &HashMap<u32, RawEntity>, placement_ref: Option<u32>) -> (f64, f64) {
+    let Some(pid) = placement_ref else {
+        return (1.0, 0.0);
+    };
+    let Some(placement_entity) = entities.get(&pid) else {
+        return (1.0, 0.0);
+    };
+    if placement_entity.entity_type.to_uppercase() != "IFCLOCALPLACEMENT" {
+        return (1.0, 0.0);
+    }
+    let attrs = split_spf_attrs(&placement_entity.raw_attrs);
+    let axis_ref = parse_entity_ref(&attrs.get(1).cloned().unwrap_or_default());
+    let Some(axis_id) = axis_ref else {
+        return (1.0, 0.0);
+    };
+    let Some(axis_entity) = entities.get(&axis_id) else {
+        return (1.0, 0.0);
+    };
+    let axis_attrs = split_spf_attrs(&axis_entity.raw_attrs);
+    // Third attr (index 2) is the RefDirection
+    let dir_ref = parse_entity_ref(&axis_attrs.get(2).cloned().unwrap_or_default());
+    let Some(dir_id) = dir_ref else {
+        return (1.0, 0.0);
+    };
+    let Some(dir_entity) = entities.get(&dir_id) else {
+        return (1.0, 0.0);
+    };
+    if dir_entity.entity_type.to_uppercase() != "IFCDIRECTION" {
+        return (1.0, 0.0);
+    }
+    let (dx, dy, _) = parse_point_coords(&dir_entity.raw_attrs);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len > 1e-9 {
+        (dx / len, dy / len)
+    } else {
+        (1.0, 0.0)
+    }
+}
+
+/// Try to extract wall dimensions from the product shape (via IfcExtrudedAreaSolid + IfcRectangleProfileDef).
+/// Returns (length, height, thickness). Falls back to defaults if geometry is too complex.
+fn resolve_wall_dimensions(
+    entities: &HashMap<u32, RawEntity>,
+    shape_ref: Option<u32>,
+    warnings: &mut Vec<ImportWarning>,
+    eid: u32,
+) -> (f64, f64, f64) {
+    let default = (4.0, 2.7, 0.2);
+
+    let Some(sid) = shape_ref else {
+        warnings.push(ImportWarning {
+            entity_id: eid,
+            message: "Wall has no shape; using default dimensions 4m x 2.7m x 0.2m".into(),
+        });
+        return default;
+    };
+    let Some(shape_entity) = entities.get(&sid) else {
+        return default;
+    };
+
+    // Navigate: IfcProductDefinitionShape -> Representations -> IfcShapeRepresentation -> Items -> IfcExtrudedAreaSolid
+    let shape_type = shape_entity.entity_type.to_uppercase();
+    if shape_type != "IFCPRODUCTDEFINITIONSHAPE" {
+        return default;
+    }
+    let shape_attrs = split_spf_attrs(&shape_entity.raw_attrs);
+    // Third attr (index 2) is the list of representations
+    let rep_refs = shape_attrs
+        .get(2)
+        .map(|s| parse_entity_ref_list(s))
+        .unwrap_or_default();
+
+    for rep_ref in rep_refs {
+        if let Some(rep_entity) = entities.get(&rep_ref) {
+            if rep_entity.entity_type.to_uppercase() != "IFCSHAPEREPRESENTATION" {
+                continue;
+            }
+            let rep_attrs = split_spf_attrs(&rep_entity.raw_attrs);
+            // Fourth attr (index 3) is the items set
+            let item_refs = rep_attrs
+                .get(3)
+                .map(|s| parse_entity_ref_list(s))
+                .unwrap_or_default();
+
+            for item_ref in item_refs {
+                if let Some(item_entity) = entities.get(&item_ref) {
+                    if item_entity.entity_type.to_uppercase() == "IFCEXTRUDEDAREASOLID" {
+                        let item_attrs = split_spf_attrs(&item_entity.raw_attrs);
+                        // attr 0 = profile, attr 3 = depth (extrusion height)
+                        let depth = item_attrs
+                            .get(3)
+                            .and_then(|s| s.trim().parse::<f64>().ok())
+                            .unwrap_or(2.7);
+
+                        let profile_ref =
+                            parse_entity_ref(&item_attrs.get(0).cloned().unwrap_or_default());
+                        if let Some(prof_id) = profile_ref {
+                            if let Some(prof_entity) = entities.get(&prof_id) {
+                                if prof_entity.entity_type.to_uppercase()
+                                    == "IFCRECTANGLEPROFILEDEF"
+                                {
+                                    let prof_attrs =
+                                        split_spf_attrs(&prof_entity.raw_attrs);
+                                    // attr 3 = XDim (length), attr 4 = YDim (thickness)
+                                    let x_dim = prof_attrs
+                                        .get(3)
+                                        .and_then(|s| s.trim().parse::<f64>().ok())
+                                        .unwrap_or(4.0);
+                                    let y_dim = prof_attrs
+                                        .get(4)
+                                        .and_then(|s| s.trim().parse::<f64>().ok())
+                                        .unwrap_or(0.2);
+                                    return (x_dim, depth, y_dim);
+                                }
+                            }
+                        }
+                        // ExtrudedAreaSolid with non-rectangle profile
+                        warnings.push(ImportWarning {
+                            entity_id: eid,
+                            message: "Wall has non-rectangular profile; using default thickness 0.2m".into(),
+                        });
+                        return (4.0, depth, 0.2);
+                    }
+                }
+            }
+        }
+    }
+
+    warnings.push(ImportWarning {
+        entity_id: eid,
+        message: "Wall geometry too complex; using default dimensions 4m x 2.7m x 0.2m".into(),
+    });
+    default
+}
+
+/// Parse coordinates from IfcCartesianPoint raw attrs: "(x,y,z)" or "(x,y)"
+fn parse_point_coords(raw_attrs: &str) -> (f64, f64, f64) {
+    let s = raw_attrs.trim();
+    // The attrs look like "(1.0,2.0,3.0)" — it's a single attribute that is a list
+    let s = s.strip_prefix('(').unwrap_or(s);
+    let s = s.strip_suffix(')').unwrap_or(s);
+    let parts: Vec<&str> = s.split(',').collect();
+    let x = parts.first().and_then(|s| s.trim().parse().ok()).unwrap_or(0.0);
+    let y = parts.get(1).and_then(|s| s.trim().parse().ok()).unwrap_or(0.0);
+    let z = parts.get(2).and_then(|s| s.trim().parse().ok()).unwrap_or(0.0);
+    (x, y, z)
+}
+
+/// Assign level_id to an element if it doesn't already have one.
+fn assign_level_to_element(element: &mut Element, level_id: &str) {
+    match element {
+        Element::Wall(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Floor(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Roof(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Foundation(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Column(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Beam(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Door(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Window(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Stair(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Room(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IFC Export (IFC4)
+// ---------------------------------------------------------------------------
+
+/// Export BetterCAD elements to IFC4 SPF format.
 pub fn export_ifc(elements: &[Element]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut w = IfcWriter::new();
     w.write_project(elements);
@@ -27,15 +799,12 @@ pub fn export_ifc(elements: &[Element]) -> Result<Vec<u8>, Box<dyn std::error::E
 fn ifc_guid_from_bytes(bytes: &[u8; 16]) -> String {
     const CHARS: &[u8; 64] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
 
-    // Convert 16 bytes (128 bits) into 22 base-64 characters.
-    // Process 3 bytes at a time into 4 chars (with the last group handling 1 byte -> 2 chars).
     let mut result = String::with_capacity(22);
     let mut num: u128 = 0;
     for &b in bytes {
         num = (num << 8) | b as u128;
     }
 
-    // 128 bits -> 22 base-64 digits (22 * 6 = 132 bits, so first digit has reduced range)
     for i in (0..22).rev() {
         let shift = i * 6;
         let idx = ((num >> shift) & 0x3F) as usize;
@@ -47,10 +816,8 @@ fn ifc_guid_from_bytes(bytes: &[u8; 16]) -> String {
 
 /// Generate a deterministic IFC GUID from a seed string (element id + salt).
 fn make_ifc_guid(seed: &str) -> String {
-    // Simple hash-based GUID: use a basic hash to produce 16 bytes
     let mut hash: [u8; 16] = [0u8; 16];
     let seed_bytes = seed.as_bytes();
-    // FNV-like mixing for each byte position
     for (i, slot) in hash.iter_mut().enumerate() {
         let mut h: u64 = 0xcbf29ce484222325_u64;
         h = h.wrapping_mul(0x100000001b3).wrapping_add(i as u64);
@@ -129,29 +896,24 @@ impl IfcWriter {
         );
 
         // --- Units ---
-        // #6 IFCSIUNIT (length = metre)
         let unit_length = self.alloc();
         self.emit(unit_length, "IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)".into());
 
-        // #7 IFCSIUNIT (area = square metre)
         let unit_area = self.alloc();
         self.emit(unit_area, "IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.)".into());
 
-        // #8 IFCSIUNIT (volume = cubic metre)
         let unit_volume = self.alloc();
         self.emit(
             unit_volume,
             "IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.)".into(),
         );
 
-        // #9 IFCSIUNIT (angle = radian)
         let unit_angle = self.alloc();
         self.emit(
             unit_angle,
             "IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.)".into(),
         );
 
-        // #10 IFCUNITASSIGNMENT
         let units = self.alloc();
         self.emit(
             units,
@@ -162,7 +924,6 @@ impl IfcWriter {
         );
 
         // --- Geometric representation context ---
-        // World coordinate system origin
         let origin_3d = self.write_cartesian_point_3d(0.0, 0.0, 0.0);
         let dir_z = self.write_direction_3d(0.0, 0.0, 1.0);
         let dir_x = self.write_direction_3d(1.0, 0.0, 0.0);
@@ -175,10 +936,9 @@ impl IfcWriter {
             ),
         );
 
-        let dim_count = self.alloc();
-        self.emit(dim_count, "IFCDIMENSIONALEXPONENTS(0,0,0,0,0,0,0)".into());
+        let _dim_count = self.alloc();
+        self.emit(_dim_count, "IFCDIMENSIONALEXPONENTS(0,0,0,0,0,0,0)".into());
 
-        // Geometric representation context
         let geom_ctx = self.alloc();
         self.emit(
             geom_ctx,
@@ -188,7 +948,6 @@ impl IfcWriter {
             ),
         );
 
-        // Sub context for Body
         let body_ctx = self.alloc();
         self.emit(
             body_ctx,
@@ -233,17 +992,79 @@ impl IfcWriter {
             ),
         );
 
-        // --- Building Storey ---
-        let storey_guid = make_ifc_guid("storey_default");
-        let storey_placement = self.write_local_placement(Some(bldg_placement), 0.0, 0.0, 0.0);
-        let storey = self.alloc();
-        self.emit(
-            storey,
-            format!(
-                "IFCBUILDINGSTOREY('{}',#{},'Level 1',$,$,#{},$,$,.ELEMENT.,0.0)",
-                storey_guid, owner_history, storey_placement
-            ),
-        );
+        // --- Multi-storey: collect unique level_ids ---
+        let level_elements: HashMap<String, &LevelElement> = elements
+            .iter()
+            .filter_map(|e| match e {
+                Element::Level(level) => Some((level.meta.id.clone(), level)),
+                _ => None,
+            })
+            .collect();
+
+        // Build storeys from levels, or create a default one
+        struct StoreyInfo {
+            ifc_id: u32,
+            placement: u32,
+            level_domain_id: Option<String>,
+        }
+        let mut storeys: Vec<StoreyInfo> = Vec::new();
+
+        if level_elements.is_empty() {
+            // Single default storey
+            let storey_guid = make_ifc_guid("storey_default");
+            let storey_placement =
+                self.write_local_placement(Some(bldg_placement), 0.0, 0.0, 0.0);
+            let storey = self.alloc();
+            self.emit(
+                storey,
+                format!(
+                    "IFCBUILDINGSTOREY('{}',#{},'Level 1',$,$,#{},$,$,.ELEMENT.,0.0)",
+                    storey_guid, owner_history, storey_placement
+                ),
+            );
+            storeys.push(StoreyInfo {
+                ifc_id: storey,
+                placement: storey_placement,
+                level_domain_id: None,
+            });
+        } else {
+            // One storey per level element
+            let mut sorted_levels: Vec<(&String, &&LevelElement)> =
+                level_elements.iter().collect();
+            sorted_levels.sort_by(|a, b| {
+                a.1.elevation
+                    .partial_cmp(&b.1.elevation)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            for (level_id, level) in sorted_levels {
+                let storey_guid =
+                    make_ifc_guid(&format!("storey_{}", level_id));
+                let storey_placement = self.write_local_placement(
+                    Some(bldg_placement),
+                    0.0,
+                    0.0,
+                    level.elevation,
+                );
+                let storey = self.alloc();
+                self.emit(
+                    storey,
+                    format!(
+                        "IFCBUILDINGSTOREY('{}',#{},'{}','Level',$,#{},$,$,.ELEMENT.,{})",
+                        storey_guid,
+                        owner_history,
+                        level.meta.name,
+                        storey_placement,
+                        level.elevation
+                    ),
+                );
+                storeys.push(StoreyInfo {
+                    ifc_id: storey,
+                    placement: storey_placement,
+                    level_domain_id: Some(level_id.clone()),
+                });
+            }
+        }
 
         // --- Spatial containment hierarchy ---
         // Site in Project
@@ -272,88 +1093,198 @@ impl IfcWriter {
             ),
         );
 
-        // Storey in Building
-        let rel_storey = self.alloc();
+        // All storeys in Building
+        let storey_refs: Vec<String> = storeys
+            .iter()
+            .map(|s| format!("#{}", s.ifc_id))
+            .collect();
+        let rel_storeys = self.alloc();
         self.emit(
-            rel_storey,
+            rel_storeys,
             format!(
-                "IFCRELAGGREGATES('{}',#{},$,$,#{},(#{}))",
-                make_ifc_guid("rel_storey_in_bldg"),
+                "IFCRELAGGREGATES('{}',#{},$,$,#{},({}));",
+                make_ifc_guid("rel_storeys_in_bldg"),
                 owner_history,
                 building,
-                storey
-            ),
+                storey_refs.join(",")
+            ).replace(");;", ");"),
         );
 
-        // --- Write building elements ---
-        let mut storey_elements: Vec<u32> = Vec::new();
+        // Build a wall lookup for door/window placement
+        let walls_by_id: HashMap<&str, &WallElement> = elements
+            .iter()
+            .filter_map(|e| match e {
+                Element::Wall(w) => Some((w.meta.id.as_str(), w)),
+                _ => None,
+            })
+            .collect();
 
-        for element in elements {
-            match element {
-                Element::Wall(wall) => {
-                    let id = self.write_wall(
-                        wall,
-                        owner_history,
-                        storey_placement,
-                        body_ctx,
-                    );
-                    storey_elements.push(id);
+        // --- Write building elements grouped by storey ---
+        // For each storey, collect elements that belong to it
+        for storey_info in &storeys {
+            let mut storey_elements: Vec<u32> = Vec::new();
+
+            for element in elements {
+                // Determine which storey this element belongs to
+                let element_level_id = element.meta().level_id.as_ref().map(|r| r.0.clone());
+
+                let belongs = match &storey_info.level_domain_id {
+                    Some(lid) => element_level_id.as_deref() == Some(lid.as_str()),
+                    None => true, // default storey: everything goes here
+                };
+
+                if !belongs {
+                    continue;
                 }
-                Element::Door(door) => {
-                    let id = self.write_door(door, owner_history, storey_placement, body_ctx);
-                    storey_elements.push(id);
+
+                match element {
+                    Element::Wall(wall) => {
+                        let id = self.write_wall(
+                            wall,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+
+                        // Write openings for doors/windows hosted on this wall
+                        for el in elements {
+                            match el {
+                                Element::Door(door) if door.wall_id == wall.meta.id => {
+                                    self.write_door_with_opening(
+                                        door,
+                                        wall,
+                                        id,
+                                        owner_history,
+                                        storey_info.placement,
+                                        body_ctx,
+                                    );
+                                    // Door is NOT added to storey_elements (it's in the opening)
+                                }
+                                Element::Window(window) if window.wall_id == wall.meta.id => {
+                                    self.write_window_with_opening(
+                                        window,
+                                        wall,
+                                        id,
+                                        owner_history,
+                                        storey_info.placement,
+                                        body_ctx,
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        storey_elements.push(id);
+                    }
+                    Element::Floor(floor) => {
+                        let id = self.write_floor(
+                            floor,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Roof(roof) => {
+                        let id = self.write_roof(
+                            roof,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Foundation(foundation) => {
+                        let id = self.write_foundation(
+                            foundation,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Column(col) => {
+                        let id = self.write_column(
+                            col,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Beam(beam) => {
+                        let id = self.write_beam(
+                            beam,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Stair(stair) => {
+                        let id = self.write_stair(
+                            stair,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Room(room) => {
+                        let id = self.write_space(
+                            room,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+                        storey_elements.push(id);
+                    }
+                    // Doors and windows without a host wall → add standalone
+                    Element::Door(door) if walls_by_id.get(door.wall_id.as_str()).is_none() => {
+                        let id = self.write_door_standalone(
+                            door,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Window(window) if walls_by_id.get(window.wall_id.as_str()).is_none() => {
+                        let id = self.write_window_standalone(
+                            window,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                        );
+                        storey_elements.push(id);
+                    }
+                    // Skip: Level, Grid, Material, FamilyType, etc. + doors/windows with wall_id
+                    _ => {}
                 }
-                Element::Window(window) => {
-                    let id =
-                        self.write_window(window, owner_history, storey_placement, body_ctx);
-                    storey_elements.push(id);
-                }
-                Element::Floor(floor) => {
-                    let id = self.write_floor(floor, owner_history, storey_placement, body_ctx);
-                    storey_elements.push(id);
-                }
-                Element::Roof(roof) => {
-                    let id = self.write_roof(roof, owner_history, storey_placement, body_ctx);
-                    storey_elements.push(id);
-                }
-                Element::Column(col) => {
-                    let id =
-                        self.write_column(col, owner_history, storey_placement, body_ctx);
-                    storey_elements.push(id);
-                }
-                Element::Beam(beam) => {
-                    let id = self.write_beam(beam, owner_history, storey_placement, body_ctx);
-                    storey_elements.push(id);
-                }
-                Element::Stair(stair) => {
-                    let id =
-                        self.write_stair(stair, owner_history, storey_placement, body_ctx);
-                    storey_elements.push(id);
-                }
-                Element::Room(room) => {
-                    let id = self.write_space(room, owner_history, storey_placement, body_ctx);
-                    storey_elements.push(id);
-                }
-                // Non-geometric elements (Level, Grid, Material, etc.) are skipped
-                _ => {}
             }
-        }
 
-        // Containment: elements in storey
-        if !storey_elements.is_empty() {
-            let element_refs: Vec<String> =
-                storey_elements.iter().map(|id| format!("#{}", id)).collect();
-            let rel_contains = self.alloc();
-            self.emit(
-                rel_contains,
-                format!(
-                    "IFCRELCONTAINEDINSPATIALSTRUCTURE('{}',#{},$,$,({}),#{})",
-                    make_ifc_guid("rel_contains_storey"),
-                    owner_history,
-                    element_refs.join(","),
-                    storey
-                ),
-            );
+            // Containment: elements in storey
+            if !storey_elements.is_empty() {
+                let element_refs: Vec<String> =
+                    storey_elements.iter().map(|id| format!("#{}", id)).collect();
+                let rel_contains = self.alloc();
+                self.emit(
+                    rel_contains,
+                    format!(
+                        "IFCRELCONTAINEDINSPATIALSTRUCTURE('{}',#{},$,$,({}),#{})",
+                        make_ifc_guid(&format!(
+                            "rel_contains_{}",
+                            storey_info
+                                .level_domain_id
+                                .as_deref()
+                                .unwrap_or("default")
+                        )),
+                        owner_history,
+                        element_refs.join(","),
+                        storey_info.ifc_id
+                    ),
+                );
+            }
         }
     }
 
@@ -449,7 +1380,6 @@ impl IfcWriter {
         placement
     }
 
-    /// Write a rectangular profile and return its ID.
     fn write_rectangle_profile(&mut self, x_dim: f64, y_dim: f64) -> u32 {
         let center = self.write_cartesian_point_2d(0.0, 0.0);
         let dir = self.write_direction_2d(1.0, 0.0);
@@ -470,14 +1400,11 @@ impl IfcWriter {
         profile
     }
 
-    /// Write an arbitrary closed polyline profile from 2D points.
     fn write_arbitrary_profile(&mut self, points: &[[f64; 2]]) -> u32 {
-        // Build polyline (closed: repeat first point at end)
         let mut point_ids: Vec<u32> = Vec::new();
         for p in points {
             point_ids.push(self.write_cartesian_point_2d(p[0], p[1]));
         }
-        // Close the loop
         if let Some(&first) = points.first() {
             point_ids.push(self.write_cartesian_point_2d(first[0], first[1]));
         }
@@ -497,7 +1424,6 @@ impl IfcWriter {
         profile
     }
 
-    /// Create an extruded area solid from a profile, extruding along Z by depth.
     fn write_extruded_area_solid(
         &mut self,
         profile: u32,
@@ -525,7 +1451,6 @@ impl IfcWriter {
         solid
     }
 
-    /// Wrap a solid into a shape representation and product definition shape.
     fn write_body_shape(&mut self, solid: u32, body_ctx: u32) -> u32 {
         let shape_rep = self.alloc();
         self.emit(
@@ -544,11 +1469,11 @@ impl IfcWriter {
         prod_shape
     }
 
-    // --- Building element writers ---
+    // --- Building element writers (IFC4) ---
 
     fn write_wall(
         &mut self,
-        wall: &bcad_domain::WallElement,
+        wall: &WallElement,
         owner_history: u32,
         storey_placement: u32,
         body_ctx: u32,
@@ -557,7 +1482,6 @@ impl IfcWriter {
         let dy = wall.end[1] - wall.start[1];
         let length = (dx * dx + dy * dy).sqrt();
 
-        // Wall direction
         let (dir_x, dir_y) = if length > 1e-9 {
             (dx / length, dy / length)
         } else {
@@ -569,21 +1493,21 @@ impl IfcWriter {
             wall.start[0],
             wall.start[1],
             0.0,
-            0.0, 0.0, 1.0,       // axis (Z-up)
-            dir_x, dir_y, 0.0,    // ref direction (along wall)
+            0.0, 0.0, 1.0,
+            dir_x, dir_y, 0.0,
         );
 
-        // Profile: rectangle (length x thickness), extruded by height
         let profile = self.write_rectangle_profile(length, wall.thickness);
         let solid = self.write_extruded_area_solid(profile, wall.height);
         let shape = self.write_body_shape(solid, body_ctx);
 
         let guid = make_ifc_guid(&format!("wall_{}", wall.meta.id));
         let wall_id = self.alloc();
+        // IFC4: IFCWALL with PredefinedType .STANDARD. as last attribute
         self.emit(
             wall_id,
             format!(
-                "IFCWALLSTANDARDCASE('{}',#{},'{}','Wall',$,#{},#{},$)",
+                "IFCWALL('{}',#{},'{}','Wall',$,#{},#{},$,.STANDARD.)",
                 guid,
                 owner_history,
                 wall.meta.name,
@@ -592,7 +1516,6 @@ impl IfcWriter {
             ),
         );
 
-        // Property set with dimensions
         self.write_quantity_set(
             &wall.meta.id,
             owner_history,
@@ -608,9 +1531,9 @@ impl IfcWriter {
         wall_id
     }
 
-    fn write_door(
+    fn write_door_standalone(
         &mut self,
-        door: &bcad_domain::DoorElement,
+        door: &DoorElement,
         owner_history: u32,
         storey_placement: u32,
         body_ctx: u32,
@@ -618,17 +1541,17 @@ impl IfcWriter {
         let placement =
             self.write_local_placement(Some(storey_placement), 0.0, 0.0, door.sill_height);
 
-        // Simple rectangular profile for the door leaf
         let profile = self.write_rectangle_profile(door.width, 0.05);
         let solid = self.write_extruded_area_solid(profile, door.height);
         let shape = self.write_body_shape(solid, body_ctx);
 
         let guid = make_ifc_guid(&format!("door_{}", door.meta.id));
         let door_id = self.alloc();
+        // IFC4: IFCDOOR with PredefinedType at end
         self.emit(
             door_id,
             format!(
-                "IFCDOOR('{}',#{},'{}','Door',$,#{},#{},$,{},{})",
+                "IFCDOOR('{}',#{},'{}','Door',$,#{},#{},$,{},{},$)",
                 guid,
                 owner_history,
                 door.meta.name,
@@ -642,9 +1565,100 @@ impl IfcWriter {
         door_id
     }
 
-    fn write_window(
+    fn write_door_with_opening(
         &mut self,
-        window: &bcad_domain::WindowElement,
+        door: &DoorElement,
+        wall: &WallElement,
+        wall_ifc_id: u32,
+        owner_history: u32,
+        storey_placement: u32,
+        body_ctx: u32,
+    ) {
+        let dx = wall.end[0] - wall.start[0];
+        let dy = wall.end[1] - wall.start[1];
+        let wall_length = (dx * dx + dy * dy).sqrt();
+        let (dir_x, dir_y) = if wall_length > 1e-9 {
+            (dx / wall_length, dy / wall_length)
+        } else {
+            (1.0, 0.0)
+        };
+
+        // Opening center along wall
+        let center_dist = door.position_along_wall * wall_length;
+        let opening_x = wall.start[0] + dir_x * (center_dist - door.width * 0.5);
+        let opening_y = wall.start[1] + dir_y * (center_dist - door.width * 0.5);
+
+        // IfcOpeningElement
+        let opening_placement = self.write_local_placement_with_dir(
+            Some(storey_placement),
+            opening_x,
+            opening_y,
+            door.sill_height,
+            0.0, 0.0, 1.0,
+            dir_x, dir_y, 0.0,
+        );
+        let opening_profile = self.write_rectangle_profile(door.width, wall.thickness + 0.01);
+        let opening_solid = self.write_extruded_area_solid(opening_profile, door.height);
+        let opening_shape = self.write_body_shape(opening_solid, body_ctx);
+
+        let opening_guid = make_ifc_guid(&format!("opening_door_{}", door.meta.id));
+        let opening_id = self.alloc();
+        self.emit(
+            opening_id,
+            format!(
+                "IFCOPENINGELEMENT('{}',#{},'Door Opening',$,$,#{},#{},$,.OPENING.)",
+                opening_guid, owner_history, opening_placement, opening_shape
+            ),
+        );
+
+        // IfcRelVoidsElement (wall → opening)
+        let rel_void_guid = make_ifc_guid(&format!("relvoid_door_{}", door.meta.id));
+        let rel_void = self.alloc();
+        self.emit(
+            rel_void,
+            format!(
+                "IFCRELVOIDSELEMENT('{}',#{},$,$,#{},#{})",
+                rel_void_guid, owner_history, wall_ifc_id, opening_id
+            ),
+        );
+
+        // Door element placed relative to the opening
+        let door_placement = self.write_local_placement(Some(opening_placement), 0.0, 0.0, 0.0);
+        let door_profile = self.write_rectangle_profile(door.width, 0.05);
+        let door_solid = self.write_extruded_area_solid(door_profile, door.height);
+        let door_shape = self.write_body_shape(door_solid, body_ctx);
+
+        let door_guid = make_ifc_guid(&format!("door_{}", door.meta.id));
+        let door_ifc_id = self.alloc();
+        self.emit(
+            door_ifc_id,
+            format!(
+                "IFCDOOR('{}',#{},'{}','Door',$,#{},#{},$,{},{},$)",
+                door_guid,
+                owner_history,
+                door.meta.name,
+                door_placement,
+                door_shape,
+                door.height,
+                door.width
+            ),
+        );
+
+        // IfcRelFillsElement (opening → door)
+        let rel_fill_guid = make_ifc_guid(&format!("relfill_door_{}", door.meta.id));
+        let rel_fill = self.alloc();
+        self.emit(
+            rel_fill,
+            format!(
+                "IFCRELFILLSELEMENT('{}',#{},$,$,#{},#{})",
+                rel_fill_guid, owner_history, opening_id, door_ifc_id
+            ),
+        );
+    }
+
+    fn write_window_standalone(
+        &mut self,
+        window: &WindowElement,
         owner_history: u32,
         storey_placement: u32,
         body_ctx: u32,
@@ -661,7 +1675,7 @@ impl IfcWriter {
         self.emit(
             win_id,
             format!(
-                "IFCWINDOW('{}',#{},'{}','Window',$,#{},#{},$,{},{})",
+                "IFCWINDOW('{}',#{},'{}','Window',$,#{},#{},$,{},{},$)",
                 guid,
                 owner_history,
                 window.meta.name,
@@ -675,9 +1689,99 @@ impl IfcWriter {
         win_id
     }
 
+    fn write_window_with_opening(
+        &mut self,
+        window: &WindowElement,
+        wall: &WallElement,
+        wall_ifc_id: u32,
+        owner_history: u32,
+        storey_placement: u32,
+        body_ctx: u32,
+    ) {
+        let dx = wall.end[0] - wall.start[0];
+        let dy = wall.end[1] - wall.start[1];
+        let wall_length = (dx * dx + dy * dy).sqrt();
+        let (dir_x, dir_y) = if wall_length > 1e-9 {
+            (dx / wall_length, dy / wall_length)
+        } else {
+            (1.0, 0.0)
+        };
+
+        let center_dist = window.position_along_wall * wall_length;
+        let opening_x = wall.start[0] + dir_x * (center_dist - window.width * 0.5);
+        let opening_y = wall.start[1] + dir_y * (center_dist - window.width * 0.5);
+
+        // IfcOpeningElement
+        let opening_placement = self.write_local_placement_with_dir(
+            Some(storey_placement),
+            opening_x,
+            opening_y,
+            window.sill_height,
+            0.0, 0.0, 1.0,
+            dir_x, dir_y, 0.0,
+        );
+        let opening_profile = self.write_rectangle_profile(window.width, wall.thickness + 0.01);
+        let opening_solid = self.write_extruded_area_solid(opening_profile, window.height);
+        let opening_shape = self.write_body_shape(opening_solid, body_ctx);
+
+        let opening_guid = make_ifc_guid(&format!("opening_window_{}", window.meta.id));
+        let opening_id = self.alloc();
+        self.emit(
+            opening_id,
+            format!(
+                "IFCOPENINGELEMENT('{}',#{},'Window Opening',$,$,#{},#{},$,.OPENING.)",
+                opening_guid, owner_history, opening_placement, opening_shape
+            ),
+        );
+
+        // IfcRelVoidsElement (wall → opening)
+        let rel_void_guid = make_ifc_guid(&format!("relvoid_window_{}", window.meta.id));
+        let rel_void = self.alloc();
+        self.emit(
+            rel_void,
+            format!(
+                "IFCRELVOIDSELEMENT('{}',#{},$,$,#{},#{})",
+                rel_void_guid, owner_history, wall_ifc_id, opening_id
+            ),
+        );
+
+        // Window element placed relative to the opening
+        let win_placement = self.write_local_placement(Some(opening_placement), 0.0, 0.0, 0.0);
+        let win_profile = self.write_rectangle_profile(window.width, 0.05);
+        let win_solid = self.write_extruded_area_solid(win_profile, window.height);
+        let win_shape = self.write_body_shape(win_solid, body_ctx);
+
+        let win_guid = make_ifc_guid(&format!("window_{}", window.meta.id));
+        let win_ifc_id = self.alloc();
+        self.emit(
+            win_ifc_id,
+            format!(
+                "IFCWINDOW('{}',#{},'{}','Window',$,#{},#{},$,{},{},$)",
+                win_guid,
+                owner_history,
+                window.meta.name,
+                win_placement,
+                win_shape,
+                window.height,
+                window.width
+            ),
+        );
+
+        // IfcRelFillsElement (opening → window)
+        let rel_fill_guid = make_ifc_guid(&format!("relfill_window_{}", window.meta.id));
+        let rel_fill = self.alloc();
+        self.emit(
+            rel_fill,
+            format!(
+                "IFCRELFILLSELEMENT('{}',#{},$,$,#{},#{})",
+                rel_fill_guid, owner_history, opening_id, win_ifc_id
+            ),
+        );
+    }
+
     fn write_floor(
         &mut self,
-        floor: &bcad_domain::FloorElement,
+        floor: &FloorElement,
         owner_history: u32,
         storey_placement: u32,
         body_ctx: u32,
@@ -690,6 +1794,7 @@ impl IfcWriter {
 
         let guid = make_ifc_guid(&format!("floor_{}", floor.meta.id));
         let slab_id = self.alloc();
+        // IFC4: IFCSLAB with PredefinedType at end
         self.emit(
             slab_id,
             format!(
@@ -705,9 +1810,39 @@ impl IfcWriter {
         slab_id
     }
 
+    fn write_foundation(
+        &mut self,
+        foundation: &FoundationElement,
+        owner_history: u32,
+        storey_placement: u32,
+        body_ctx: u32,
+    ) -> u32 {
+        let placement = self.write_local_placement(Some(storey_placement), 0.0, 0.0, 0.0);
+
+        let profile = self.write_arbitrary_profile(&foundation.boundary);
+        let solid = self.write_extruded_area_solid(profile, foundation.thickness);
+        let shape = self.write_body_shape(solid, body_ctx);
+
+        let guid = make_ifc_guid(&format!("foundation_{}", foundation.meta.id));
+        let slab_id = self.alloc();
+        self.emit(
+            slab_id,
+            format!(
+                "IFCSLAB('{}',#{},'{}','Foundation slab',$,#{},#{},$,.BASESLAB.)",
+                guid,
+                owner_history,
+                foundation.meta.name,
+                placement,
+                shape
+            ),
+        );
+
+        slab_id
+    }
+
     fn write_roof(
         &mut self,
-        roof: &bcad_domain::RoofElement,
+        roof: &RoofElement,
         owner_history: u32,
         storey_placement: u32,
         body_ctx: u32,
@@ -715,10 +1850,10 @@ impl IfcWriter {
         let placement =
             self.write_local_placement(Some(storey_placement), 0.0, 0.0, roof.elevation);
         let roof_type = match roof.roof_type {
-            bcad_domain::RoofType::Flat => ".FLAT_ROOF.",
-            bcad_domain::RoofType::Shed => ".SHED_ROOF.",
-            bcad_domain::RoofType::Gable => ".GABLE_ROOF.",
-            bcad_domain::RoofType::Hip => ".HIP_ROOF.",
+            RoofType::Flat => ".FLAT_ROOF.",
+            RoofType::Shed => ".SHED_ROOF.",
+            RoofType::Gable => ".GABLE_ROOF.",
+            RoofType::Hip => ".HIP_ROOF.",
         };
 
         let profile = self.write_arbitrary_profile(&roof.boundary);
@@ -745,7 +1880,7 @@ impl IfcWriter {
 
     fn write_column(
         &mut self,
-        col: &bcad_domain::ColumnElement,
+        col: &ColumnElement,
         owner_history: u32,
         storey_placement: u32,
         body_ctx: u32,
@@ -763,10 +1898,11 @@ impl IfcWriter {
 
         let guid = make_ifc_guid(&format!("column_{}", col.meta.id));
         let col_id = self.alloc();
+        // IFC4: IFCCOLUMN with PredefinedType at end
         self.emit(
             col_id,
             format!(
-                "IFCCOLUMN('{}',#{},'{}','Column',$,#{},#{},$)",
+                "IFCCOLUMN('{}',#{},'{}','Column',$,#{},#{},$,$)",
                 guid, owner_history, col.meta.name, placement, shape
             ),
         );
@@ -776,7 +1912,7 @@ impl IfcWriter {
 
     fn write_beam(
         &mut self,
-        beam: &bcad_domain::BeamElement,
+        beam: &BeamElement,
         owner_history: u32,
         storey_placement: u32,
         body_ctx: u32,
@@ -792,14 +1928,13 @@ impl IfcWriter {
             (1.0, 0.0, 0.0)
         };
 
-        // Beam axis is along the beam direction, extrusion also along that
         let placement = self.write_local_placement_with_dir(
             Some(storey_placement),
             beam.start[0],
             beam.start[1],
             beam.start[2],
-            ref_dx, ref_dy, ref_dz, // axis along beam
-            0.0, 0.0, 1.0,          // ref direction
+            ref_dx, ref_dy, ref_dz,
+            0.0, 0.0, 1.0,
         );
 
         let profile = self.write_rectangle_profile(beam.width, beam.depth);
@@ -808,10 +1943,11 @@ impl IfcWriter {
 
         let guid = make_ifc_guid(&format!("beam_{}", beam.meta.id));
         let beam_id = self.alloc();
+        // IFC4: IFCBEAM with PredefinedType at end
         self.emit(
             beam_id,
             format!(
-                "IFCBEAM('{}',#{},'{}','Beam',$,#{},#{},$)",
+                "IFCBEAM('{}',#{},'{}','Beam',$,#{},#{},$,$)",
                 guid, owner_history, beam.meta.name, placement, shape
             ),
         );
@@ -821,7 +1957,7 @@ impl IfcWriter {
 
     fn write_stair(
         &mut self,
-        stair: &bcad_domain::StairElement,
+        stair: &StairElement,
         owner_history: u32,
         storey_placement: u32,
         body_ctx: u32,
@@ -833,7 +1969,6 @@ impl IfcWriter {
             0.0,
         );
 
-        // Simplified: represent stair as a ramp solid (bounding box)
         let dx = stair.end[0] - stair.start[0];
         let dy = stair.end[1] - stair.start[1];
         let run = (dx * dx + dy * dy).sqrt();
@@ -845,8 +1980,8 @@ impl IfcWriter {
         let guid = make_ifc_guid(&format!("stair_{}", stair.meta.id));
         let stair_id = self.alloc();
         let stair_kind = match stair.stair_type {
-            bcad_domain::StairType::Straight => ".STRAIGHT_RUN_STAIR.",
-            bcad_domain::StairType::Spiral => ".SPIRAL_STAIR.",
+            StairType::Straight => ".STRAIGHT_RUN_STAIR.",
+            StairType::Spiral => ".SPIRAL_STAIR.",
         };
         self.emit(
             stair_id,
@@ -861,14 +1996,13 @@ impl IfcWriter {
 
     fn write_space(
         &mut self,
-        room: &bcad_domain::RoomElement,
+        room: &RoomElement,
         owner_history: u32,
         storey_placement: u32,
         body_ctx: u32,
     ) -> u32 {
         let placement = self.write_local_placement(Some(storey_placement), 0.0, 0.0, 0.0);
 
-        // Room as extruded space (default 3m height)
         let profile = self.write_arbitrary_profile(&room.boundary);
         let solid = self.write_extruded_area_solid(profile, 3.0);
         let shape = self.write_body_shape(solid, body_ctx);
@@ -945,11 +2079,10 @@ impl IfcWriter {
             "FILE_NAME('export.ifc','{}',(''),(''),'','BetterCAD 0.1','');\n",
             timestamp
         ));
-        output.push_str("FILE_SCHEMA(('IFC2X3'));\n");
+        output.push_str("FILE_SCHEMA(('IFC4'));\n");
         output.push_str("ENDSEC;\n");
         output.push_str("DATA;\n");
 
-        // Entity lines
         for line in &self.lines {
             output.push_str(line);
             output.push('\n');
@@ -965,13 +2098,11 @@ impl IfcWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bcad_domain::*;
 
     #[test]
     fn test_ifc_guid_length() {
         let guid = make_ifc_guid("test_seed");
         assert_eq!(guid.len(), 22);
-        // Ensure all characters are valid IFC base64
         for ch in guid.chars() {
             assert!(
                 ch.is_ascii_alphanumeric() || ch == '_' || ch == '$',
@@ -1008,7 +2139,15 @@ mod tests {
     }
 
     #[test]
-    fn test_export_wall() {
+    fn test_export_uses_ifc4_schema() {
+        let bytes = export_ifc(&[]).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("FILE_SCHEMA(('IFC4'))"), "Should use IFC4 schema");
+        assert!(!text.contains("IFC2X3"), "Should not contain IFC2X3");
+    }
+
+    #[test]
+    fn test_export_wall_uses_ifcwall() {
         let elements = vec![Element::Wall(WallElement {
             meta: ElementMeta::new("Test Wall"),
             start: [0.0, 0.0],
@@ -1019,10 +2158,10 @@ mod tests {
 
         let bytes = export_ifc(&elements).unwrap();
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("IFCWALLSTANDARDCASE"));
-        assert!(text.contains("IFCEXTRUDEDAREASOLID"));
-        assert!(text.contains("IFCRECTANGLEPROFILEDEF"));
-        assert!(text.contains("IFCRELCONTAINEDINSPATIALSTRUCTURE"));
+        // IFC4 uses IFCWALL with .STANDARD. instead of IFCWALLSTANDARDCASE
+        assert!(text.contains("IFCWALL("), "Should contain IFCWALL");
+        assert!(text.contains(".STANDARD.)"), "Should have .STANDARD. predefined type");
+        assert!(!text.contains("IFCWALLSTANDARDCASE"), "Should NOT contain IFCWALLSTANDARDCASE");
     }
 
     #[test]
@@ -1051,37 +2190,44 @@ mod tests {
 
         let bytes = export_ifc(&elements).unwrap();
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("IFCWALLSTANDARDCASE"));
+        assert!(text.contains("IFCWALL("));
         assert!(text.contains("IFCSLAB"));
         assert!(text.contains("IFCCOLUMN"));
     }
 
     #[test]
-    fn test_export_door_and_window() {
+    fn test_export_door_with_opening() {
+        let wall = WallElement {
+            meta: {
+                let mut m = ElementMeta::new("Wall 1");
+                m.id = "w1".to_string();
+                m
+            },
+            start: [0.0, 0.0],
+            end: [5.0, 0.0],
+            height: 3.0,
+            thickness: 0.2,
+        };
+
         let elements = vec![
+            Element::Wall(wall),
             Element::Door(DoorElement {
                 meta: ElementMeta::new("Door 1"),
                 wall_id: "w1".into(),
-                position_along_wall: 1.0,
+                position_along_wall: 0.5,
                 width: 0.9,
                 height: 2.1,
                 sill_height: 0.0,
                 swing: DoorSwing::Right,
             }),
-            Element::Window(WindowElement {
-                meta: ElementMeta::new("Window 1"),
-                wall_id: "w1".into(),
-                position_along_wall: 3.0,
-                width: 1.2,
-                height: 1.0,
-                sill_height: 0.9,
-            }),
         ];
 
         let bytes = export_ifc(&elements).unwrap();
         let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("IFCOPENINGELEMENT"), "Should have opening element");
+        assert!(text.contains("IFCRELVOIDSELEMENT"), "Should have rel voids");
+        assert!(text.contains("IFCRELFILLSELEMENT"), "Should have rel fills");
         assert!(text.contains("IFCDOOR"));
-        assert!(text.contains("IFCWINDOW"));
     }
 
     #[test]
@@ -1094,7 +2240,7 @@ mod tests {
                 width: 1.0,
                 risers: 15,
                 total_height: 3.0,
-                stair_type: bcad_domain::StairType::Straight,
+                stair_type: StairType::Straight,
                 spiral_turns: 1.0,
                 side_wall_thickness: 0.12,
             }),
@@ -1111,19 +2257,187 @@ mod tests {
     }
 
     #[test]
+    fn test_export_foundation() {
+        let elements = vec![Element::Foundation(FoundationElement {
+            meta: ElementMeta::new("Foundation 1"),
+            boundary: vec![[0.0, 0.0], [6.0, 0.0], [6.0, 4.0], [0.0, 4.0]],
+            thickness: 0.5,
+        })];
+
+        let bytes = export_ifc(&elements).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("IFCSLAB"));
+        assert!(text.contains(".BASESLAB.)"), "Foundation should use .BASESLAB. predefined type");
+    }
+
+    #[test]
     fn test_ifc_file_structure() {
         let bytes = export_ifc(&[]).unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
-        // Check required sections
         assert!(text.contains("HEADER;"));
         assert!(text.contains("FILE_DESCRIPTION"));
         assert!(text.contains("FILE_NAME"));
-        assert!(text.contains("FILE_SCHEMA(('IFC2X3'))"));
+        assert!(text.contains("FILE_SCHEMA(('IFC4'))"));
         assert!(text.contains("DATA;"));
         assert!(text.contains("ENDSEC;"));
-
-        // Check spatial hierarchy
         assert!(text.contains("IFCRELAGGREGATES"));
+    }
+
+    #[test]
+    fn test_export_multi_storey() {
+        let level1 = Element::Level(LevelElement {
+            meta: {
+                let mut m = ElementMeta::new("Level 1");
+                m.id = "L1".to_string();
+                m
+            },
+            elevation: 0.0,
+        });
+        let level2 = Element::Level(LevelElement {
+            meta: {
+                let mut m = ElementMeta::new("Level 2");
+                m.id = "L2".to_string();
+                m
+            },
+            elevation: 3.0,
+        });
+        let wall1 = Element::Wall(WallElement {
+            meta: {
+                let mut m = ElementMeta::new("Wall L1");
+                m.level_id = Some("L1".into());
+                m
+            },
+            start: [0.0, 0.0],
+            end: [5.0, 0.0],
+            height: 3.0,
+            thickness: 0.2,
+        });
+        let wall2 = Element::Wall(WallElement {
+            meta: {
+                let mut m = ElementMeta::new("Wall L2");
+                m.level_id = Some("L2".into());
+                m
+            },
+            start: [0.0, 0.0],
+            end: [5.0, 0.0],
+            height: 3.0,
+            thickness: 0.2,
+        });
+
+        let elements = vec![level1, level2, wall1, wall2];
+        let bytes = export_ifc(&elements).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        // Should have two IFCBUILDINGSTOREY entities
+        let storey_count = text.matches("IFCBUILDINGSTOREY(").count();
+        assert_eq!(storey_count, 2, "Should have 2 storeys");
+        // Should have two separate IFCRELCONTAINEDINSPATIALSTRUCTURE
+        let contains_count = text.matches("IFCRELCONTAINEDINSPATIALSTRUCTURE(").count();
+        assert_eq!(contains_count, 2, "Should have 2 containment relations");
+    }
+
+    // --- Import Tests ---
+
+    #[test]
+    fn test_import_ifc_empty() {
+        let ifc = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
+        let result = import_ifc(ifc.as_bytes()).unwrap();
+        assert!(result.elements.is_empty());
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_import_ifc_wall() {
+        let ifc = r#"ISO-10303-21;
+HEADER;
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1=IFCCARTESIANPOINT((0.0,0.0,0.0));
+#2=IFCDIRECTION((0.0,0.0,1.0));
+#3=IFCDIRECTION((1.0,0.0,0.0));
+#4=IFCAXIS2PLACEMENT3D(#1,#2,#3);
+#5=IFCLOCALPLACEMENT($,#4);
+#10=IFCWALL('0test_guid_wall_12345',$,'My Wall',$,$,#5,$,$,.STANDARD.);
+ENDSEC;
+END-ISO-10303-21;
+"#;
+        let result = import_ifc(ifc.as_bytes()).unwrap();
+        assert_eq!(result.elements.len(), 1);
+        match &result.elements[0] {
+            Element::Wall(w) => {
+                assert_eq!(w.meta.name, "My Wall");
+                assert!((w.start[0]).abs() < 1e-6);
+            }
+            other => panic!("expected Wall, got {:?}", other.kind_name()),
+        }
+    }
+
+    #[test]
+    fn test_import_ifc_storey_and_slab() {
+        let ifc = r#"ISO-10303-21;
+HEADER;
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1=IFCBUILDINGSTOREY('guid1',$,'Ground Floor',$,$,$,$,$,.ELEMENT.,0.0);
+#2=IFCSLAB('guid2',$,'Floor Slab',$,$,$,$,$,.FLOOR.);
+#3=IFCRELCONTAINEDINSPATIALSTRUCTURE('guid3',$,$,$,(#2),#1);
+ENDSEC;
+END-ISO-10303-21;
+"#;
+        let result = import_ifc(ifc.as_bytes()).unwrap();
+        // Should have 1 level + 1 floor = 2 elements
+        let levels: Vec<_> = result
+            .elements
+            .iter()
+            .filter(|e| matches!(e, Element::Level(_)))
+            .collect();
+        let floors: Vec<_> = result
+            .elements
+            .iter()
+            .filter(|e| matches!(e, Element::Floor(_)))
+            .collect();
+        assert_eq!(levels.len(), 1);
+        assert_eq!(floors.len(), 1);
+        // Floor should have a level_id
+        if let Element::Floor(f) = floors[0] {
+            assert!(f.meta.level_id.is_some(), "Floor should have level_id assigned");
+        }
+    }
+
+    #[test]
+    fn test_spf_attr_parsing() {
+        let attrs = split_spf_attrs("'hello',#42,$,(#1,#2),3.14");
+        assert_eq!(attrs.len(), 5);
+        assert_eq!(attrs[0], "'hello'");
+        assert_eq!(attrs[1], "#42");
+        assert_eq!(attrs[2], "$");
+        assert_eq!(attrs[3], "(#1,#2)");
+        assert_eq!(attrs[4], "3.14");
+    }
+
+    #[test]
+    fn test_import_export_roundtrip() {
+        // Export a simple project, then import it back
+        let elements = vec![
+            Element::Wall(WallElement {
+                meta: ElementMeta::new("Test Wall"),
+                start: [0.0, 0.0],
+                end: [5.0, 0.0],
+                height: 3.0,
+                thickness: 0.2,
+            }),
+        ];
+
+        let bytes = export_ifc(&elements).unwrap();
+        let result = import_ifc(&bytes).unwrap();
+        // Should find at least 1 wall plus the default storey
+        let walls: Vec<_> = result
+            .elements
+            .iter()
+            .filter(|e| matches!(e, Element::Wall(_)))
+            .collect();
+        assert!(!walls.is_empty(), "Roundtrip should preserve walls");
     }
 }

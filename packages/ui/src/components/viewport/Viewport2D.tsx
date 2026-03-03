@@ -1,26 +1,35 @@
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useThree } from '@react-three/fiber'
 import { MapControls, Line, Text } from '@react-three/drei'
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import {
   isBeamElement,
   isColumnElement,
   isDimensionElement,
-  isDoorElement,
   isFloorElement,
   isRoofElement,
   isRoomElement,
   isStairElement,
   isTextAnnotationElement,
   isWallElement,
-  isWindowElement,
   useEntityStore,
 } from '../../stores/entity-store'
-import type { BeamElement, ColumnElement, DimensionElement, DoorElement, FloorElement, PrototypeElement, RoofElement, RoomElement, StairElement, TextAnnotationElement, WallElement, WindowElement } from '../../services/kernel-bridge'
+import type { BeamElement, ColumnElement, DimensionElement, FloorElement, PrototypeElement, RoofElement, RoomElement, StairElement, TextAnnotationElement, WallElement } from '../../services/kernel-bridge'
 import { useLevelStore } from '../../stores/level-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { useUIStore } from '../../stores/ui-store'
 import { formatLength } from '../../utils/units'
+import { buildVisibleWallOutlineLines } from '../../utils/wall-outline'
 import { polygonCentroid } from '../../services/room-detection'
+import { resolveRoomName } from '../../services/room-utils'
+import { MepSymbols2D } from './MepSymbols2D'
+import { SwitchingDiagram2D } from './SwitchingDiagram2D'
+import { FurnitureSymbols2D } from './FurnitureSymbols2D'
+import { SiteSymbols2D } from './SiteSymbols2D'
+import { DoorWindowSymbols2D } from './DoorWindowSymbols2D'
+import { HvacSymbols2D } from './HvacSymbols2D'
+import { FireSafetySymbols2D } from './FireSafetySymbols2D'
+import { AccessibilitySymbols2D } from './AccessibilitySymbols2D'
 
 interface PlanLine {
   start: [number, number]
@@ -45,10 +54,6 @@ function arcPoints2D(center: [number, number], radius: number, startAngle: numbe
   return points
 }
 
-function normalizeSwing(swing?: string): 'left' | 'right' {
-  return swing === 'left' ? 'left' : 'right'
-}
-
 function isOnActiveLevel(element: PrototypeElement, activeLevelId: string): boolean {
   return !element.meta.level_id || element.meta.level_id === activeLevelId
 }
@@ -57,14 +62,16 @@ function PlanLines() {
   const elements = useEntityStore((s) => s.elements)
   const activeLevelId = useLevelStore((s) => s.activeLevelId)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
+  const selectBody = useUIStore((s) => s.selectBody)
+  const activeTool = useUIStore((s) => s.activeTool)
+  const annotationDensity = useUIStore((s) => s.annotationDensity)
+  const showMepText = useUIStore((s) => s.showMepText)
+  const showFurnitureLabels = useUIStore((s) => s.showFurnitureLabels)
+  const planSymbolProfile = useUIStore((s) => s.planSymbolProfile)
+  const canSelect = activeTool === 'select'
 
   const walls = useMemo(
     () => Array.from(elements.values()).filter((e): e is WallElement => isWallElement(e) && isOnActiveLevel(e, activeLevelId)),
-    [elements, activeLevelId],
-  )
-
-  const doors = useMemo(
-    () => Array.from(elements.values()).filter((e): e is DoorElement => isDoorElement(e) && isOnActiveLevel(e, activeLevelId)),
     [elements, activeLevelId],
   )
 
@@ -75,11 +82,6 @@ function PlanLines() {
 
   const stairs = useMemo(
     () => Array.from(elements.values()).filter((e): e is StairElement => isStairElement(e) && isOnActiveLevel(e, activeLevelId)),
-    [elements, activeLevelId],
-  )
-
-  const windows = useMemo(
-    () => Array.from(elements.values()).filter((e): e is WindowElement => isWindowElement(e) && isOnActiveLevel(e, activeLevelId)),
     [elements, activeLevelId],
   )
 
@@ -133,12 +135,14 @@ function PlanLines() {
         id: room.meta.id,
         shape,
         centroid,
-        name: room.name,
+        name: resolveRoomName(room),
         color: room.color || '#8b5cf6',
         area,
       }
     }).filter((r): r is NonNullable<typeof r> => r !== null)
   }, [rooms])
+
+  const showElementTags = annotationDensity !== 'minimal'
 
   const roofLoops = useMemo(() => {
     return roofs
@@ -158,33 +162,7 @@ function PlanLines() {
   }, [walls])
 
   const wallLines = useMemo(() => {
-    const result: PlanLine[] = []
-    walls.forEach((wall) => {
-      const dx = wall.end[0] - wall.start[0]
-      const dy = wall.end[1] - wall.start[1]
-      const len = Math.sqrt(dx * dx + dy * dy)
-      if (len < 1e-10) return
-      const nx = (-dy / len) * (wall.thickness / 2)
-      const ny = (dx / len) * (wall.thickness / 2)
-
-      result.push({
-        start: [wall.start[0] + nx, wall.start[1] + ny],
-        end: [wall.end[0] + nx, wall.end[1] + ny],
-      })
-      result.push({
-        start: [wall.start[0] - nx, wall.start[1] - ny],
-        end: [wall.end[0] - nx, wall.end[1] - ny],
-      })
-      result.push({
-        start: [wall.start[0] + nx, wall.start[1] + ny],
-        end: [wall.start[0] - nx, wall.start[1] - ny],
-      })
-      result.push({
-        start: [wall.end[0] + nx, wall.end[1] + ny],
-        end: [wall.end[0] - nx, wall.end[1] - ny],
-      })
-    })
-    return result
+    return buildVisibleWallOutlineLines(walls)
   }, [walls])
 
   const floorLoops = useMemo(() => {
@@ -277,87 +255,6 @@ function PlanLines() {
     return { edgeLines, riserLines }
   }, [stairs])
 
-  const doorOverlay = useMemo(() => {
-    const spans: PlanLine[] = []
-    const leaves: PlanLine[] = []
-    const arcs: [number, number][][] = []
-
-    doors.forEach((door: DoorElement) => {
-      const wall = wallById.get(door.wall_id)
-      if (!wall) return
-      const dx = wall.end[0] - wall.start[0]
-      const dz = wall.end[1] - wall.start[1]
-      const len = Math.max(1e-8, Math.hypot(dx, dz))
-      const dir: [number, number] = [dx / len, dz / len]
-      const center: [number, number] = [
-        wall.start[0] + dx * door.position_along_wall,
-        wall.start[1] + dz * door.position_along_wall,
-      ]
-      const half = door.width / 2
-      spans.push({
-        start: [center[0] - dir[0] * half, center[1] - dir[1] * half],
-        end: [center[0] + dir[0] * half, center[1] + dir[1] * half],
-      })
-
-      const normal: [number, number] = [-dir[1], dir[0]]
-      const swing = normalizeSwing(door.swing)
-      const hinge: [number, number] = swing === 'left'
-        ? [center[0] - dir[0] * half, center[1] - dir[1] * half]
-        : [center[0] + dir[0] * half, center[1] + dir[1] * half]
-      const closedDir: [number, number] = swing === 'left' ? dir : [-dir[0], -dir[1]]
-      const openDir: [number, number] = swing === 'left' ? normal : [-normal[0], -normal[1]]
-
-      leaves.push({
-        start: hinge,
-        end: [hinge[0] + openDir[0] * door.width, hinge[1] + openDir[1] * door.width],
-      })
-
-      const arcPoints: [number, number][] = []
-      const segments = 14
-      for (let i = 0; i <= segments; i += 1) {
-        const theta = (Math.PI / 2) * (i / segments)
-        const x = hinge[0] + door.width * (closedDir[0] * Math.cos(theta) + openDir[0] * Math.sin(theta))
-        const y = hinge[1] + door.width * (closedDir[1] * Math.cos(theta) + openDir[1] * Math.sin(theta))
-        arcPoints.push([x, y])
-      }
-      arcs.push(arcPoints)
-    })
-
-    return { spans, leaves, arcs }
-  }, [doors, wallById])
-
-  const windowOverlay = useMemo(() => {
-    const lines: { start: [number, number]; end: [number, number] }[] = []
-
-    windows.forEach((win: WindowElement) => {
-      const wall = wallById.get(win.wall_id)
-      if (!wall) return
-      const dx = wall.end[0] - wall.start[0]
-      const dz = wall.end[1] - wall.start[1]
-      const len = Math.max(1e-8, Math.hypot(dx, dz))
-      const dir: [number, number] = [dx / len, dz / len]
-      const normal: [number, number] = [-dir[1], dir[0]]
-      const center: [number, number] = [
-        wall.start[0] + dx * win.position_along_wall,
-        wall.start[1] + dz * win.position_along_wall,
-      ]
-      const half = win.width / 2
-      const offset = wall.thickness * 0.3
-
-      // Two parallel lines offset from wall center (standard window symbol)
-      lines.push({
-        start: [center[0] - dir[0] * half + normal[0] * offset, center[1] - dir[1] * half + normal[1] * offset],
-        end: [center[0] + dir[0] * half + normal[0] * offset, center[1] + dir[1] * half + normal[1] * offset],
-      })
-      lines.push({
-        start: [center[0] - dir[0] * half - normal[0] * offset, center[1] - dir[1] * half - normal[1] * offset],
-        end: [center[0] + dir[0] * half - normal[0] * offset, center[1] + dir[1] * half - normal[1] * offset],
-      })
-    })
-
-    return lines
-  }, [windows, wallById])
-
   const columnOverlay = useMemo(() => {
     const edges: PlanLine[] = []
     const crosses: PlanLine[] = []
@@ -387,7 +284,14 @@ function PlanLines() {
       {/* Room overlays (filled shapes with labels) */}
       {roomOverlays.map((room) => (
         <group key={`room-${room.id}`}>
-          <mesh position={[0, 0, -0.01]}>
+          <mesh
+            position={[0, 0, -0.01]}
+            onClick={(e) => {
+              if (!canSelect) return
+              e.stopPropagation()
+              selectBody(room.id)
+            }}
+          >
             <shapeGeometry args={[room.shape]} />
             <meshBasicMaterial color={room.color} transparent opacity={0.18} side={THREE.DoubleSide} />
           </mesh>
@@ -452,50 +356,6 @@ function PlanLines() {
           ]}
           color="#7dd3fc"
           lineWidth={0.9}
-        />
-      ))}
-      {doorOverlay.spans.map((line, i) => (
-        <Line
-          key={`door-span-${i}`}
-          points={[
-            [line.start[0], line.start[1], 0],
-            [line.end[0], line.end[1], 0],
-          ]}
-          color="#f59e0b"
-          lineWidth={2}
-        />
-      ))}
-      {doorOverlay.leaves.map((line, i) => (
-        <Line
-          key={`door-leaf-${i}`}
-          points={[
-            [line.start[0], line.start[1], 0],
-            [line.end[0], line.end[1], 0],
-          ]}
-          color="#fbbf24"
-          lineWidth={1.5}
-        />
-      ))}
-      {doorOverlay.arcs.map((arc, i) => (
-        <Line
-          key={`door-arc-${i}`}
-          points={arc.map((p) => [p[0], p[1], 0])}
-          color="#fbbf24"
-          lineWidth={1}
-          dashed
-          dashSize={0.12}
-          gapSize={0.08}
-        />
-      ))}
-      {windowOverlay.map((line, i) => (
-        <Line
-          key={`window-${i}`}
-          points={[
-            [line.start[0], line.start[1], 0],
-            [line.end[0], line.end[1], 0],
-          ]}
-          color="#60a5fa"
-          lineWidth={2}
         />
       ))}
       {columnOverlay.edges.map((line, i) => (
@@ -567,27 +427,7 @@ function PlanLines() {
       ))}
 
       {/* Element tags */}
-      {doors.map((door, i) => {
-        const wall = wallById.get(door.wall_id)
-        if (!wall) return null
-        const dx = wall.end[0] - wall.start[0]
-        const dz = wall.end[1] - wall.start[1]
-        const cx = wall.start[0] + dx * door.position_along_wall
-        const cy = wall.start[1] + dz * door.position_along_wall
-        return (
-          <Text
-            key={`tag-door-${door.meta.id}`}
-            position={[cx, cy - 0.3, 0.02]}
-            fontSize={0.15}
-            color="#f59e0b"
-            anchorX="center"
-            anchorY="top"
-          >
-            {`D${String(i + 1).padStart(2, '0')}`}
-          </Text>
-        )
-      })}
-      {walls.map((wall, i) => {
+      {showElementTags && walls.map((wall, i) => {
         const mx = (wall.start[0] + wall.end[0]) / 2
         const my = (wall.start[1] + wall.end[1]) / 2
         return (
@@ -603,6 +443,47 @@ function PlanLines() {
           </Text>
         )
       })}
+
+      {/* MEP symbols (electrical + plumbing) */}
+      <MepSymbols2D
+        annotationDensity={annotationDensity}
+        showText={showMepText}
+        symbolProfile={planSymbolProfile}
+      />
+      {/* Switching diagram lines (switch -> fixture connections) */}
+      <SwitchingDiagram2D />
+      {/* Furniture symbols */}
+      <FurnitureSymbols2D
+        annotationDensity={annotationDensity}
+        showLabels={showFurnitureLabels}
+        symbolProfile={planSymbolProfile}
+      />
+      {/* Door & window symbols (replaces manual overlay) */}
+      <DoorWindowSymbols2D
+        annotationDensity={annotationDensity}
+        showLabels={showMepText}
+        symbolProfile={planSymbolProfile}
+      />
+      {/* HVAC symbols */}
+      <HvacSymbols2D
+        annotationDensity={annotationDensity}
+        showLabels={showMepText}
+        symbolProfile={planSymbolProfile}
+      />
+      {/* Fire safety symbols */}
+      <FireSafetySymbols2D
+        annotationDensity={annotationDensity}
+        showLabels={showMepText}
+        symbolProfile={planSymbolProfile}
+      />
+      {/* Accessibility symbols */}
+      <AccessibilitySymbols2D
+        annotationDensity={annotationDensity}
+        showLabels={showMepText}
+        symbolProfile={planSymbolProfile}
+      />
+      {/* Site plan symbols */}
+      <SiteSymbols2D />
     </>
   )
 }
@@ -665,7 +546,27 @@ interface Viewport2DProps {
   background: string
 }
 
+function Viewport2DScreenshotSync() {
+  const { gl, scene, camera } = useThree()
+
+  useEffect(() => {
+    ;(window as any).__bettercad_capture_2d_screenshot = (): string => {
+      gl.render(scene, camera)
+      const dataUrl = gl.domElement.toDataURL('image/png')
+      return dataUrl.replace(/^data:image\/png;base64,/, '')
+    }
+    return () => {
+      delete (window as any).__bettercad_capture_2d_screenshot
+    }
+  }, [gl, scene, camera])
+
+  return null
+}
+
 export function Viewport2D({ background }: Viewport2DProps) {
+  const activeTool = useUIStore((s) => s.activeTool)
+  const selectBody = useUIStore((s) => s.selectBody)
+
   return (
     <Canvas
       orthographic
@@ -676,10 +577,16 @@ export function Viewport2D({ background }: Viewport2DProps) {
         far: 1000,
         up: [0, 1, 0],
       }}
+      onPointerMissed={() => {
+        if (activeTool === 'select') {
+          selectBody(null)
+        }
+      }}
     >
       <color attach="background" args={[background]} />
       <PlanLines />
-      <MapControls enableRotate={false} />
+      <MapControls enableRotate={false} screenSpacePanning makeDefault />
+      <Viewport2DScreenshotSync />
     </Canvas>
   )
 }

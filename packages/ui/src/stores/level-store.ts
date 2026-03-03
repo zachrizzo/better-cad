@@ -10,6 +10,12 @@ export interface Level {
   visibility: LevelVisibility
 }
 
+export interface KernelLevelSnapshot {
+  id: string
+  name: string
+  elevation: number
+}
+
 interface LevelState {
   levels: Level[]
   activeLevelId: string
@@ -23,6 +29,7 @@ interface LevelState {
   toggleLevelVisibility: (id: string) => void
   setLevelVisibility: (id: string, visibility: LevelVisibility) => void
   copyToLevel: (sourceLevelId: string, targetLevelId: string) => CopyToLevelResult
+  syncFromKernelLevels: (levels: KernelLevelSnapshot[], preferredActiveLevelId?: string) => void
 }
 
 export interface CopyToLevelResult {
@@ -121,6 +128,35 @@ export const useLevelStore = create<LevelState>()(
         // The actual element cloning is handled by the caller (which has access to entity-store + kernel).
         // This just computes the elevation offset.
         return { clonedIds: new Map(), elevationOffset }
+      },
+
+      syncFromKernelLevels: (incomingLevels, preferredActiveLevelId) => {
+        if (incomingLevels.length === 0) return
+        set((state) => {
+          const visibilityById = new Map(state.levels.map((level) => [level.id, level.visibility]))
+          const merged: Level[] = incomingLevels.map((level) => ({
+            id: level.id,
+            name: level.name,
+            elevation: level.elevation,
+            visibility: visibilityById.get(level.id) ?? 'visible',
+          }))
+
+          const kernelLevelIds = new Set(merged.map((level) => level.id))
+          const preferredActive = typeof preferredActiveLevelId === 'string' && kernelLevelIds.has(preferredActiveLevelId)
+            ? preferredActiveLevelId
+            : null
+          const activeIsValid = kernelLevelIds.has(state.activeLevelId)
+          const nextActiveLevelId = preferredActive
+            ? preferredActive
+            : activeIsValid
+              ? state.activeLevelId
+              : merged[0].id
+
+          return {
+            levels: merged,
+            activeLevelId: nextActiveLevelId,
+          }
+        })
       },
     }),
     {

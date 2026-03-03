@@ -7,6 +7,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             commands::ping,
+            commands::get_capabilities,
             commands::reset_project,
             commands::create_element,
             commands::update_element,
@@ -19,6 +20,12 @@ pub fn run() {
             commands::add_wall,
             commands::generate_plan_view,
             commands::import_step,
+            commands::import_dxf_data,
+            commands::import_ifc_data,
+            commands::export_step_project,
+            commands::export_ifc_project,
+            commands::export_dxf_project,
+            commands::export_gltf_project,
             commands::export_step,
             commands::get_material_library,
             commands::save_project,

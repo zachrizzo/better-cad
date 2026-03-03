@@ -1,13 +1,26 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
+  BackendCapabilities,
+  EnrichedPlanViewData,
+  ElevationViewData,
+  ExportFormat,
+  ImportFormat,
+  ImportResult,
   KernelBackend,
   PrototypeElement,
+  RegenOptions,
   RegeneratedMesh,
+  SectionViewData,
   TessellatedMesh,
 } from './kernel-bridge'
 import type { PbrMaterial } from '../stores/material-store'
+import { normalizeQueriedElements } from './room-utils'
 
 export class TauriBackend implements KernelBackend {
+  async getCapabilities(): Promise<BackendCapabilities> {
+    return invoke<BackendCapabilities>('get_capabilities')
+  }
+
   async ping(): Promise<string> {
     return invoke<string>('ping')
   }
@@ -30,10 +43,10 @@ export class TauriBackend implements KernelBackend {
 
   async queryElements(): Promise<PrototypeElement[]> {
     const raw = await invoke<string>('query_elements')
-    return JSON.parse(raw) as PrototypeElement[]
+    return normalizeQueriedElements(JSON.parse(raw) as PrototypeElement[])
   }
 
-  async regenView(): Promise<RegeneratedMesh[]> {
+  async regenView(_opts?: RegenOptions): Promise<RegeneratedMesh[]> {
     const result = await invoke<{ id: string; positions: number[]; normals: number[]; indices: number[] }[]>(
       'regen_view',
     )
@@ -105,27 +118,88 @@ export class TauriBackend implements KernelBackend {
     return invoke<string>('generate_plan_view', { wallsJson })
   }
 
-  async importFile(data: Uint8Array, format: string): Promise<TessellatedMesh[]> {
-    if (format !== 'step') {
-      throw new Error(`Format "${format}" not supported in Tauri backend`)
+  async generatePlanViewV2(): Promise<EnrichedPlanViewData> {
+    const raw = await invoke<string>('generate_plan_view_v2')
+    return JSON.parse(raw) as EnrichedPlanViewData
+  }
+
+  async generateSectionCut(
+    cutStartX: number,
+    cutStartY: number,
+    cutEndX: number,
+    cutEndY: number,
+    cutHeight: number,
+  ): Promise<SectionViewData> {
+    const raw = await invoke<string>('generate_section_cut_view', {
+      cutStartX,
+      cutStartY,
+      cutEndX,
+      cutEndY,
+      cutHeight,
+    })
+    return JSON.parse(raw) as SectionViewData
+  }
+
+  async generateElevation(direction: string): Promise<ElevationViewData> {
+    const raw = await invoke<string>('generate_elevation_view', { direction })
+    return JSON.parse(raw) as ElevationViewData
+  }
+
+  async importModel(data: Uint8Array, format: ImportFormat): Promise<ImportResult> {
+    if (format === 'step') {
+      const result = await invoke<
+        { positions: number[]; normals: number[]; indices: number[] }[]
+      >('import_step', { data: Array.from(data) })
+      const meshes = result.map((m) => ({
+        positions: new Float32Array(m.positions),
+        normals: new Float32Array(m.normals),
+        indices: new Uint32Array(m.indices),
+      }))
+      return { meshes, stateMutated: false }
     }
 
-    const result = await invoke<
-      { positions: number[]; normals: number[]; indices: number[] }[]
-    >('import_step', { data: Array.from(data) })
-    return result.map((m) => ({
-      positions: new Float32Array(m.positions),
-      normals: new Float32Array(m.normals),
-      indices: new Uint32Array(m.indices),
-    }))
+    if (format === 'dxf') {
+      const raw = await invoke<string>('import_dxf_data', { data: Array.from(data) })
+      const imported = JSON.parse(raw) as unknown[]
+      return { meshes: [], stateMutated: true, importedElementCount: imported.length }
+    }
+
+    if (format === 'ifc') {
+      const raw = await invoke<string>('import_ifc_data', { data: Array.from(data) })
+      const imported = JSON.parse(raw) as unknown[]
+      return { meshes: [], stateMutated: true, importedElementCount: imported.length, warnings: [] }
+    }
+
+    throw new Error(`Import format "${format}" is not supported`)
+  }
+
+  async exportModel(format: ExportFormat): Promise<ArrayBuffer> {
+    if (format === 'step') {
+      const bytes = await invoke<number[]>('export_step_project')
+      return new Uint8Array(bytes).buffer
+    }
+    if (format === 'dxf') {
+      const bytes = await invoke<number[]>('export_dxf_project')
+      return new Uint8Array(bytes).buffer
+    }
+    if (format === 'ifc') {
+      const bytes = await invoke<number[]>('export_ifc_project')
+      return new Uint8Array(bytes).buffer
+    }
+    if (format === 'gltf') {
+      const bytes = await invoke<number[]>('export_gltf_project')
+      return new Uint8Array(bytes).buffer
+    }
+    throw new Error(`Export format "${format}" is not supported`)
+  }
+
+  async importFile(data: Uint8Array, format: string): Promise<TessellatedMesh[]> {
+    const result = await this.importModel(data, format as ImportFormat)
+    return result.meshes
   }
 
   async exportFile(format: string): Promise<ArrayBuffer> {
-    if (format !== 'step') {
-      throw new Error(`Format "${format}" not supported in Tauri backend`)
-    }
-    const bytes = await invoke<number[]>('export_step', { width: 1, height: 1, depth: 1 })
-    return new Uint8Array(bytes).buffer
+    return this.exportModel(format as ExportFormat)
   }
 
   async getMaterialLibrary(): Promise<PbrMaterial[]> {

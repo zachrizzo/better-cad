@@ -1,4 +1,6 @@
-import type { WallElement } from './kernel-bridge'
+import type { KernelBackend, WallElement } from './kernel-bridge'
+import { isWallElement, useEntityStore } from '../stores/entity-store'
+import { syncEntitiesAndRegenerateMeshes } from './entity-regeneration'
 
 type Point2 = [number, number]
 
@@ -407,4 +409,202 @@ export function cleanupWalls(
     created: createdWalls,
     deleted: Array.from(deletedIds),
   }
+}
+
+// ── Endpoint auto-join (snap close endpoints together) ────────────────────
+
+const AUTO_JOIN_THRESHOLD = 0.05 // 5cm
+
+/**
+ * Auto-join wall endpoints that are within threshold distance.
+ * Only joins walls on the same level. Does not merge parallel/double walls.
+ * Returns the number of joins performed.
+ */
+export function autoJoinEndpoints(
+  walls: WallElement[],
+  threshold: number = AUTO_JOIN_THRESHOLD,
+): { modified: WallElement[]; joinCount: number } {
+  if (walls.length < 2) return { modified: [], joinCount: 0 }
+
+  const wallMap = new Map<string, WallElement>()
+  for (const w of walls) {
+    wallMap.set(w.meta.id, { ...w, start: [...w.start] as Point2, end: [...w.end] as Point2 })
+  }
+
+  const modifiedIds = new Set<string>()
+  let joinCount = 0
+
+  const wallList = Array.from(wallMap.values())
+  for (let i = 0; i < wallList.length; i++) {
+    for (let j = i + 1; j < wallList.length; j++) {
+      const wi = wallMap.get(wallList[i].meta.id)!
+      const wj = wallMap.get(wallList[j].meta.id)!
+
+      // Only join walls on the same level
+      if (wi.meta.level_id !== wj.meta.level_id) continue
+
+      // Skip parallel walls with the same thickness (likely intentional double-wall)
+      if (areParallel(wi, wj) && Math.abs(wi.thickness - wj.thickness) < 0.01) continue
+
+      const pairs: Array<{ from: 'start' | 'end'; to: 'start' | 'end'; d: number }> = [
+        { from: 'start', to: 'start', d: dist(wi.start, wj.start) },
+        { from: 'start', to: 'end', d: dist(wi.start, wj.end) },
+        { from: 'end', to: 'start', d: dist(wi.end, wj.start) },
+        { from: 'end', to: 'end', d: dist(wi.end, wj.end) },
+      ]
+
+      for (const pair of pairs) {
+        if (pair.d < threshold && pair.d > 0) {
+          // Snap wj's endpoint to wi's endpoint
+          const target: Point2 = pair.from === 'start' ? [...wi.start] as Point2 : [...wi.end] as Point2
+          if (pair.to === 'start') {
+            wj.start = target
+          } else {
+            wj.end = target
+          }
+          modifiedIds.add(wj.meta.id)
+          joinCount++
+        }
+      }
+    }
+  }
+
+  const modified: WallElement[] = []
+  for (const id of modifiedIds) {
+    const w = wallMap.get(id)
+    if (w) modified.push(w)
+  }
+
+  return { modified, joinCount }
+}
+
+// ── Kernel-aware auto-join functions ──────────────────────────────────────
+
+/**
+ * Run full wall auto-join and cleanup on all walls (or walls on a specific level).
+ * Persists changes via the kernel and regenerates meshes.
+ * Returns the total number of modifications made.
+ */
+export async function autoJoinWalls(
+  kernel: KernelBackend,
+  levelId?: string | null,
+): Promise<number> {
+  const elements = await kernel.queryElements()
+  const walls = elements.filter(
+    (el): el is WallElement =>
+      isWallElement(el) && (!levelId || !el.meta.level_id || el.meta.level_id === levelId),
+  )
+
+  if (walls.length < 2) return 0
+
+  let totalChanges = 0
+
+  // Phase 1: Auto-join close endpoints
+  const joinResult = autoJoinEndpoints(walls)
+  if (joinResult.joinCount > 0) {
+    for (const w of joinResult.modified) {
+      await kernel.updateElement(w.meta.id, w)
+    }
+    totalChanges += joinResult.joinCount
+  }
+
+  // Phase 2: Run full cleanup (T-junctions, L-junctions, overlaps)
+  // Re-query to get updated state after endpoint joins
+  const updatedElements = await kernel.queryElements()
+  const updatedWalls = updatedElements.filter(
+    (el): el is WallElement =>
+      isWallElement(el) && (!levelId || !el.meta.level_id || el.meta.level_id === levelId),
+  )
+  const cleanupResult = cleanupWalls(updatedWalls)
+
+  for (const w of cleanupResult.modified) {
+    await kernel.updateElement(w.meta.id, w)
+    totalChanges++
+  }
+  for (const w of cleanupResult.created) {
+    await kernel.createElement(w)
+    totalChanges++
+  }
+  for (const id of cleanupResult.deleted) {
+    await kernel.deleteElement(id)
+    totalChanges++
+  }
+
+  if (totalChanges > 0) {
+    await syncEntitiesAndRegenerateMeshes(kernel)
+  }
+
+  return totalChanges
+}
+
+/**
+ * Auto-join walls near a specific wall (by its endpoints).
+ * More efficient than full autoJoinWalls for use right after wall placement.
+ */
+export async function autoJoinNearbyWalls(
+  kernel: KernelBackend,
+  newWallId: string,
+  levelId?: string | null,
+): Promise<number> {
+  const elements = await kernel.queryElements()
+  const allWalls = elements.filter(
+    (el): el is WallElement =>
+      isWallElement(el) && (!levelId || !el.meta.level_id || el.meta.level_id === levelId),
+  )
+
+  const newWall = allWalls.find((w) => w.meta.id === newWallId)
+  if (!newWall) return 0
+
+  // Only consider walls whose endpoints are near the new wall's endpoints
+  const NEARBY_THRESHOLD = 0.5 // 50cm search radius for nearby walls
+  const nearbyWalls = allWalls.filter((w) => {
+    if (w.meta.id === newWallId) return true
+    return (
+      dist(newWall.start, w.start) < NEARBY_THRESHOLD ||
+      dist(newWall.start, w.end) < NEARBY_THRESHOLD ||
+      dist(newWall.end, w.start) < NEARBY_THRESHOLD ||
+      dist(newWall.end, w.end) < NEARBY_THRESHOLD
+    )
+  })
+
+  if (nearbyWalls.length < 2) return 0
+
+  let totalChanges = 0
+
+  // Phase 1: Auto-join close endpoints
+  const joinResult = autoJoinEndpoints(nearbyWalls)
+  if (joinResult.joinCount > 0) {
+    for (const w of joinResult.modified) {
+      await kernel.updateElement(w.meta.id, w)
+    }
+    totalChanges += joinResult.joinCount
+  }
+
+  // Phase 2: Cleanup on the nearby subset
+  // Re-fetch the nearby walls with updated state
+  const refreshedElements = await kernel.queryElements()
+  const refreshedNearbyIds = new Set(nearbyWalls.map((w) => w.meta.id))
+  const refreshedNearbyWalls = refreshedElements.filter(
+    (el): el is WallElement => isWallElement(el) && refreshedNearbyIds.has(el.meta.id),
+  )
+
+  const cleanupResult = cleanupWalls(refreshedNearbyWalls)
+  for (const w of cleanupResult.modified) {
+    await kernel.updateElement(w.meta.id, w)
+    totalChanges++
+  }
+  for (const w of cleanupResult.created) {
+    await kernel.createElement(w)
+    totalChanges++
+  }
+  for (const id of cleanupResult.deleted) {
+    await kernel.deleteElement(id)
+    totalChanges++
+  }
+
+  if (totalChanges > 0) {
+    await syncEntitiesAndRegenerateMeshes(kernel)
+  }
+
+  return totalChanges
 }

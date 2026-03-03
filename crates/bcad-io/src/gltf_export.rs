@@ -5,12 +5,40 @@
 use bcad_kernel::materials::PbrMaterial;
 use bcad_kernel::tessellation::TessellatedMesh;
 
+/// Element metadata attached to each glTF node as extras.
+#[derive(Debug, Clone)]
+pub struct GltfElementInfo {
+    pub element_id: String,
+    pub element_kind: String,
+    pub element_name: String,
+}
+
 /// Export meshes with materials as a GLB (binary glTF 2.0) file.
 ///
 /// Each tuple pairs a tessellated mesh with its PBR material. The result
 /// is a self-contained GLB byte vector with embedded binary buffer.
 pub fn export_gltf(
     meshes: &[(&TessellatedMesh, &PbrMaterial)],
+) -> Result<Vec<u8>, crate::IoError> {
+    // Delegate to the extras-aware version with no extras
+    let no_extras: Vec<Option<&GltfElementInfo>> = vec![None; meshes.len()];
+    export_gltf_inner(meshes, &no_extras)
+}
+
+/// Export meshes with materials and element metadata as a GLB (binary glTF 2.0) file.
+///
+/// Each node gets `name` and `extras` fields from the corresponding GltfElementInfo.
+pub fn export_gltf_with_extras(
+    meshes: &[(&TessellatedMesh, &PbrMaterial)],
+    element_infos: &[Option<GltfElementInfo>],
+) -> Result<Vec<u8>, crate::IoError> {
+    let refs: Vec<Option<&GltfElementInfo>> = element_infos.iter().map(|o| o.as_ref()).collect();
+    export_gltf_inner(meshes, &refs)
+}
+
+fn export_gltf_inner(
+    meshes: &[(&TessellatedMesh, &PbrMaterial)],
+    element_infos: &[Option<&GltfElementInfo>],
 ) -> Result<Vec<u8>, crate::IoError> {
     use serde_json::{json, Value};
 
@@ -129,8 +157,26 @@ pub fn export_gltf(
             }]
         }));
 
-        // Node
-        nodes.push(json!({ "mesh": mesh_idx }));
+        // Node — with optional name and extras from element info
+        let node = if let Some(Some(info)) = element_infos.get(mesh_idx) {
+            let short_id = if info.element_id.len() > 8 {
+                &info.element_id[..8]
+            } else {
+                &info.element_id
+            };
+            json!({
+                "mesh": mesh_idx,
+                "name": format!("{}-{}", capitalize_first(&info.element_kind), short_id),
+                "extras": {
+                    "bcad_element_id": info.element_id,
+                    "bcad_element_kind": info.element_kind,
+                    "bcad_element_name": info.element_name
+                }
+            })
+        } else {
+            json!({ "mesh": mesh_idx })
+        };
+        nodes.push(node);
     }
 
     let node_indices: Vec<usize> = (0..nodes.len()).collect();
@@ -186,6 +232,14 @@ pub fn export_gltf(
     Ok(glb)
 }
 
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +272,37 @@ mod tests {
     fn test_export_gltf_empty_input() {
         let result = export_gltf(&[]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_export_gltf_with_extras() {
+        let mesh = test_mesh();
+        let mat = PbrMaterial::new("Test", [1.0, 0.0, 0.0, 1.0], 0.0, 0.5);
+        let info = GltfElementInfo {
+            element_id: "abc12345".to_string(),
+            element_kind: "wall".to_string(),
+            element_name: "Wall 1".to_string(),
+        };
+
+        let glb = export_gltf_with_extras(
+            &[(&mesh, &mat)],
+            &[Some(info)],
+        )
+        .expect("export with extras should succeed");
+
+        // Verify it's a valid GLB
+        assert_eq!(&glb[0..4], b"glTF");
+
+        // Extract JSON chunk and verify extras are present
+        let json_len = u32::from_le_bytes([glb[12], glb[13], glb[14], glb[15]]) as usize;
+        let json_str = std::str::from_utf8(&glb[20..20 + json_len])
+            .expect("JSON chunk should be valid UTF-8");
+        let json_val: serde_json::Value =
+            serde_json::from_str(json_str.trim()).expect("JSON should be parseable");
+        let node = &json_val["nodes"][0];
+        assert_eq!(node["name"], "Wall-abc12345");
+        assert_eq!(node["extras"]["bcad_element_id"], "abc12345");
+        assert_eq!(node["extras"]["bcad_element_kind"], "wall");
+        assert_eq!(node["extras"]["bcad_element_name"], "Wall 1");
     }
 }

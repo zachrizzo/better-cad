@@ -32,7 +32,9 @@ pub struct OpeningSpec {
 impl WallParams {
     /// Convert wall params to a solid using extrude_sketch_points.
     /// The wall is a rectangular cross-section extruded along the wall direction.
-    pub fn to_solid(&self) -> Result<bcad_kernel::topology::Solid, bcad_kernel::error::KernelError> {
+    pub fn to_solid(
+        &self,
+    ) -> Result<bcad_kernel::topology::Solid, bcad_kernel::error::KernelError> {
         // Calculate wall direction and normal
         let dx = self.end[0] - self.start[0];
         let dy = self.end[1] - self.start[1];

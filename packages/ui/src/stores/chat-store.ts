@@ -22,6 +22,8 @@ interface ChatState {
   isStreaming: boolean
   /** The id of the assistant message currently being streamed */
   streamingAssistantId: string | null
+  /** AbortController for the current streaming generation */
+  abortController: AbortController | null
 
   // ── Actions ──
   createChat: () => string
@@ -33,6 +35,8 @@ interface ChatState {
   setChatTitle: (chatId: string, title: string) => void
   setIsStreaming: (v: boolean) => void
   setStreamingAssistantId: (id: string | null) => void
+  setAbortController: (controller: AbortController | null) => void
+  stopGeneration: () => void
 
   // ── Derived helpers ──
   getActiveChat: () => Chat | undefined
@@ -69,6 +73,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     activeChatId: initial.id,
     isStreaming: false,
     streamingAssistantId: null,
+    abortController: null,
 
     createChat: () => {
       const chat = makeNewChat()
@@ -149,6 +154,13 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     setIsStreaming: (v) => set({ isStreaming: v }),
     setStreamingAssistantId: (id) => set({ streamingAssistantId: id }),
+    setAbortController: (controller) => set({ abortController: controller }),
+    stopGeneration: () => {
+      const { abortController } = get()
+      if (abortController) {
+        abortController.abort()
+      }
+    },
 
     getActiveChat: () => {
       const s = get()

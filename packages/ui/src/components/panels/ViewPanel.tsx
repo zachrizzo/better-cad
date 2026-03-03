@@ -30,6 +30,14 @@ export function ViewPanel() {
   const removeView = useViewStore((s) => s.removeView)
   const addView = useViewStore((s) => s.addView)
   const setActiveTool = useUIStore((s) => s.setActiveTool)
+  const planSymbolProfile = useUIStore((s) => s.planSymbolProfile)
+  const annotationDensity = useUIStore((s) => s.annotationDensity)
+  const showFurnitureLabels = useUIStore((s) => s.showFurnitureLabels)
+  const showMepText = useUIStore((s) => s.showMepText)
+  const setPlanSymbolProfile = useUIStore((s) => s.setPlanSymbolProfile)
+  const setAnnotationDensity = useUIStore((s) => s.setAnnotationDensity)
+  const setShowFurnitureLabels = useUIStore((s) => s.setShowFurnitureLabels)
+  const setShowMepText = useUIStore((s) => s.setShowMepText)
   const wallsVisible = useSettingsStore((s) => s.wallsVisible)
   const toggleWallsVisible = useSettingsStore((s) => s.toggleWallsVisible)
   const [elevationDirection, setElevationDirection] = useState<ElevationDirection>('north')
@@ -114,6 +122,46 @@ export function ViewPanel() {
       </div>
       <div className="view-panel-help">
         Save camera views for section cuts and fixed elevations.
+      </div>
+
+      <div className="property-panel-title" style={{ marginTop: 10 }}>Plan Symbols</div>
+      <div className="property-row">
+        <label className="property-label">Profile</label>
+        <select
+          className="property-input"
+          value={planSymbolProfile}
+          onChange={(e) => setPlanSymbolProfile(e.target.value as 'open_us_v1')}
+        >
+          <option value="open_us_v1">Open US v1</option>
+        </select>
+      </div>
+      <div className="property-row">
+        <label className="property-label">Density</label>
+        <select
+          className="property-input"
+          value={annotationDensity}
+          onChange={(e) => setAnnotationDensity(e.target.value as 'minimal' | 'medium' | 'verbose')}
+        >
+          <option value="minimal">Minimal</option>
+          <option value="medium">Medium</option>
+          <option value="verbose">Verbose</option>
+        </select>
+      </div>
+      <div className="property-row">
+        <label className="property-label">Furniture Labels</label>
+        <input
+          type="checkbox"
+          checked={showFurnitureLabels}
+          onChange={(e) => setShowFurnitureLabels(e.target.checked)}
+        />
+      </div>
+      <div className="property-row">
+        <label className="property-label">MEP Text</label>
+        <input
+          type="checkbox"
+          checked={showMepText}
+          onChange={(e) => setShowMepText(e.target.checked)}
+        />
       </div>
 
       {activeViewId && (

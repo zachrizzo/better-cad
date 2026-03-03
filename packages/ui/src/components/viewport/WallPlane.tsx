@@ -13,7 +13,7 @@ import { formatLength } from '../../utils/units'
 import type { FloorElement, WallElement } from '../../services/kernel-bridge'
 import { isFloorElement, isWallElement, useEntityStore } from '../../stores/entity-store'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
-import { cleanupWalls } from '../../services/wall-cleanup'
+import { autoJoinNearbyWalls } from '../../services/wall-cleanup'
 import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
 
 const WALL_SNAP_DISTANCE = 0.35
@@ -497,23 +497,8 @@ export function WallPlane() {
         await kernel.createElement(wallElement)
         await syncEntitiesAndRegenerateMeshes(kernel)
 
-        // Run wall cleanup to handle T-junctions, L-junctions, and overlaps
-        const levelWalls = Array.from(useEntityStore.getState().elements.values()).filter(
-          (el): el is WallElement => isWallElement(el) && (!el.meta.level_id || el.meta.level_id === activeLevelId),
-        )
-        const result = cleanupWalls(levelWalls)
-        if (result.modified.length || result.created.length || result.deleted.length) {
-          for (const w of result.modified) {
-            await kernel.updateElement(w.meta.id, w)
-          }
-          for (const w of result.created) {
-            await kernel.createElement(w)
-          }
-          for (const id of result.deleted) {
-            await kernel.deleteElement(id)
-          }
-          await syncEntitiesAndRegenerateMeshes(kernel)
-        }
+        // Auto-join nearby walls (endpoint snapping + T/L junction cleanup)
+        await autoJoinNearbyWalls(kernel, wallId, activeLevelId)
       } catch (err) {
         console.error('[BetterCAD] Failed to create wall entity:', err)
       }

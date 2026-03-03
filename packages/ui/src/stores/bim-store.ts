@@ -1,9 +1,36 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { FurnitureSymbolType, PlumbingSymbolType, ElectricalSymbolType } from '../services/kernel-bridge'
 
 export type SketchExtrudeMode = 'walls' | 'solid'
 export type StairType = 'straight' | 'spiral'
 export type RoofType = 'flat' | 'shed' | 'gable' | 'hip'
+
+export const FURNITURE_DEFAULT_SIZES: Record<FurnitureSymbolType, { width: number; depth: number }> = {
+  desk: { width: 1.5, depth: 0.75 },
+  chair: { width: 0.5, depth: 0.5 },
+  table: { width: 1.2, depth: 0.8 },
+  bed: { width: 2.0, depth: 1.5 },
+  sofa: { width: 2.2, depth: 0.9 },
+  dining_table: { width: 1.8, depth: 0.9 },
+  bookshelf: { width: 1.0, depth: 0.3 },
+  wardrobe: { width: 1.2, depth: 0.6 },
+  toilet_stall: { width: 0.9, depth: 1.5 },
+  reception_desk: { width: 2.4, depth: 0.8 },
+  conference_table: { width: 3.0, depth: 1.2 },
+  kitchen_island: { width: 2.0, depth: 1.0 },
+  refrigerator: { width: 0.7, depth: 0.7 },
+  stove: { width: 0.76, depth: 0.65 },
+  washer: { width: 0.6, depth: 0.6 },
+  dryer: { width: 0.6, depth: 0.6 },
+  nightstand: { width: 0.5, depth: 0.45 },
+  coffee_table: { width: 1.2, depth: 0.6 },
+  tv_console: { width: 1.8, depth: 0.45 },
+  console_table: { width: 1.4, depth: 0.4 },
+  bench: { width: 1.5, depth: 0.45 },
+  ottoman: { width: 0.7, depth: 0.7 },
+  vanity: { width: 1.2, depth: 0.55 },
+}
 
 export interface WallData {
   id: string
@@ -58,8 +85,20 @@ interface BimState {
   defaultRoofType: RoofType
   defaultRoofPitchDegrees: number
   defaultRoofRidgeAngleDegrees: number
+  defaultFurnitureType: FurnitureSymbolType
+  defaultFurnitureRotation: number
+  defaultPlumbingType: PlumbingSymbolType
+  defaultPlumbingRotation: number
+  defaultElectricalType: ElectricalSymbolType
+  defaultElectricalRotation: number
   autoExtrudeSketch: boolean
   sketchExtrudeMode: SketchExtrudeMode
+  setDefaultFurnitureType: (type: FurnitureSymbolType) => void
+  setDefaultFurnitureRotation: (rotation: number) => void
+  setDefaultPlumbingType: (type: PlumbingSymbolType) => void
+  setDefaultPlumbingRotation: (rotation: number) => void
+  setDefaultElectricalType: (type: ElectricalSymbolType) => void
+  setDefaultElectricalRotation: (rotation: number) => void
   addWall: (wall: WallData) => void
   updateWall: (id: string, patch: Partial<Omit<WallData, 'id'>>) => void
   removeWall: (id: string) => void
@@ -132,8 +171,20 @@ export const useBimStore = create<BimState>()(
       defaultRoofType: 'gable',
       defaultRoofPitchDegrees: 30,
       defaultRoofRidgeAngleDegrees: 0,
+      defaultFurnitureType: 'desk',
+      defaultFurnitureRotation: 0,
+      defaultPlumbingType: 'toilet',
+      defaultPlumbingRotation: 0,
+      defaultElectricalType: 'outlet',
+      defaultElectricalRotation: 0,
       autoExtrudeSketch: false,
       sketchExtrudeMode: 'walls',
+      setDefaultFurnitureType: (type) => set({ defaultFurnitureType: type }),
+      setDefaultFurnitureRotation: (rotation) => set({ defaultFurnitureRotation: ((rotation % 360) + 360) % 360 }),
+      setDefaultPlumbingType: (type) => set({ defaultPlumbingType: type }),
+      setDefaultPlumbingRotation: (rotation) => set({ defaultPlumbingRotation: ((rotation % 360) + 360) % 360 }),
+      setDefaultElectricalType: (type) => set({ defaultElectricalType: type }),
+      setDefaultElectricalRotation: (rotation) => set({ defaultElectricalRotation: ((rotation % 360) + 360) % 360 }),
       addWall: (wall) =>
         set((s) => {
           const walls = new Map(s.walls)
@@ -248,6 +299,12 @@ export const useBimStore = create<BimState>()(
         defaultRoofType: state.defaultRoofType,
         defaultRoofPitchDegrees: state.defaultRoofPitchDegrees,
         defaultRoofRidgeAngleDegrees: state.defaultRoofRidgeAngleDegrees,
+        defaultFurnitureType: state.defaultFurnitureType,
+        defaultFurnitureRotation: state.defaultFurnitureRotation,
+        defaultPlumbingType: state.defaultPlumbingType,
+        defaultPlumbingRotation: state.defaultPlumbingRotation,
+        defaultElectricalType: state.defaultElectricalType,
+        defaultElectricalRotation: state.defaultElectricalRotation,
         autoExtrudeSketch: state.autoExtrudeSketch,
         sketchExtrudeMode: state.sketchExtrudeMode,
       }),

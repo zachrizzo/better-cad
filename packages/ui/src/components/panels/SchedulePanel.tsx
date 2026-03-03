@@ -7,6 +7,7 @@ import {
   getWindowSchedule,
   getRoomSchedule,
   getWallQuantities,
+  getWallSchedule,
   getMaterialTakeoff,
   toCsv,
   downloadCsv,
@@ -81,6 +82,7 @@ export function SchedulePanel({ onClose }: { onClose: () => void }) {
   const windowRows = useMemo(() => getWindowSchedule(elements), [elements])
   const roomRows = useMemo(() => getRoomSchedule(elements), [elements])
   const wallQty = useMemo(() => getWallQuantities(elements), [elements])
+  const wallScheduleRows = useMemo(() => getWallSchedule(elements), [elements])
   const takeoffRows = useMemo(() => getMaterialTakeoff(elements), [elements])
 
   const fmt = useCallback((m: number) => formatLength(m, lengthUnit), [lengthUnit])
@@ -91,8 +93,8 @@ export function SchedulePanel({ onClose }: { onClose: () => void }) {
     if (tab === 'doors') {
       const sorted = sortRows(doorRows, sort)
       const csv = toCsv(
-        ['ID', 'Name', 'Width', 'Height', 'Sill Height', 'Swing', 'Host Wall'],
-        sorted.map((r) => [r.id, r.name, fmt(r.width), fmt(r.height), fmt(r.sillHeight), r.swing, r.hostWall]),
+        ['ID', 'Name', 'Width', 'Height', 'Sill Height', 'Swing', 'Host Wall', 'Host Wall ID'],
+        sorted.map((r) => [r.id, r.name, fmt(r.width), fmt(r.height), fmt(r.sillHeight), r.swing, r.hostWall, r.hostWallId]),
       )
       downloadCsv('door-schedule.csv', csv)
     } else if (tab === 'windows') {
@@ -105,30 +107,26 @@ export function SchedulePanel({ onClose }: { onClose: () => void }) {
     } else if (tab === 'rooms') {
       const sorted = sortRows(roomRows, sort)
       const csv = toCsv(
-        ['ID', 'Name', 'Area (m\u00B2)', 'Perimeter', 'Level'],
-        sorted.map((r) => [r.id, r.name, fmtArea(r.area), fmt(r.perimeter), r.level]),
+        ['ID', 'Name', 'Area (m\u00B2)', 'Perimeter', 'Level', 'Source'],
+        sorted.map((r) => [r.id, r.name, fmtArea(r.area), fmt(r.perimeter), r.level, r.source]),
       )
       downloadCsv('room-schedule.csv', csv)
     } else if (tab === 'walls') {
+      const sorted = sortRows(wallScheduleRows, sort)
       const csv = toCsv(
-        ['Metric', 'Value'],
-        [
-          ['Wall Count', wallQty.count],
-          ['Total Length', fmt(wallQty.totalLength)],
-          ['Total Area', fmtArea(wallQty.totalArea)],
-          ['Total Volume', fmtVol(wallQty.totalVolume)],
-        ],
+        ['id', 'name', 'length', 'height', 'thickness', 'gross_area', 'net_area', 'opening_area', 'level_name', 'material_id'],
+        sorted.map((r) => [r.id, r.name, r.length.toFixed(3), r.height.toFixed(3), r.thickness.toFixed(3), fmtArea(r.grossArea), fmtArea(r.netArea), fmtArea(r.openingArea), r.levelName, r.materialId]),
       )
-      downloadCsv('wall-quantities.csv', csv)
+      downloadCsv('wall-schedule.csv', csv)
     } else if (tab === 'takeoff') {
       const sorted = sortRows(takeoffRows, sort)
       const csv = toCsv(
-        ['Element Type', 'Count', 'Total Area (m\u00B2)', 'Total Volume (m\u00B3)'],
-        sorted.map((r) => [r.elementType, r.count, fmtArea(r.totalArea), fmtVol(r.totalVolume)]),
+        ['Element Type', 'Material', 'Count', 'Total Area (m\u00B2)', 'Total Volume (m\u00B3)'],
+        sorted.map((r) => [r.elementType, r.materialName, r.count, fmtArea(r.totalArea), fmtVol(r.totalVolume)]),
       )
       downloadCsv('material-takeoff.csv', csv)
     }
-  }, [tab, sort, doorRows, windowRows, roomRows, wallQty, takeoffRows, fmt, fmtArea, fmtVol])
+  }, [tab, sort, doorRows, windowRows, roomRows, wallQty, wallScheduleRows, takeoffRows, fmt, fmtArea, fmtVol])
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
@@ -385,15 +383,17 @@ function TakeoffTable({ rows, sort, onSort, fmtArea, fmtVol }: {
       <thead>
         <tr style={headerStyle}>
           <SortableHeader label="Element Type" column="elementType" sort={sort} onSort={onSort} />
+          <SortableHeader label="Material" column="materialName" sort={sort} onSort={onSort} />
           <SortableHeader label="Count" column="count" sort={sort} onSort={onSort} />
           <SortableHeader label="Total Area" column="totalArea" sort={sort} onSort={onSort} />
           <SortableHeader label="Total Volume" column="totalVolume" sort={sort} onSort={onSort} />
         </tr>
       </thead>
       <tbody>
-        {sorted.map((r) => (
-          <tr key={r.elementType}>
+        {sorted.map((r, i) => (
+          <tr key={`${r.elementType}-${r.materialName}-${i}`}>
             <td style={{ ...cellStyle, textTransform: 'capitalize' }}>{r.elementType}</td>
+            <td style={cellStyle}>{r.materialName}</td>
             <td style={cellStyle}>{r.count}</td>
             <td style={cellStyle}>{fmtArea(r.totalArea)}</td>
             <td style={cellStyle}>{fmtVol(r.totalVolume)}</td>

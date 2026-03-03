@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
 import { useUIStore } from '../../stores/ui-store'
-import { useBimStore } from '../../stores/bim-store'
+import { useBimStore, FURNITURE_DEFAULT_SIZES } from '../../stores/bim-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { useKernel } from '../../hooks/useKernel'
 import { MaterialPicker } from '../materials/MaterialPicker'
 import { isBeamElement, isColumnElement, isDimensionElement, isDoorElement, isFloorElement, isRoofElement, isRoomElement, isStairElement, isTextAnnotationElement, isWallElement, isWindowElement, useEntityStore } from '../../stores/entity-store'
+import type { FurnitureSymbolType, PlumbingSymbolType, ElectricalSymbolType } from '../../services/kernel-bridge'
 import { LENGTH_UNITS, metersToUnitValue, type LengthUnit, unitValueToMeters } from '../../utils/units'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { LevelManager } from '../panels/LevelManager'
@@ -14,6 +15,14 @@ const MIN_VALUE = 0.01
 export function PropertyPanel() {
   const selectedBodyId = useUIStore((s) => s.selectedBodyId)
   const activeTool = useUIStore((s) => s.activeTool)
+  const planSymbolProfile = useUIStore((s) => s.planSymbolProfile)
+  const annotationDensity = useUIStore((s) => s.annotationDensity)
+  const showFurnitureLabels = useUIStore((s) => s.showFurnitureLabels)
+  const showMepText = useUIStore((s) => s.showMepText)
+  const setPlanSymbolProfile = useUIStore((s) => s.setPlanSymbolProfile)
+  const setAnnotationDensity = useUIStore((s) => s.setAnnotationDensity)
+  const setShowFurnitureLabels = useUIStore((s) => s.setShowFurnitureLabels)
+  const setShowMepText = useUIStore((s) => s.setShowMepText)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const setLengthUnit = useSettingsStore((s) => s.setLengthUnit)
 
@@ -75,6 +84,19 @@ export function PropertyPanel() {
   const setDefaultRoofPitchDegrees = useBimStore((s) => s.setDefaultRoofPitchDegrees)
   const setDefaultRoofRidgeAngleDegrees = useBimStore((s) => s.setDefaultRoofRidgeAngleDegrees)
 
+  const defaultFurnitureType = useBimStore((s) => s.defaultFurnitureType)
+  const defaultFurnitureRotation = useBimStore((s) => s.defaultFurnitureRotation)
+  const setDefaultFurnitureType = useBimStore((s) => s.setDefaultFurnitureType)
+  const setDefaultFurnitureRotation = useBimStore((s) => s.setDefaultFurnitureRotation)
+  const defaultPlumbingType = useBimStore((s) => s.defaultPlumbingType)
+  const defaultPlumbingRotation = useBimStore((s) => s.defaultPlumbingRotation)
+  const setDefaultPlumbingType = useBimStore((s) => s.setDefaultPlumbingType)
+  const setDefaultPlumbingRotation = useBimStore((s) => s.setDefaultPlumbingRotation)
+  const defaultElectricalType = useBimStore((s) => s.defaultElectricalType)
+  const defaultElectricalRotation = useBimStore((s) => s.defaultElectricalRotation)
+  const setDefaultElectricalType = useBimStore((s) => s.setDefaultElectricalType)
+  const setDefaultElectricalRotation = useBimStore((s) => s.setDefaultElectricalRotation)
+
   const elements = useEntityStore((s) => s.elements)
   const selectedElement = selectedBodyId ? elements.get(selectedBodyId) ?? null : null
 
@@ -111,6 +133,9 @@ export function PropertyPanel() {
   const showColumnDefaults = activeTool === 'column'
   const showBeamDefaults = activeTool === 'beam'
   const showRoofDefaults = activeTool === 'roof'
+  const showFurnitureDefaults = activeTool === 'furniture'
+  const showPlumbingDefaults = activeTool === 'plumbing'
+  const showElectricalDefaults = activeTool === 'electrical'
   const showAnyToolDefaults = (
     showWallDefaults ||
     showDoorDefaults ||
@@ -120,7 +145,10 @@ export function PropertyPanel() {
     showStairDefaults ||
     showColumnDefaults ||
     showBeamDefaults ||
-    showRoofDefaults
+    showRoofDefaults ||
+    showFurnitureDefaults ||
+    showPlumbingDefaults ||
+    showElectricalDefaults
   )
 
   return (
@@ -141,6 +169,48 @@ export function PropertyPanel() {
           <option value="in">Inches (in)</option>
           <option value="ft">Feet (ft)</option>
         </select>
+      </div>
+
+      <div className="property-panel-title" style={{ marginTop: 14 }}>
+        Plan Symbols
+      </div>
+      <div className="property-row">
+        <label className="property-label">Profile</label>
+        <select
+          className="property-input"
+          value={planSymbolProfile}
+          onChange={(e) => setPlanSymbolProfile(e.target.value as 'open_us_v1')}
+        >
+          <option value="open_us_v1">Open US v1</option>
+        </select>
+      </div>
+      <div className="property-row">
+        <label className="property-label">Density</label>
+        <select
+          className="property-input"
+          value={annotationDensity}
+          onChange={(e) => setAnnotationDensity(e.target.value as 'minimal' | 'medium' | 'verbose')}
+        >
+          <option value="minimal">Minimal</option>
+          <option value="medium">Medium</option>
+          <option value="verbose">Verbose</option>
+        </select>
+      </div>
+      <div className="property-row">
+        <label className="property-label">Furniture Text</label>
+        <input
+          type="checkbox"
+          checked={showFurnitureLabels}
+          onChange={(e) => setShowFurnitureLabels(e.target.checked)}
+        />
+      </div>
+      <div className="property-row">
+        <label className="property-label">MEP Text</label>
+        <input
+          type="checkbox"
+          checked={showMepText}
+          onChange={(e) => setShowMepText(e.target.checked)}
+        />
       </div>
 
       <div className="property-panel-title" style={{ marginTop: 14 }}>
@@ -585,6 +655,124 @@ export function PropertyPanel() {
               onChange={(e) => {
                 const v = parseFloat(e.target.value)
                 if (!Number.isNaN(v)) setDefaultRoofRidgeAngleDegrees(v)
+              }}
+            />
+          </div>
+        </>
+      )}
+
+      {showFurnitureDefaults && (
+        <>
+          <div className="property-row">
+            <label className="property-label">Type</label>
+            <select
+              className="property-input"
+              value={defaultFurnitureType}
+              onChange={(e) => setDefaultFurnitureType(e.target.value as FurnitureSymbolType)}
+            >
+              {(Object.keys(FURNITURE_DEFAULT_SIZES) as FurnitureSymbolType[]).map((t) => (
+                <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+              ))}
+            </select>
+          </div>
+          <div className="property-row">
+            <label className="property-label">Rotation</label>
+            <input
+              type="number"
+              className="property-input"
+              value={defaultFurnitureRotation}
+              min={0}
+              max={359}
+              step={15}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value)
+                if (!Number.isNaN(v)) setDefaultFurnitureRotation(v)
+              }}
+            />
+          </div>
+          <div className="property-row">
+            <label className="property-label">Size</label>
+            <span className="property-input" style={{ background: 'transparent', border: 'none' }}>
+              {metersToUnitValue(FURNITURE_DEFAULT_SIZES[defaultFurnitureType].width, lengthUnit).toFixed(1)} x {metersToUnitValue(FURNITURE_DEFAULT_SIZES[defaultFurnitureType].depth, lengthUnit).toFixed(1)} {LENGTH_UNITS[lengthUnit].symbol}
+            </span>
+          </div>
+        </>
+      )}
+
+      {showPlumbingDefaults && (
+        <>
+          <div className="property-row">
+            <label className="property-label">Type</label>
+            <select
+              className="property-input"
+              value={defaultPlumbingType}
+              onChange={(e) => setDefaultPlumbingType(e.target.value as PlumbingSymbolType)}
+            >
+              <option value="toilet">toilet</option>
+              <option value="sink">sink</option>
+              <option value="bathtub">bathtub</option>
+              <option value="shower">shower</option>
+              <option value="water_heater">water heater</option>
+              <option value="hose_bib">hose bib</option>
+              <option value="floor_drain">floor drain</option>
+              <option value="dishwasher">dishwasher</option>
+              <option value="washing_machine">washing machine</option>
+              <option value="urinal">urinal</option>
+            </select>
+          </div>
+          <div className="property-row">
+            <label className="property-label">Rotation</label>
+            <input
+              type="number"
+              className="property-input"
+              value={defaultPlumbingRotation}
+              min={0}
+              max={359}
+              step={15}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value)
+                if (!Number.isNaN(v)) setDefaultPlumbingRotation(v)
+              }}
+            />
+          </div>
+        </>
+      )}
+
+      {showElectricalDefaults && (
+        <>
+          <div className="property-row">
+            <label className="property-label">Type</label>
+            <select
+              className="property-input"
+              value={defaultElectricalType}
+              onChange={(e) => setDefaultElectricalType(e.target.value as ElectricalSymbolType)}
+            >
+              <option value="outlet">outlet</option>
+              <option value="switch">switch</option>
+              <option value="light_fixture">light fixture</option>
+              <option value="panel">panel</option>
+              <option value="smoke_detector">smoke detector</option>
+              <option value="junction_box">junction box</option>
+              <option value="three_way_switch">three way switch</option>
+              <option value="dimmer_switch">dimmer switch</option>
+              <option value="gfci_outlet">GFCI outlet</option>
+              <option value="floor_outlet">floor outlet</option>
+              <option value="ceiling_fan">ceiling fan</option>
+              <option value="thermostat">thermostat</option>
+            </select>
+          </div>
+          <div className="property-row">
+            <label className="property-label">Rotation</label>
+            <input
+              type="number"
+              className="property-input"
+              value={defaultElectricalRotation}
+              min={0}
+              max={359}
+              step={15}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value)
+                if (!Number.isNaN(v)) setDefaultElectricalRotation(v)
               }}
             />
           </div>
@@ -1072,7 +1260,7 @@ export function PropertyPanel() {
                 <input
                   type="text"
                   className="property-input"
-                  value={selectedElement.name}
+                  value={selectedElement.name || selectedElement.meta.name || ''}
                   onChange={(e) => {
                     const next = { ...selectedElement, name: e.target.value, meta: { ...selectedElement.meta, name: e.target.value } }
                     void patchSelectedElement(next)

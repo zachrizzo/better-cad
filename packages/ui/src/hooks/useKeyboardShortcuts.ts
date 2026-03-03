@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useUIStore } from '../stores/ui-store'
 import { useDocumentStore } from '../stores/document-store'
+import { useBimStore } from '../stores/bim-store'
 import {
   useEntityStore,
   isWallElement,
@@ -9,19 +10,24 @@ import {
   isDoorElement,
   isWindowElement,
   isColumnElement,
+  isBeamElement,
   isRoofElement,
+  isFoundationElement,
 } from '../stores/entity-store'
 import {
   getKernel,
   type KernelBackend,
   type ColumnElement,
+  type BeamElement,
   type RoofElement,
+  type FoundationElement,
   type WallElement,
   type FloorElement,
   type StairElement,
   type PrototypeElement,
 } from '../services/kernel-bridge'
 import { syncEntitiesAndRegenerateMeshes } from '../services/entity-regeneration'
+import { smartDuplicateOffset, isArrayableElement } from '../services/array-tools'
 
 let kernelSingleton: KernelBackend | null = null
 let kernelPromise: Promise<KernelBackend> | null = null
@@ -37,9 +43,7 @@ async function getKernelSingleton(): Promise<KernelBackend> {
   return kernelPromise
 }
 
-// --- Duplicate (Ctrl+D) ------------------------------------------------
-
-const COPY_OFFSET = 0.5 // 0.5 m offset in both kernel X and Y
+// --- Duplicate (Ctrl+D) — uses smart offset from array-tools ----------
 
 async function duplicateSelectedElement(): Promise<void> {
   const selectedId = useUIStore.getState().selectedBodyId
@@ -48,48 +52,59 @@ async function duplicateSelectedElement(): Promise<void> {
   const el = useEntityStore.getState().elements.get(selectedId)
   if (!el) return
 
-  // Only duplicate movable element types (walls, floors, stairs)
-  // Doors/windows are wall-hosted and should not be duplicated standalone
-  if (isDoorElement(el) || isWindowElement(el)) return
+  // Only duplicate arrayable element types (not doors/windows/rooms/etc.)
+  if (!isArrayableElement(el)) return
 
+  const [dx, dy] = smartDuplicateOffset(el)
   const newId = `${el.kind}-${crypto.randomUUID()}`
+
+  // Build copy with smart offset applied per element kind
   let copy: PrototypeElement | null = null
 
   if (isWallElement(el)) {
     copy = {
       ...el,
       meta: { ...el.meta, id: newId, name: `${el.meta.name} copy` },
-      start: [el.start[0] + COPY_OFFSET, el.start[1] + COPY_OFFSET] as [number, number],
-      end: [el.end[0] + COPY_OFFSET, el.end[1] + COPY_OFFSET] as [number, number],
+      start: [el.start[0] + dx, el.start[1] + dy] as [number, number],
+      end: [el.end[0] + dx, el.end[1] + dy] as [number, number],
     }
-  } else if (isFloorElement(el)) {
+  } else if (isFloorElement(el) || isFoundationElement(el)) {
+    const f = el as FloorElement | FoundationElement
     copy = {
-      ...el,
-      meta: { ...el.meta, id: newId, name: `${el.meta.name} copy` },
-      boundary: el.boundary.map(
-        ([x, y]) => [x + COPY_OFFSET, y + COPY_OFFSET] as [number, number],
+      ...f,
+      meta: { ...f.meta, id: newId, name: `${f.meta.name} copy` },
+      boundary: f.boundary.map(
+        ([x, y]) => [x + dx, y + dy] as [number, number],
       ),
     }
   } else if (isStairElement(el)) {
     copy = {
       ...el,
       meta: { ...el.meta, id: newId, name: `${el.meta.name} copy` },
-      start: [el.start[0] + COPY_OFFSET, el.start[1] + COPY_OFFSET] as [number, number],
-      end: [el.end[0] + COPY_OFFSET, el.end[1] + COPY_OFFSET] as [number, number],
+      start: [el.start[0] + dx, el.start[1] + dy] as [number, number],
+      end: [el.end[0] + dx, el.end[1] + dy] as [number, number],
     }
   } else if (isColumnElement(el)) {
     copy = {
       ...el,
       meta: { ...el.meta, id: newId, name: `${el.meta.name} copy` },
-      center: [el.center[0] + COPY_OFFSET, el.center[1] + COPY_OFFSET] as [number, number],
+      center: [el.center[0] + dx, el.center[1] + dy] as [number, number],
     }
   } else if (isRoofElement(el)) {
     copy = {
       ...el,
       meta: { ...el.meta, id: newId, name: `${el.meta.name} copy` },
       boundary: el.boundary.map(
-        ([x, y]) => [x + COPY_OFFSET, y + COPY_OFFSET] as [number, number],
+        ([x, y]) => [x + dx, y + dy] as [number, number],
       ),
+    }
+  } else if (isBeamElement(el)) {
+    const b = el as BeamElement
+    copy = {
+      ...b,
+      meta: { ...b.meta, id: newId, name: `${b.meta.name} copy` },
+      start: [b.start[0] + dx, b.start[1] + dy, b.start[2]] as [number, number, number],
+      end: [b.end[0] + dx, b.end[1] + dy, b.end[2]] as [number, number, number],
     }
   }
 
@@ -104,6 +119,23 @@ async function duplicateSelectedElement(): Promise<void> {
   } catch (err) {
     console.error('[BetterCAD] Duplicate failed:', err)
   }
+}
+
+// --- Array dialog trigger (Ctrl+Shift+D) --------------------------------
+
+/** Callback set by App.tsx to open the array dialog */
+let _openArrayDialogCb: (() => void) | null = null
+
+export function setOpenArrayDialogCallback(cb: (() => void) | null): void {
+  _openArrayDialogCb = cb
+}
+
+function openArrayDialogForSelected(): void {
+  const selectedId = useUIStore.getState().selectedBodyId
+  if (!selectedId) return
+  const el = useEntityStore.getState().elements.get(selectedId)
+  if (!el || !isArrayableElement(el)) return
+  _openArrayDialogCb?.()
 }
 
 // --- Rotate (R key → 90 deg CW) ----------------------------------------
@@ -181,6 +213,31 @@ async function rotateSelectedElement(): Promise<void> {
       ...r,
       boundary: r.boundary.map(([x, y]) => rotatePoint(x, y, cx, cy, angle)),
     }
+  } else if (isBeamElement(el)) {
+    const b = el as BeamElement
+    const cx = (b.start[0] + b.end[0]) / 2
+    const cy = (b.start[1] + b.end[1]) / 2
+    const [nx, ny] = rotatePoint(b.start[0], b.start[1], cx, cy, angle)
+    const [ex, ey] = rotatePoint(b.end[0], b.end[1], cx, cy, angle)
+    updated = {
+      ...b,
+      start: [nx, ny, b.start[2]] as [number, number, number],
+      end: [ex, ey, b.end[2]] as [number, number, number],
+    }
+  } else if (isFoundationElement(el)) {
+    const f = el as FoundationElement
+    let cx = 0
+    let cy = 0
+    for (const [x, y] of f.boundary) {
+      cx += x
+      cy += y
+    }
+    cx /= f.boundary.length
+    cy /= f.boundary.length
+    updated = {
+      ...f,
+      boundary: f.boundary.map(([x, y]) => rotatePoint(x, y, cx, cy, angle)),
+    }
   }
 
   if (!updated) return
@@ -201,7 +258,7 @@ interface ShortcutCallbacks {
   onToolSelect?: (tool: ToolType) => void
 }
 
-type ToolType = 'select' | 'foundation' | 'parking' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section'
+type ToolType = 'select' | 'foundation' | 'parking' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section' | 'furniture' | 'plumbing' | 'electrical'
 
 export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
   const setActiveTool = useUIStore((s) => s.setActiveTool)
@@ -234,7 +291,13 @@ export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
           case 'd':
           case 'D':
             e.preventDefault()
-            void duplicateSelectedElement()
+            if (e.shiftKey) {
+              // Ctrl+Shift+D → Array dialog
+              openArrayDialogForSelected()
+            } else {
+              // Ctrl+D → Duplicate with smart offset
+              void duplicateSelectedElement()
+            }
             return
         }
       }
@@ -325,10 +388,37 @@ export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
             selectTool('text')
           }
           break
+        case 'i':
+        case 'I':
+          if (!e.ctrlKey && !e.metaKey) {
+            selectTool('furniture')
+          }
+          break
+        case 'u':
+        case 'U':
+          if (!e.ctrlKey && !e.metaKey) {
+            selectTool('plumbing')
+          }
+          break
+        case 'e':
+        case 'E':
+          if (!e.ctrlKey && !e.metaKey) {
+            selectTool('electrical')
+          }
+          break
         case 'r':
         case 'R':
           if (!e.ctrlKey && !e.metaKey) {
-            void rotateSelectedElement()
+            const currentTool = useUIStore.getState().activeTool
+            if (currentTool === 'furniture') {
+              useBimStore.getState().setDefaultFurnitureRotation(useBimStore.getState().defaultFurnitureRotation + 90)
+            } else if (currentTool === 'plumbing') {
+              useBimStore.getState().setDefaultPlumbingRotation(useBimStore.getState().defaultPlumbingRotation + 90)
+            } else if (currentTool === 'electrical') {
+              useBimStore.getState().setDefaultElectricalRotation(useBimStore.getState().defaultElectricalRotation + 90)
+            } else {
+              void rotateSelectedElement()
+            }
           }
           break
         case 'Delete':

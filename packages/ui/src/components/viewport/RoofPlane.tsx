@@ -39,6 +39,50 @@ function normalizeAngleDegrees(angle: number): number {
   return normalized
 }
 
+function subdivideTopTriangles(geometry: THREE.BufferGeometry, topZ: number): void {
+  const posAttr = geometry.getAttribute('position')
+  if (!(posAttr instanceof THREE.BufferAttribute) || posAttr.itemSize !== 3) return
+
+  const source = posAttr.array as Float32Array
+  if (source.length < 9) return
+
+  const topEps = Math.max(Math.abs(topZ), 1) * 1e-4
+  const out: number[] = []
+
+  for (let i = 0; i + 8 < source.length; i += 9) {
+    const x0 = source[i]
+    const y0 = source[i + 1]
+    const z0 = source[i + 2]
+    const x1 = source[i + 3]
+    const y1 = source[i + 4]
+    const z1 = source[i + 5]
+    const x2 = source[i + 6]
+    const y2 = source[i + 7]
+    const z2 = source[i + 8]
+
+    const isTop = Math.abs(z0 - topZ) <= topEps && Math.abs(z1 - topZ) <= topEps && Math.abs(z2 - topZ) <= topEps
+    if (!isTop) {
+      out.push(x0, y0, z0, x1, y1, z1, x2, y2, z2)
+      continue
+    }
+
+    const cx = (x0 + x1 + x2) / 3
+    const cy = (y0 + y1 + y2) / 3
+    const cz = topZ
+
+    out.push(
+      x0, y0, z0, x1, y1, z1, cx, cy, cz,
+      x1, y1, z1, x2, y2, z2, cx, cy, cz,
+      x2, y2, z2, x0, y0, z0, cx, cy, cz,
+    )
+  }
+
+  if (out.length !== source.length) {
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out), 3))
+    if (geometry.getAttribute('normal')) geometry.deleteAttribute('normal')
+  }
+}
+
 function RoofMesh({ boundary, thickness, elevation, roofType, pitchDegrees, ridgeAngleDegrees, color, opacity = 0.85 }: {
   boundary: Point2[]
   thickness: number
@@ -65,7 +109,7 @@ function RoofMesh({ boundary, thickness, elevation, roofType, pitchDegrees, ridg
     shape.closePath()
 
     const extrudeSettings = { depth: thickness, bevelEnabled: false, steps: 1 }
-    const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings)
+    const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings).toNonIndexed()
 
     const normalizedRoofType = normalizeRoofType(roofType)
     const normalizedPitch = clamp(pitchDegrees, 0, MAX_ROOF_PITCH_DEGREES)
@@ -73,6 +117,9 @@ function RoofMesh({ boundary, thickness, elevation, roofType, pitchDegrees, ridg
       geom.computeVertexNormals()
       return geom
     }
+
+    // Add interior top triangles so gable/hip roofs can form a visible ridge.
+    subdivideTopTriangles(geom, thickness)
 
     const ridgeWorldAngle = THREE.MathUtils.degToRad(normalizeAngleDegrees(ridgeAngleDegrees))
     const ridgeWorldX = Math.cos(ridgeWorldAngle)

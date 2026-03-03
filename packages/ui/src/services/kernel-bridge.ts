@@ -6,6 +6,10 @@ export interface TessellatedMesh {
   indices: Uint32Array
 }
 
+export type ImportFormat = 'step' | 'dxf' | 'ifc'
+export type ExportFormat = 'step' | 'dxf' | 'ifc' | 'gltf'
+export type ModelFormat = ImportFormat | ExportFormat
+
 export interface ElementMeta {
   id: string
   name: string
@@ -13,6 +17,10 @@ export interface ElementMeta {
   host_id?: string | null
   type_id?: string | null
   parent_id?: string | null
+  material_id?: string | null
+  ifc_guid?: string | null
+  classification?: string | null
+  layer?: string
 }
 
 export interface WallElement {
@@ -24,6 +32,9 @@ export interface WallElement {
   thickness: number
 }
 
+export type DoorType = 'single_swing' | 'double_swing' | 'sliding' | 'pocket' | 'bifold' | 'garage'
+export type WindowType = 'fixed' | 'double_hung' | 'casement' | 'sliding' | 'awning' | 'bay'
+
 export interface DoorElement {
   kind: 'door'
   meta: ElementMeta
@@ -33,6 +44,7 @@ export interface DoorElement {
   height: number
   sill_height: number
   swing: 'left' | 'right'
+  door_type?: DoorType
 }
 
 export interface WindowElement {
@@ -43,6 +55,7 @@ export interface WindowElement {
   width: number
   height: number
   sill_height: number
+  window_type?: WindowType
 }
 
 export interface FloorElement {
@@ -75,6 +88,13 @@ export interface StairElement {
   stair_type?: 'straight' | 'spiral'
   spiral_turns?: number
   side_wall_thickness?: number
+}
+
+export interface FoundationElement {
+  kind: 'foundation'
+  meta: ElementMeta
+  boundary: [number, number][]
+  thickness: number
 }
 
 export interface ColumnElement {
@@ -133,12 +153,115 @@ export interface GenericElement {
   [key: string]: unknown
 }
 
+export type ElectricalSymbolType = 'outlet' | 'switch' | 'light_fixture' | 'panel' | 'smoke_detector' | 'junction_box' | 'three_way_switch' | 'dimmer_switch' | 'gfci_outlet' | 'floor_outlet' | 'ceiling_fan' | 'thermostat'
+export type PlumbingSymbolType = 'toilet' | 'sink' | 'bathtub' | 'shower' | 'water_heater' | 'hose_bib' | 'floor_drain' | 'dishwasher' | 'washing_machine' | 'urinal'
+export type FurnitureSymbolType = 'desk' | 'chair' | 'table' | 'bed' | 'sofa' | 'dining_table' | 'bookshelf' | 'wardrobe' | 'toilet_stall' | 'reception_desk' | 'conference_table' | 'kitchen_island' | 'refrigerator' | 'stove' | 'washer' | 'dryer' | 'nightstand' | 'coffee_table' | 'tv_console' | 'console_table' | 'bench' | 'ottoman' | 'vanity'
+export type SiteDetailType = 'property_line' | 'setback' | 'tree' | 'parking_space' | 'sidewalk' | 'driveway' | 'compass' | 'contour_line' | 'fence' | 'retaining'
+export type TagType = 'room' | 'door' | 'window' | 'wall' | 'column' | 'beam'
+export type HatchPattern = 'concrete' | 'insulation' | 'earth' | 'wood' | 'brick' | 'steel' | 'gravel' | 'glass' | 'none'
+
+export type HvacSymbolType = 'supply_vent' | 'return_vent' | 'thermostat' | 'exhaust_fan' | 'ductwork' | 'mini_split'
+export type FireSafetySymbolType = 'fire_extinguisher' | 'sprinkler_head' | 'exit_sign' | 'pull_station' | 'smoke_alarm' | 'fire_alarm_panel'
+export type AccessibilitySymbolType = 'wheelchair' | 'ramp' | 'grab_bar' | 'accessible_parking' | 'tactile_warning'
+
+export interface ElectricalElement {
+  kind: 'electrical'
+  meta: ElementMeta
+  symbol_type: ElectricalSymbolType
+  position: [number, number]
+  rotation: number
+  circuit_id?: string
+  connected_to?: string
+}
+
+export interface PlumbingElement {
+  kind: 'plumbing'
+  meta: ElementMeta
+  symbol_type: PlumbingSymbolType
+  position: [number, number]
+  rotation: number
+}
+
+export interface FurnitureElement {
+  kind: 'furniture'
+  meta: ElementMeta
+  symbol_type: FurnitureSymbolType
+  position: [number, number]
+  rotation: number
+  width: number
+  depth: number
+}
+
+export interface SiteDetailElement {
+  kind: 'site_detail'
+  meta: ElementMeta
+  detail_type: SiteDetailType
+  points: [number, number][]
+  radius?: number
+  elevation?: number
+}
+
+export interface LeaderAnnotationElement {
+  kind: 'leader_annotation'
+  meta: ElementMeta
+  start: [number, number]
+  end: [number, number]
+  text: string
+  arrow_type: string
+}
+
+export interface KeynoteElement {
+  kind: 'keynote'
+  meta: ElementMeta
+  position: [number, number]
+  keynote_id: string
+  text: string
+}
+
+export interface TagElement {
+  kind: 'tag'
+  meta: ElementMeta
+  position: [number, number]
+  target_element_id: string
+  tag_type: TagType
+  auto_text: boolean
+}
+
+export interface HvacElement {
+  kind: 'hvac'
+  meta: ElementMeta
+  symbol_type: HvacSymbolType
+  position: [number, number]
+  rotation: number
+  width?: number
+  depth?: number
+}
+
+export interface FireSafetyElement {
+  kind: 'fire_safety'
+  meta: ElementMeta
+  symbol_type: FireSafetySymbolType
+  position: [number, number]
+  rotation: number
+}
+
+export interface AccessibilityElement {
+  kind: 'accessibility'
+  meta: ElementMeta
+  symbol_type: AccessibilitySymbolType
+  position: [number, number]
+  rotation: number
+  width?: number
+  depth?: number
+}
+
 export type PrototypeElement =
   | WallElement
   | DoorElement
   | WindowElement
   | FloorElement
   | RoofElement
+  | FoundationElement
   | StairElement
   | ColumnElement
   | BeamElement
@@ -146,25 +269,129 @@ export type PrototypeElement =
   | DimensionElement
   | TextAnnotationElement
   | LevelElement
+  | ElectricalElement
+  | PlumbingElement
+  | FurnitureElement
+  | SiteDetailElement
+  | LeaderAnnotationElement
+  | KeynoteElement
+  | TagElement
+  | HvacElement
+  | FireSafetyElement
+  | AccessibilityElement
   | GenericElement
 
 export interface RegeneratedMesh extends TessellatedMesh {
   id: string
 }
 
+export interface FormatCapability {
+  import: boolean
+  export: boolean
+}
+
+export interface BackendCapabilities {
+  formats: Record<ModelFormat, FormatCapability>
+}
+
+export interface ImportWarning {
+  entity_id: number
+  message: string
+}
+
+export interface ImportResult {
+  meshes: TessellatedMesh[]
+  stateMutated: boolean
+  importedElementCount?: number
+  warnings?: ImportWarning[]
+}
+
+export interface RegenOptions {
+  includeKinds?: string[]
+}
+
+// --- Documentation view types ---
+
+export interface PlanHatch {
+  corners: [[number, number], [number, number], [number, number], [number, number]]
+  element_id: string
+}
+
+export interface PlanSymbol {
+  symbol_type: 'DoorSwing' | 'WindowGlazing'
+  center: [number, number]
+  angle: number
+  radius: number
+  element_id: string
+}
+
+export interface PlanRoomLabel {
+  centroid: [number, number]
+  name: string
+  area: number
+}
+
+export interface EnrichedPlanViewData {
+  wall_lines: Array<{ start: [number, number]; end: [number, number] }>
+  wall_hatches: PlanHatch[]
+  opening_symbols: PlanSymbol[]
+  room_labels: PlanRoomLabel[]
+}
+
+export interface CutLine {
+  start: [number, number]
+  end: [number, number]
+  element_id: string
+  element_kind: string
+}
+
+export interface HatchPolygon {
+  points: [number, number][]
+  element_id: string
+}
+
+export interface SectionViewData {
+  cut_lines: CutLine[]
+  hatch_polygons: HatchPolygon[]
+  view_width: number
+  view_height: number
+}
+
+export interface ElevationLine {
+  start: [number, number]
+  end: [number, number]
+  element_id: string
+}
+
+export interface ElevationViewData {
+  lines: ElevationLine[]
+  view_width: number
+  view_height: number
+}
+
 export interface KernelBackend {
+  getCapabilities(): Promise<BackendCapabilities>
   resetProject(name: string, units: string): Promise<void>
   createElement(element: PrototypeElement): Promise<string>
   updateElement(elementId: string, element: PrototypeElement): Promise<void>
   deleteElement(elementId: string): Promise<void>
   queryElements(): Promise<PrototypeElement[]>
-  regenView(): Promise<RegeneratedMesh[]>
+  regenView(opts?: RegenOptions): Promise<RegeneratedMesh[]>
   createBox(width: number, height: number, depth: number): Promise<string>
   tessellate(bodyId: string): Promise<TessellatedMesh>
   createAndTessellateBox(width: number, height: number, depth: number): Promise<TessellatedMesh>
   extrudeSketchPoints(points: [number, number][], height: number): Promise<TessellatedMesh>
   addWall(startX: number, startY: number, endX: number, endY: number, height: number, thickness: number): Promise<TessellatedMesh>
   generatePlanView(wallsJson: string): Promise<string>
+  generatePlanViewV2(): Promise<EnrichedPlanViewData>
+  generateSectionCut(cutStartX: number, cutStartY: number, cutEndX: number, cutEndY: number, cutHeight: number): Promise<SectionViewData>
+  generateElevation(direction: string): Promise<ElevationViewData>
+  importModel(data: Uint8Array, format: ImportFormat): Promise<ImportResult>
+  exportModel(format: ExportFormat): Promise<ArrayBuffer>
+  /**
+   * Legacy compatibility wrappers retained while callsites migrate.
+   * New code should call importModel/exportModel.
+   */
   importFile(data: Uint8Array, format: string): Promise<TessellatedMesh[]>
   exportFile(format: string): Promise<ArrayBuffer>
   getMaterialLibrary(): Promise<PbrMaterial[]>

@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use bcad_domain::{Element, FloorElement, PrototypeProject, PrototypeState, StairElement, StairType, WallElement};
+use bcad_domain::{
+    default_backend_capabilities, Element, ElementMeta, FloorElement, LevelElement,
+    PrototypeProject, PrototypeState, StairElement, StairType, WallElement,
+};
 use bcad_kernel::tessellation::TessellatedMesh;
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -69,14 +72,48 @@ fn wall_mesh(
     bcad_bim::wall::wall_mesh_with_openings(&wall_params, &openings).map_err(|e| e.to_string())
 }
 
-fn floor_mesh(floor: &FloorElement) -> Result<TessellatedMesh, String> {
-    if floor.boundary.len() < 3 {
-        return Err("floor boundary must have at least 3 points".into());
+fn floor_mesh(floor: &FloorElement, stair_openings: &[Vec<[f64; 2]>]) -> Result<TessellatedMesh, String> {
+    bcad_bim::slab::floor_mesh_with_openings(floor, stair_openings).map_err(|e| e.to_string())
+}
+
+fn collect_stair_openings_by_target_level(elements: &[Element]) -> HashMap<String, Vec<Vec<[f64; 2]>>> {
+    let mut levels: Vec<(&str, f64)> = elements
+        .iter()
+        .filter_map(|element| match element {
+            Element::Level(level) => Some((level.meta.id.as_str(), level.elevation)),
+            _ => None,
+        })
+        .collect();
+    levels.sort_by(|a, b| a.1.total_cmp(&b.1));
+
+    let mut next_level_by_id: HashMap<&str, &str> = HashMap::new();
+    for pair in levels.windows(2) {
+        next_level_by_id.insert(pair[0].0, pair[1].0);
     }
-    let points: Vec<(f64, f64)> = floor.boundary.iter().map(|p| (p[0], p[1])).collect();
-    let solid = bcad_kernel::geometry::extrude_sketch_points(&points, floor.thickness)
-        .map_err(|e| e.to_string())?;
-    bcad_kernel::tessellation::tessellate(&solid).map_err(|e| e.to_string())
+
+    let mut openings_by_level: HashMap<String, Vec<Vec<[f64; 2]>>> = HashMap::new();
+    for element in elements {
+        let Element::Stair(stair) = element else {
+            continue;
+        };
+
+        let Some(source_level_id) = stair.meta.level_id.as_ref().map(|id| id.as_ref()) else {
+            continue;
+        };
+        let Some(target_level_id) = next_level_by_id.get(source_level_id).copied() else {
+            continue;
+        };
+        let Some(opening_loop) = bcad_bim::slab::stair_opening_boundary(stair) else {
+            continue;
+        };
+
+        openings_by_level
+            .entry(target_level_id.to_string())
+            .or_default()
+            .push(opening_loop);
+    }
+
+    openings_by_level
 }
 
 fn normalize_spiral_turns(turns: f64) -> f64 {
@@ -274,6 +311,62 @@ fn stair_mesh(stair: &StairElement) -> Result<TessellatedMesh, String> {
     }
 }
 
+fn assign_level_if_missing(element: &mut Element, level_id: &str) {
+    match element {
+        Element::Wall(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Floor(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Roof(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Foundation(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Column(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Beam(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Door(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Window(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Stair(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        Element::Room(e) => {
+            if e.meta.level_id.is_none() {
+                e.meta.level_id = Some(level_id.into());
+            }
+        }
+        _ => {}
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Ping
 // ---------------------------------------------------------------------------
@@ -281,6 +374,11 @@ fn stair_mesh(stair: &StairElement) -> Result<TessellatedMesh, String> {
 #[tauri::command]
 pub fn ping() -> String {
     "bcad-tauri pong".to_string()
+}
+
+#[tauri::command]
+pub fn get_capabilities() -> Result<Value, String> {
+    serde_json::to_value(default_backend_capabilities()).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +423,7 @@ pub fn query_elements() -> Result<String, String> {
 #[tauri::command]
 pub fn regen_view() -> Result<Value, String> {
     let state = PROTOTYPE_STATE.lock().map_err(|e| e.to_string())?;
+    let stair_openings_by_level = collect_stair_openings_by_target_level(state.query_elements());
 
     let mut openings_by_wall: HashMap<String, Vec<bcad_bim::wall::OpeningSpec>> = HashMap::new();
 
@@ -358,7 +457,7 @@ pub fn regen_view() -> Result<Value, String> {
 
     let mut meshes: Vec<RegeneratedMesh> = Vec::new();
 
-    for element in state.query_elements() {
+    for element in state.query_elements_ordered() {
         match element {
             Element::Wall(wall) => {
                 let mesh = wall_mesh(wall, &openings_by_wall)?;
@@ -370,7 +469,14 @@ pub fn regen_view() -> Result<Value, String> {
                 });
             }
             Element::Floor(floor) => {
-                let mesh = floor_mesh(floor)?;
+                let stair_openings = floor
+                    .meta
+                    .level_id
+                    .as_ref()
+                    .and_then(|level_id| stair_openings_by_level.get(level_id.as_ref()))
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                let mesh = floor_mesh(floor, stair_openings)?;
                 meshes.push(RegeneratedMesh {
                     id: floor.meta.id.clone(),
                     positions: mesh.positions,
@@ -459,6 +565,245 @@ pub fn import_step(data: Vec<u8>) -> Result<Value, String> {
         .filter_map(|s| bcad_kernel::tessellation::tessellate(s).ok())
         .collect();
     serde_json::to_value(&meshes).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn import_dxf_data(data: Vec<u8>) -> Result<String, String> {
+    let elements = bcad_io::dxf_io::import_dxf(&data).map_err(|e| e.to_string())?;
+    let mut state = PROTOTYPE_STATE.lock().map_err(|e| e.to_string())?;
+    let level_id = if let Some(level) = state
+        .query_elements()
+        .iter()
+        .find_map(|element| match element {
+            Element::Level(level) => Some(level.meta.id.clone()),
+            _ => None,
+        })
+    {
+        level
+    } else {
+        let level = Element::Level(LevelElement {
+            meta: ElementMeta::new("Imported Level"),
+            elevation: 0.0,
+        });
+        let id = level.id().to_string();
+        state.create_element(level).map_err(|e| e.to_string())?;
+        id
+    };
+
+    for mut element in elements {
+        assign_level_if_missing(&mut element, &level_id);
+        state.create_element(element).map_err(|e| e.to_string())?;
+    }
+    serde_json::to_string(state.query_elements()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn import_ifc_data(data: Vec<u8>) -> Result<String, String> {
+    let result = bcad_io::ifc::import_ifc(&data).map_err(|e| e.to_string())?;
+
+    let mut state = PROTOTYPE_STATE.lock().map_err(|e| e.to_string())?;
+
+    let level_id = if let Some(level) = state
+        .query_elements()
+        .iter()
+        .find_map(|element| match element {
+            Element::Level(level) => Some(level.meta.id.clone()),
+            _ => None,
+        })
+    {
+        level
+    } else {
+        // Check if the imported elements already include a level
+        if let Some(level) = result.elements.iter().find_map(|e| match e {
+            Element::Level(l) => Some(l.meta.id.clone()),
+            _ => None,
+        }) {
+            level
+        } else {
+            let level = Element::Level(LevelElement {
+                meta: ElementMeta::new("Imported Level"),
+                elevation: 0.0,
+            });
+            let id = level.id().to_string();
+            let _ = state.create_element(level);
+            id
+        }
+    };
+
+    for mut element in result.elements {
+        assign_level_if_missing(&mut element, &level_id);
+        let _ = state.create_element(element);
+    }
+
+    serde_json::to_string(state.query_elements()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn export_step_project() -> Result<Vec<u8>, String> {
+    let state = PROTOTYPE_STATE.lock().map_err(|e| e.to_string())?;
+    let elements = state.query_elements();
+
+    let mut solids = Vec::new();
+    for element in elements {
+        match element {
+            Element::Wall(wall) => {
+                let dx = wall.end[0] - wall.start[0];
+                let dy = wall.end[1] - wall.start[1];
+                let length = (dx * dx + dy * dy).sqrt();
+                if length < 1e-8 {
+                    continue;
+                }
+                if let Ok(solid) = bcad_kernel::geometry::create_box(length, wall.thickness, wall.height) {
+                    solids.push(solid);
+                }
+            }
+            Element::Floor(floor) => {
+                if floor.boundary.len() >= 2 {
+                    let xs: Vec<f64> = floor.boundary.iter().map(|p| p[0]).collect();
+                    let ys: Vec<f64> = floor.boundary.iter().map(|p| p[1]).collect();
+                    let w = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+                        - xs.iter().cloned().fold(f64::INFINITY, f64::min);
+                    let d = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+                        - ys.iter().cloned().fold(f64::INFINITY, f64::min);
+                    if w > 1e-8 && d > 1e-8 {
+                        if let Ok(solid) = bcad_kernel::geometry::create_box(w, d, floor.thickness) {
+                            solids.push(solid);
+                        }
+                    }
+                }
+            }
+            Element::Stair(stair) => {
+                let dx = stair.end[0] - stair.start[0];
+                let dy = stair.end[1] - stair.start[1];
+                let run_len = (dx * dx + dy * dy).sqrt();
+                if run_len > 1e-8 {
+                    if let Ok(solid) = bcad_kernel::geometry::create_box(run_len, stair.width, stair.total_height) {
+                        solids.push(solid);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if solids.is_empty() {
+        return Err("no exportable geometry in project".into());
+    }
+
+    bcad_io::step::export_step(&solids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn export_gltf_project() -> Result<Vec<u8>, String> {
+    let state = PROTOTYPE_STATE.lock().map_err(|e| e.to_string())?;
+    let elements = state.query_elements();
+    let stair_openings_by_level = collect_stair_openings_by_target_level(elements);
+
+    let mut openings_by_wall: HashMap<String, Vec<bcad_bim::wall::OpeningSpec>> = HashMap::new();
+    for element in elements {
+        match element {
+            Element::Door(door) => {
+                openings_by_wall
+                    .entry(door.wall_id.clone())
+                    .or_default()
+                    .push(bcad_bim::wall::OpeningSpec {
+                        position_along_wall: door.position_along_wall,
+                        width: door.width,
+                        height: door.height,
+                        sill_height: door.sill_height,
+                    });
+            }
+            Element::Window(window) => {
+                openings_by_wall
+                    .entry(window.wall_id.clone())
+                    .or_default()
+                    .push(bcad_bim::wall::OpeningSpec {
+                        position_along_wall: window.position_along_wall,
+                        width: window.width,
+                        height: window.height,
+                        sill_height: window.sill_height,
+                    });
+            }
+            _ => {}
+        }
+    }
+
+    let mut mesh_material_pairs: Vec<(bcad_kernel::tessellation::TessellatedMesh, bcad_kernel::materials::PbrMaterial)> =
+        Vec::new();
+    for element in elements {
+        match element {
+            Element::Wall(wall) => {
+                if let Ok(mesh) = wall_mesh(wall, &openings_by_wall) {
+                    mesh_material_pairs.push((
+                        mesh,
+                        bcad_kernel::materials::PbrMaterial::new(
+                            "Wall",
+                            [0.85, 0.85, 0.80, 1.0],
+                            0.0,
+                            0.7,
+                        ),
+                    ));
+                }
+            }
+            Element::Floor(floor) => {
+                let stair_openings = floor
+                    .meta
+                    .level_id
+                    .as_ref()
+                    .and_then(|level_id| stair_openings_by_level.get(level_id.as_ref()))
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                if let Ok(mesh) = floor_mesh(floor, stair_openings) {
+                    mesh_material_pairs.push((
+                        mesh,
+                        bcad_kernel::materials::PbrMaterial::new(
+                            "Floor",
+                            [0.6, 0.6, 0.55, 1.0],
+                            0.0,
+                            0.6,
+                        ),
+                    ));
+                }
+            }
+            Element::Stair(stair) => {
+                if let Ok(mesh) = stair_mesh(stair) {
+                    mesh_material_pairs.push((
+                        mesh,
+                        bcad_kernel::materials::PbrMaterial::new(
+                            "Stair",
+                            [0.5, 0.45, 0.35, 1.0],
+                            0.0,
+                            0.5,
+                        ),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if mesh_material_pairs.is_empty() {
+        return Err("no exportable geometry in project".into());
+    }
+
+    let refs: Vec<(&bcad_kernel::tessellation::TessellatedMesh, &bcad_kernel::materials::PbrMaterial)> =
+        mesh_material_pairs.iter().map(|(m, mat)| (m, mat)).collect();
+
+    bcad_io::gltf_export::export_gltf(&refs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn export_ifc_project() -> Result<Vec<u8>, String> {
+    let state = PROTOTYPE_STATE.lock().map_err(|e| e.to_string())?;
+    let elements = state.query_elements();
+    bcad_io::ifc::export_ifc(elements).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn export_dxf_project() -> Result<Vec<u8>, String> {
+    let state = PROTOTYPE_STATE.lock().map_err(|e| e.to_string())?;
+    let elements = state.query_elements();
+    bcad_io::dxf_io::export_dxf(elements).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

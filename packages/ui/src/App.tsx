@@ -20,16 +20,19 @@ import { BeamPlane } from './components/viewport/BeamPlane'
 import { RoofPlane } from './components/viewport/RoofPlane'
 import { SketchPlane } from './components/viewport/SketchPlane'
 import { SectionPlane } from './components/viewport/SectionPlane'
+import { CameraSync } from './components/viewport/CameraSync'
 import { SectionView, SectionCutLine } from './components/viewport/SectionView'
 import { ElevationCamera } from './components/viewport/ElevationCamera'
 import { DimensionPlane, DimensionOverlay3D } from './components/viewport/DimensionPlane'
 import { TextAnnotationPlane, TextAnnotationOverlay3D } from './components/viewport/TextAnnotationPlane'
+import { FurniturePlane } from './components/viewport/FurniturePlane'
 import { MeasurePlane } from './components/tools/MeasureTool'
 import { SelectionGizmo } from './components/viewport/SelectionGizmo'
 import { Viewport2D } from './components/viewport/Viewport2D'
 import { PropertyPanel } from './components/layout/PropertyPanel'
 import { ConstraintPanel } from './components/panels/ConstraintPanel'
 import { ViewPanel } from './components/panels/ViewPanel'
+import { LayerPanel } from './components/panels/LayerPanel'
 import { SchedulePanel } from './components/panels/SchedulePanel'
 import { SketchToolbar } from './components/panels/SketchToolbar'
 import { useBimStore } from './stores/bim-store'
@@ -52,11 +55,15 @@ import {
   useEntityStore,
 } from './stores/entity-store'
 import { syncEntitiesAndRegenerateMeshes } from './services/entity-regeneration'
+import { autoJoinWalls } from './services/wall-cleanup'
 import { detectRooms } from './services/room-detection'
 import { ImportDialog } from './components/dialogs/ImportDialog'
 import { ExportDialog } from './components/dialogs/ExportDialog'
+import { ArrayDialog, type ArrayParams } from './components/dialogs/ArrayDialog'
 import type { TessellatedMesh, WallElement } from './services/kernel-bridge'
 import { downloadArrayBufferAsFile } from './utils/file-download'
+import { linearArray, polarArray, isArrayableElement } from './services/array-tools'
+import { setOpenArrayDialogCallback } from './hooks/useKeyboardShortcuts'
 import './App.css'
 
 // Lazy-load ChatPanel + @anthropic-ai/sdk so they don't run during initial app render
@@ -79,6 +86,9 @@ const TOOL_OPTIONS = [
   { tool: 'dimension', label: 'Dimension', title: 'Dimension tool', shortcut: 'A' },
   { tool: 'text', label: 'Text', title: 'Text annotation tool', shortcut: 'T' },
   { tool: 'sketch', label: 'Sketch', title: 'Sketch tool', shortcut: 'K' },
+  { tool: 'furniture', label: 'Furniture', title: 'Furniture placement tool', shortcut: 'I' },
+  { tool: 'plumbing', label: 'Plumbing', title: 'Plumbing fixture tool', shortcut: 'U' },
+  { tool: 'electrical', label: 'Electrical', title: 'Electrical symbol tool', shortcut: 'E' },
   { tool: 'measure', label: 'Measure', title: 'Measure tool', shortcut: 'M' },
   { tool: 'section', label: 'Section', title: 'Section cut tool', shortcut: '-' },
 ] as const
@@ -187,6 +197,9 @@ function getDrawingPlaneHint(tool: string): string | null {
   if (tool === 'text') return 'Click to place a text annotation, then type and press Enter.'
   if (tool === 'sketch') return 'Parametric sketch mode. Use sub-tools to draw lines, rectangles, circles. Apply constraints in the panel.'
   if (tool === 'section') return 'Click two points on the ground plane to define the section cut line.'
+  if (tool === 'furniture') return 'Click to place furniture. Press R to rotate. Change type in Properties panel.'
+  if (tool === 'plumbing') return 'Click to place plumbing fixture. Press R to rotate. Change type in Properties panel.'
+  if (tool === 'electrical') return 'Click to place electrical symbol. Press R to rotate. Change type in Properties panel.'
   return null
 }
 
@@ -357,6 +370,7 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
       <MeasurePlane />
       <DimensionPlane />
       <TextAnnotationPlane />
+      <FurniturePlane />
       <DimensionOverlay3D />
       <TextAnnotationOverlay3D />
       <SelectionGizmo />
@@ -367,6 +381,7 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
       {activeView?.type === 'elevation' && <ElevationCamera view={activeView} />}
 
       <OrbitControls makeDefault />
+      <CameraSync />
     </>
   )
 }
@@ -408,6 +423,9 @@ export default function App() {
   const defaultRoofAutoElevation = useBimStore((s) => s.defaultRoofAutoElevation)
   const defaultRoofType = useBimStore((s) => s.defaultRoofType)
   const defaultRoofPitchDegrees = useBimStore((s) => s.defaultRoofPitchDegrees)
+  const defaultFurnitureType = useBimStore((s) => s.defaultFurnitureType)
+  const defaultPlumbingType = useBimStore((s) => s.defaultPlumbingType)
+  const defaultElectricalType = useBimStore((s) => s.defaultElectricalType)
 
   const activateSketch = useSketchStore((s) => s.activateSketch)
   const deactivateSketch = useSketchStore((s) => s.deactivateSketch)
@@ -453,6 +471,7 @@ export default function App() {
   const [hoveredBodyId, setHoveredBodyId] = useState<string | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [arrayDialogOpen, setArrayDialogOpen] = useState(false)
   const [clearProjectConfirmOpen, setClearProjectConfirmOpen] = useState(false)
   const [clearProjectPending, setClearProjectPending] = useState(false)
   const [showSchedules, setShowSchedules] = useState(false)
@@ -581,9 +600,26 @@ export default function App() {
     })
   }, [])
 
+  const handleImportedModelMutation = useCallback(async () => {
+    if (!kernel) return
+    await syncEntitiesAndRegenerateMeshes(kernel)
+  }, [kernel])
+
   const { performUndo, performRedo } = useUndo()
 
   const ROOM_COLORS = ['#8b5cf6', '#ec4899', '#14b8a6', '#f59e0b', '#3b82f6', '#ef4444', '#10b981', '#6366f1']
+
+  const handleCleanUpWalls = async () => {
+    if (!ready || !kernel) return
+    setToolReadout('Cleaning up walls...')
+    try {
+      const count = await autoJoinWalls(kernel, activeLevelId)
+      setToolReadout(count > 0 ? `${count} wall joints cleaned up.` : 'No wall cleanup needed.')
+    } catch (err) {
+      console.error('[BetterCAD] Wall cleanup failed:', err)
+      setToolReadout('Wall cleanup failed.')
+    }
+  }
 
   const handleDetectRooms = async () => {
     if (!ready || !kernel) return
@@ -855,6 +891,40 @@ export default function App() {
     onToolSelect: handleToolChange,
   })
 
+  // Register the array dialog opener for Ctrl+Shift+D
+  useEffect(() => {
+    setOpenArrayDialogCallback(() => setArrayDialogOpen(true))
+    return () => setOpenArrayDialogCallback(null)
+  }, [])
+
+  const handleArrayApply = useCallback(async (params: ArrayParams) => {
+    if (!kernel || !selectedBodyId) return
+    const el = entityElements.get(selectedBodyId)
+    if (!el || !isArrayableElement(el)) return
+    try {
+      if (params.type === 'linear') {
+        await linearArray(el, {
+          count: params.count,
+          spacingX: params.spacingX,
+          spacingY: params.spacingY,
+        }, kernel)
+      } else {
+        await polarArray(el, {
+          count: params.count,
+          centerX: params.centerX,
+          centerY: params.centerY,
+          totalAngleDeg: params.totalAngle,
+        }, kernel)
+      }
+    } catch (err) {
+      console.error('[BetterCAD] Array failed:', err)
+    }
+    setArrayDialogOpen(false)
+  }, [entityElements, kernel, selectedBodyId])
+
+  const selectedElementForArray = selectedBodyId ? entityElements.get(selectedBodyId) : null
+  const canArray = selectedElementForArray != null && isArrayableElement(selectedElementForArray)
+
   const viewportBackground = theme === 'light' ? '#edf2fa' : '#1a1a2e'
   const splitDividerColor = theme === 'light' ? '#d0d0d0' : '#3a3a50'
   const drawingPlaneHint = viewMode !== '2d' ? getDrawingPlaneHint(activeTool) : null
@@ -955,6 +1025,23 @@ export default function App() {
       hint: 'Ctrl+Shift+Z',
       onSelect: () => void performRedo(),
       disabled: redoStackLen === 0,
+    },
+    {
+      label: 'Clean Up Walls',
+      onSelect: () => void handleCleanUpWalls(),
+      title: wallCountOnActiveLevel >= 2
+        ? 'Auto-join wall endpoints and clean up intersections on active level'
+        : 'Clean Up Walls needs at least 2 walls on the active level',
+      disabled: wallCountOnActiveLevel < 2,
+    },
+    {
+      label: 'Array...',
+      hint: 'Ctrl+Shift+D',
+      onSelect: () => setArrayDialogOpen(true),
+      title: canArray
+        ? 'Create a linear or polar array of the selected element'
+        : 'Select an arrayable element first (wall, column, floor, etc.)',
+      disabled: !canArray,
     },
     {
       label: 'Detect Rooms',
@@ -1104,6 +1191,7 @@ export default function App() {
             >
               <Canvas
                 shadows
+                gl={{ preserveDrawingBuffer: true }}
                 camera={{ position: [5, 5, 5], fov: 50 }}
                 onPointerMissed={() => {
                   if (activeTool === 'select') {
@@ -1135,6 +1223,7 @@ export default function App() {
           <div className="viewport" onContextMenu={suppressViewportContextMenu}>
             <Canvas
               shadows
+              gl={{ preserveDrawingBuffer: true }}
               camera={{ position: [5, 5, 5], fov: 50 }}
               onPointerMissed={() => {
                 if (activeTool === 'select') {
@@ -1186,6 +1275,12 @@ export default function App() {
                 View
               </button>
               <button
+                className={`side-panel-tab${activeRightTab === 'layers' ? ' active' : ''}`}
+                onClick={() => setActiveRightTab('layers')}
+              >
+                Layers
+              </button>
+              <button
                 className={`side-panel-tab${activeRightTab === 'chat' ? ' active' : ''}`}
                 onClick={() => setActiveRightTab('chat')}
               >
@@ -1200,6 +1295,8 @@ export default function App() {
               <PropertyPanel />
             ) : activeRightTab === 'view' ? (
               <ViewPanel />
+            ) : activeRightTab === 'layers' ? (
+              <LayerPanel />
             ) : null}
             {/* ChatPanel always mounted — hidden via CSS to preserve state */}
             <Suspense fallback={<div className="chat-loading">Loading AI Chat...</div>}>
@@ -1222,12 +1319,20 @@ export default function App() {
         onClose={() => setImportDialogOpen(false)}
         kernel={kernel}
         onImport={handleImport}
+        onModelChanged={handleImportedModelMutation}
       />
 
       <ExportDialog
         open={exportDialogOpen}
         onClose={() => setExportDialogOpen(false)}
         kernel={kernel}
+      />
+
+      <ArrayDialog
+        open={arrayDialogOpen}
+        onClose={() => setArrayDialogOpen(false)}
+        onApply={(params) => void handleArrayApply(params)}
+        elementName={selectedElementForArray?.meta.name ?? 'Element'}
       />
 
       {clearProjectConfirmOpen && (
@@ -1272,7 +1377,7 @@ export default function App() {
           {beamElements.length > 0 && <span>Beams: {beamElements.length}</span>}
           {roofElements.length > 0 && <span>Roofs: {roofElements.length}</span>}
           {roomElements.length > 0 && <span>Rooms: {roomElements.length}</span>}
-          {selectedBodyId && <span>Selected: {selectedBodyId} (Del remove | Ctrl+D copy | R rotate | drag gizmo to move)</span>}
+          {selectedBodyId && <span>Selected: {selectedBodyId} (Del remove | Ctrl+D copy | Ctrl+Shift+D array | R rotate | drag gizmo to move)</span>}
           {activeTool === 'measure' && <span>Click two points to measure</span>}
           {activeTool === 'foundation' && <span>Place a foundation slab first; other structural tools require support.</span>}
           {activeTool === 'door' && <span>Hover a wall, preview snap, then click to place door - swing:{defaultDoorSwing}</span>}
@@ -1290,6 +1395,9 @@ export default function App() {
           {activeTool === 'wall' && <span>Shift: orthogonal lock - Right-click: finish wall chain - H:{formatLength(defaultWallHeight, lengthUnit)} T:{formatLength(defaultWallThickness, lengthUnit)}</span>}
           {activeTool === 'sketch' && <span>Sketch: Pts:{sketchPoints.size} Ln:{sketchLines.size} Cstr:{sketchConstraints.size} [{sketchSolverStatus}]</span>}
           {activeTool === 'section' && <span>Click two points to define section cut line</span>}
+          {activeTool === 'furniture' && <span>Click to place {defaultFurnitureType.replace(/_/g, ' ')} - R to rotate</span>}
+          {activeTool === 'plumbing' && <span>Click to place {defaultPlumbingType.replace(/_/g, ' ')} - R to rotate</span>}
+          {activeTool === 'electrical' && <span>Click to place {defaultElectricalType.replace(/_/g, ' ')} - R to rotate</span>}
           {activeViewName && <span>Active View: {activeViewName}</span>}
         </div>
         <div className="status-bar-right">

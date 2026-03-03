@@ -65,13 +65,17 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
   const setChatTitle = useChatStore((s) => s.setChatTitle)
   const setIsStreaming = useChatStore((s) => s.setIsStreaming)
   const setStreamingAssistantId = useChatStore((s) => s.setStreamingAssistantId)
+  const setAbortController = useChatStore((s) => s.setAbortController)
+  const stopGeneration = useChatStore((s) => s.stopGeneration)
 
   // ── Local state ──
   const [input, setInput] = useState('')
   const [showHistory, setShowHistory] = useState(false)
+  const [attachedImages, setAttachedImages] = useState<Array<{ base64: string; mimeType: string; name: string }>>([])
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const activeChat = useMemo(
     () => (activeChatId ? chats.get(activeChatId) : undefined),
@@ -116,20 +120,71 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
       assistantMsgId: string,
     ): Promise<void> => {
       const currentElements = Array.from(useEntityStore.getState().elements.values())
+      const streamingAssistantIds = new Set<string>([assistantMsgId])
+      let activeAssistantMsgId: string | null = assistantMsgId
+      let startNewAssistantSegment = false
 
-      const gen = streamBimChat(initialApiMessages, currentElements, kernel, localPlanMode)
+      const controller = new AbortController()
+      setAbortController(controller)
+
+      const gen = streamBimChat(initialApiMessages, currentElements, kernel, localPlanMode, controller.signal)
+
+      const clearStreamingFlags = (appendStoppedNote: boolean): void => {
+        setUiMessages(chatId, (prev) => {
+          let lastStreamingAssistantId: string | null = null
+          const next = prev.map((msg) => {
+            if (msg.role === 'assistant' && streamingAssistantIds.has(msg.id)) {
+              lastStreamingAssistantId = msg.id
+              const { streaming: _streaming, ...rest } = msg
+              return rest
+            }
+            return msg
+          })
+          if (!appendStoppedNote || !lastStreamingAssistantId) return next
+          return next.map((msg) => {
+            if (msg.role === 'assistant' && msg.id === lastStreamingAssistantId) {
+              return { ...msg, content: msg.content + '\n\n*[Generation stopped]*' }
+            }
+            return msg
+          })
+        })
+      }
+
+      const appendAssistantDelta = (delta: string): void => {
+        setUiMessages(chatId, (prev) => {
+          const activeExists = Boolean(
+            activeAssistantMsgId &&
+              prev.some((msg) => msg.role === 'assistant' && msg.id === activeAssistantMsgId),
+          )
+
+          if (!activeAssistantMsgId || startNewAssistantSegment || !activeExists) {
+            const nextAssistantId = crypto.randomUUID()
+            streamingAssistantIds.add(nextAssistantId)
+            activeAssistantMsgId = nextAssistantId
+            startNewAssistantSegment = false
+            const nextAssistant: UiChatMessage = {
+              id: nextAssistantId,
+              role: 'assistant',
+              content: delta,
+              streaming: true,
+            }
+            return [...prev, nextAssistant]
+          }
+
+          return prev.map((msg) => {
+            if (msg.role === 'assistant' && msg.id === activeAssistantMsgId) {
+              return { ...msg, content: msg.content + delta }
+            }
+            return msg
+          })
+        })
+      }
 
       for await (const event of gen) {
+        if (controller.signal.aborted) break
         switch (event.type) {
           case 'text_delta': {
-            setUiMessages(chatId, (prev) =>
-              prev.map((msg) => {
-                if (msg.id === assistantMsgId && msg.role === 'assistant') {
-                  return { ...msg, content: msg.content + event.delta }
-                }
-                return msg
-              }),
-            )
+            appendAssistantDelta(event.delta)
             break
           }
 
@@ -141,7 +196,16 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
               input: event.input,
               status: 'pending',
             }
-            setUiMessages(chatId, (prev) => [...prev, toolMsg])
+            setUiMessages(chatId, (prev) => {
+              const compacted = prev.filter((msg) => {
+                if (msg.role !== 'assistant') return true
+                if (!streamingAssistantIds.has(msg.id)) return true
+                return msg.content.trim().length > 0
+              })
+              return [...compacted, toolMsg]
+            })
+            activeAssistantMsgId = null
+            startNewAssistantSegment = true
             break
           }
 
@@ -169,61 +233,77 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
                 return msg
               })
             })
+            activeAssistantMsgId = null
+            startNewAssistantSegment = true
             break
           }
 
           case 'plan_ready': {
-            setUiMessages(chatId, (prev) =>
-              prev.map((msg) => {
-                if (msg.id === assistantMsgId && msg.role === 'assistant') {
-                  const planMsg: UiChatMessage = {
-                    id: assistantMsgId,
-                    role: 'plan',
-                    content: event.planText,
-                    status: 'pending',
-                  }
-                  return planMsg
-                }
-                return msg
-              }),
-            )
-            setIsStreaming(false)
-            setStreamingAssistantId(null)
-            return
+            setUiMessages(chatId, (prev) => {
+              const withoutStreamingAssistants = prev.filter(
+                (msg) => !(msg.role === 'assistant' && streamingAssistantIds.has(msg.id)),
+              )
+              const planMsgId =
+                activeAssistantMsgId && streamingAssistantIds.has(activeAssistantMsgId)
+                  ? activeAssistantMsgId
+                  : assistantMsgId
+              const planMsg: UiChatMessage = {
+                id: planMsgId,
+                role: 'plan',
+                content: event.planText,
+                status: 'pending',
+              }
+              return [...withoutStreamingAssistants, planMsg]
+            })
+            activeAssistantMsgId = null
+            startNewAssistantSegment = false
+            break
           }
 
           case 'complete': {
             setApiMessages(chatId, event.apiMessages)
-            setUiMessages(chatId, (prev) =>
-              prev.map((msg) => {
-                if (msg.id === assistantMsgId && msg.role === 'assistant') {
-                  const { streaming: _streaming, ...rest } = msg
-                  return rest
-                }
-                return msg
-              }),
-            )
+            clearStreamingFlags(false)
             setIsStreaming(false)
             setStreamingAssistantId(null)
-            break
+            setAbortController(null)
+            return
           }
         }
       }
+
+      // If loop ended due to abort, clean up the streaming UI state
+      if (controller.signal.aborted) {
+        clearStreamingFlags(true)
+        setIsStreaming(false)
+        setStreamingAssistantId(null)
+        setAbortController(null)
+      } else {
+        // Defensive cleanup for unexpected stream termination without a complete event.
+        clearStreamingFlags(false)
+        setIsStreaming(false)
+        setStreamingAssistantId(null)
+        setAbortController(null)
+      }
     },
-    [kernel, setUiMessages, setApiMessages, setIsStreaming, setStreamingAssistantId],
+    [kernel, setUiMessages, setApiMessages, setIsStreaming, setStreamingAssistantId, setAbortController],
   )
 
   // ── handleSend ────────────────────────────────────────────────────────────
 
   const handleSend = useCallback(async (): Promise<void> => {
     const trimmed = input.trim()
-    if (!trimmed || isStreaming || !activeChatId) return
+    if ((!trimmed && attachedImages.length === 0) || isStreaming || !activeChatId) return
 
     const chatId = activeChatId
     const msgId = crypto.randomUUID()
     const assistantMsgId = crypto.randomUUID()
 
-    const userUiMsg: UiChatMessage = { id: msgId, role: 'user', content: trimmed }
+    const userUiMsg: UiChatMessage = {
+      id: msgId,
+      role: 'user',
+      content: trimmed,
+      ...(attachedImages.length > 0 && { images: attachedImages.map(img => img.base64) }),
+    }
     const assistantPlaceholder: UiChatMessage = {
       id: assistantMsgId,
       role: 'assistant',
@@ -231,42 +311,69 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
       streaming: true,
     }
 
-    const newApiMessage: Anthropic.MessageParam = { role: 'user', content: trimmed }
+    const contentBlocks: any[] = []
+    for (const img of attachedImages) {
+      contentBlocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: img.mimeType, data: img.base64 },
+      })
+    }
+    if (trimmed) {
+      contentBlocks.push({ type: 'text', text: trimmed })
+    }
+    const newApiMessage: Anthropic.MessageParam = {
+      role: 'user',
+      content: contentBlocks.length === 1 && !attachedImages.length ? trimmed : contentBlocks,
+    }
     const nextApiMessages = [...apiMessages, newApiMessage]
+    const hasApprovedPlan = uiMessages.some((msg) => msg.role === 'plan' && msg.status === 'approved')
+    const effectivePlanMode = planMode && !hasApprovedPlan
 
     setUiMessages(chatId, (prev) => [...prev, userUiMsg, assistantPlaceholder])
     setApiMessages(chatId, nextApiMessages)
     setInput('')
+    setAttachedImages([])
     setIsStreaming(true)
     setStreamingAssistantId(assistantMsgId)
     autoTitle(chatId, trimmed)
 
     try {
-      await runStreamingLoop(chatId, nextApiMessages, planMode, assistantMsgId)
-    } catch (err) {
-      const errorText = err instanceof Error ? err.message : String(err)
-      const errorMsg: UiChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: `Error: ${errorText}`,
+      if (hasApprovedPlan && planMode) {
+        setPlanMode(chatId, false)
       }
-      setUiMessages(chatId, (prev) =>
-        prev
-          .map((msg) => {
-            if (msg.id === assistantMsgId && msg.role === 'assistant') {
-              const { streaming: _streaming, ...rest } = msg
-              return rest
-            }
-            return msg
-          })
-          .concat(errorMsg),
-      )
-      setIsStreaming(false)
-      setStreamingAssistantId(null)
+      await runStreamingLoop(chatId, nextApiMessages, effectivePlanMode, assistantMsgId)
+    } catch (err) {
+      // Ignore abort errors — they're expected when user stops generation
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setIsStreaming(false)
+        setStreamingAssistantId(null)
+        setAbortController(null)
+      } else {
+        const errorText = err instanceof Error ? err.message : String(err)
+        const errorMsg: UiChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: `Error: ${errorText}`,
+        }
+        setUiMessages(chatId, (prev) =>
+          prev
+            .map((msg) => {
+              if (msg.role === 'assistant' && msg.streaming) {
+                const { streaming: _streaming, ...rest } = msg
+                return rest
+              }
+              return msg
+            })
+            .concat(errorMsg),
+        )
+        setIsStreaming(false)
+        setStreamingAssistantId(null)
+        setAbortController(null)
+      }
     }
 
     textareaRef.current?.focus()
-  }, [input, isStreaming, activeChatId, apiMessages, planMode, runStreamingLoop, setUiMessages, setApiMessages, setIsStreaming, setStreamingAssistantId, autoTitle])
+  }, [input, isStreaming, activeChatId, apiMessages, uiMessages, planMode, runStreamingLoop, setUiMessages, setApiMessages, setPlanMode, setIsStreaming, setStreamingAssistantId, setAbortController, autoTitle, attachedImages])
 
   // ── handleApprovePlan ─────────────────────────────────────────────────────
 
@@ -290,6 +397,7 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
       }
       const nextApiMessages = [...apiMessages, approvalMsg]
       setApiMessages(chatId, nextApiMessages)
+      setPlanMode(chatId, false)
 
       const assistantMsgId = crypto.randomUUID()
       const assistantPlaceholder: UiChatMessage = {
@@ -305,28 +413,35 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
       try {
         await runStreamingLoop(chatId, nextApiMessages, false, assistantMsgId)
       } catch (err) {
-        const errorText = err instanceof Error ? err.message : String(err)
-        const errorMsg: UiChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: `Error: ${errorText}`,
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setIsStreaming(false)
+          setStreamingAssistantId(null)
+          setAbortController(null)
+        } else {
+          const errorText = err instanceof Error ? err.message : String(err)
+          const errorMsg: UiChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: `Error: ${errorText}`,
+          }
+          setUiMessages(chatId, (prev) =>
+            prev
+              .map((msg) => {
+                if (msg.role === 'assistant' && msg.streaming) {
+                  const { streaming: _streaming, ...rest } = msg
+                  return rest
+                }
+                return msg
+              })
+              .concat(errorMsg),
+          )
+          setIsStreaming(false)
+          setStreamingAssistantId(null)
+          setAbortController(null)
         }
-        setUiMessages(chatId, (prev) =>
-          prev
-            .map((msg) => {
-              if (msg.id === assistantMsgId && msg.role === 'assistant') {
-                const { streaming: _streaming, ...rest } = msg
-                return rest
-              }
-              return msg
-            })
-            .concat(errorMsg),
-        )
-        setIsStreaming(false)
-        setStreamingAssistantId(null)
       }
     },
-    [activeChatId, apiMessages, runStreamingLoop, setUiMessages, setApiMessages, setIsStreaming, setStreamingAssistantId],
+    [activeChatId, apiMessages, runStreamingLoop, setUiMessages, setApiMessages, setPlanMode, setIsStreaming, setStreamingAssistantId, setAbortController],
   )
 
   // ── handleRevisePlan ──────────────────────────────────────────────────────
@@ -351,6 +466,7 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
       }
       const nextApiMessages = [...apiMessages, reviseMsg]
       setApiMessages(chatId, nextApiMessages)
+      setPlanMode(chatId, true)
 
       const assistantMsgId = crypto.randomUUID()
       const assistantPlaceholder: UiChatMessage = {
@@ -366,28 +482,35 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
       try {
         await runStreamingLoop(chatId, nextApiMessages, true, assistantMsgId)
       } catch (err) {
-        const errorText = err instanceof Error ? err.message : String(err)
-        const errorMsg: UiChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: `Error: ${errorText}`,
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setIsStreaming(false)
+          setStreamingAssistantId(null)
+          setAbortController(null)
+        } else {
+          const errorText = err instanceof Error ? err.message : String(err)
+          const errorMsg: UiChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: `Error: ${errorText}`,
+          }
+          setUiMessages(chatId, (prev) =>
+            prev
+              .map((msg) => {
+                if (msg.role === 'assistant' && msg.streaming) {
+                  const { streaming: _streaming, ...rest } = msg
+                  return rest
+                }
+                return msg
+              })
+              .concat(errorMsg),
+          )
+          setIsStreaming(false)
+          setStreamingAssistantId(null)
+          setAbortController(null)
         }
-        setUiMessages(chatId, (prev) =>
-          prev
-            .map((msg) => {
-              if (msg.id === assistantMsgId && msg.role === 'assistant') {
-                const { streaming: _streaming, ...rest } = msg
-                return rest
-              }
-              return msg
-            })
-            .concat(errorMsg),
-        )
-        setIsStreaming(false)
-        setStreamingAssistantId(null)
       }
     },
-    [activeChatId, apiMessages, runStreamingLoop, setUiMessages, setApiMessages, setIsStreaming, setStreamingAssistantId],
+    [activeChatId, apiMessages, runStreamingLoop, setUiMessages, setApiMessages, setPlanMode, setIsStreaming, setStreamingAssistantId, setAbortController],
   )
 
   // ── handleNewChat ────────────────────────────────────────────────────────
@@ -410,6 +533,51 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
     },
     [isStreaming, deleteChat],
   )
+
+  // ── Image handling ──────────────────────────────────────────────────────
+
+  const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+
+    Array.from(files).forEach((file) => {
+      if (!file.type.startsWith('image/')) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result as string
+        const base64 = dataUrl.split(',')[1]
+        const mimeType = file.type
+        setAttachedImages((prev) => [...prev, { base64, mimeType, name: file.name }])
+      }
+      reader.readAsDataURL(file)
+    })
+
+    // Reset file input so the same file can be re-selected
+    e.target.value = ''
+  }, [])
+
+  const handleRemoveImage = useCallback((index: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== index))
+  }, [])
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        const blob = item.getAsFile()
+        if (!blob) continue
+        const reader = new FileReader()
+        reader.onload = () => {
+          const dataUrl = reader.result as string
+          const base64 = dataUrl.split(',')[1]
+          setAttachedImages((prev) => [...prev, { base64, mimeType: item.type, name: 'pasted-image.png' }])
+        }
+        reader.readAsDataURL(blob)
+      }
+    }
+  }, [])
 
   // ── handleSwitchChat ─────────────────────────────────────────────────────
 
@@ -495,6 +663,13 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
             return (
               <div key={msg.id} className="chat-bubble chat-bubble-user">
                 <span className="chat-bubble-label">You</span>
+                {msg.images && msg.images.length > 0 && (
+                  <div className="chat-image-previews">
+                    {msg.images.map((b64, idx) => (
+                      <img key={idx} src={`data:image/png;base64,${b64}`} alt="Attached" className="chat-attached-image" />
+                    ))}
+                  </div>
+                )}
                 <p>{msg.content}</p>
               </div>
             )
@@ -521,6 +696,8 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
           }
 
           if (msg.role === 'tool_call') {
+            const formattedResult = formatToolResult(msg.result)
+            const hasResult = formattedResult.trim().length > 0
             return (
               <div
                 key={msg.id}
@@ -537,8 +714,15 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
                     {msg.status === 'error' && '\u2717'}
                   </span>
                 </div>
-                {msg.status === 'error' && msg.result && (
-                  <pre className="chat-tool-result">{formatToolResult(msg.result)}</pre>
+                {msg.status !== 'pending' && (
+                  hasResult ? (
+                    <details className={`chat-tool-result-box${msg.status === 'error' ? ' error' : ''}`} open={msg.status === 'error'}>
+                      <summary className="chat-tool-result-summary">Response</summary>
+                      <pre className="chat-tool-result">{formattedResult}</pre>
+                    </details>
+                  ) : (
+                    <div className="chat-tool-result-empty">No response payload.</div>
+                  )
                 )}
               </div>
             )
@@ -611,28 +795,67 @@ export function ChatPanel({ kernel, visible }: ChatPanelProps) {
 
       {/* Input */}
       <div className="chat-input-area">
-        <textarea
-          ref={textareaRef}
-          className="chat-textarea"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              void handleSend()
-            }
-          }}
-          placeholder="Describe what to build... (Enter to send)"
-          rows={2}
-          disabled={isStreaming}
+        {attachedImages.length > 0 && (
+          <div className="chat-attached-previews">
+            {attachedImages.map((img, idx) => (
+              <div key={idx} className="chat-attached-preview">
+                <img src={`data:${img.mimeType};base64,${img.base64}`} alt={img.name} />
+                <button className="chat-attached-remove" onClick={() => handleRemoveImage(idx)}>&#215;</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="chat-input-row">
+          <button
+            className="chat-attach-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isStreaming}
+            title="Attach image (or paste from clipboard)"
+          >
+            &#128206;
+          </button>
+          <textarea
+            ref={textareaRef}
+            className="chat-textarea"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void handleSend()
+              }
+            }}
+            onPaste={handlePaste}
+            placeholder="Describe what to build... (Enter to send, paste images)"
+            rows={2}
+            disabled={isStreaming}
+          />
+          {isStreaming ? (
+            <button
+              className="chat-stop-btn"
+              onClick={stopGeneration}
+              title="Stop generation"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              className="chat-send-btn"
+              onClick={() => void handleSend()}
+              disabled={!input.trim() && attachedImages.length === 0}
+            >
+              Send
+            </button>
+          )}
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleImageUpload}
         />
-        <button
-          className="chat-send-btn"
-          onClick={() => void handleSend()}
-          disabled={isStreaming || !input.trim()}
-        >
-          {isStreaming ? <span className="chat-spinner" /> : 'Send'}
-        </button>
       </div>
     </div>
   )

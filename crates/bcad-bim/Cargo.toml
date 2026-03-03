@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bcad-kernel = { path = "../bcad-kernel" }
+bcad-domain = { path = "../bcad-domain" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

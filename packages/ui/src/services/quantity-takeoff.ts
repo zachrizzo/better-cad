@@ -4,7 +4,12 @@ import type {
   DoorElement,
   WindowElement,
   FloorElement,
+  RoomElement,
   StairElement,
+  ColumnElement,
+  BeamElement,
+  RoofElement,
+  LevelElement,
 } from './kernel-bridge'
 import { downloadBlobAsFile } from '../utils/file-download'
 
@@ -18,6 +23,7 @@ export interface DoorScheduleRow {
   sillHeight: number
   swing: string
   hostWall: string
+  hostWallId: string
 }
 
 export interface WindowScheduleRow {
@@ -35,6 +41,20 @@ export interface RoomScheduleRow {
   area: number
   perimeter: number
   level: string
+  source: 'room' | 'floor_proxy'
+}
+
+export interface WallScheduleRow {
+  id: string
+  name: string
+  length: number
+  height: number
+  thickness: number
+  grossArea: number
+  netArea: number
+  openingArea: number
+  levelName: string
+  materialId: string
 }
 
 export interface WallQuantities {
@@ -49,6 +69,7 @@ export interface MaterialTakeoffRow {
   count: number
   totalArea: number
   totalVolume: number
+  materialName: string
 }
 
 // --- Type guards ---
@@ -73,7 +94,47 @@ function isStair(el: PrototypeElement): el is StairElement {
   return el.kind === 'stair'
 }
 
+function isRoom(el: PrototypeElement): el is RoomElement {
+  return el.kind === 'room'
+}
+
+function isColumn(el: PrototypeElement): el is ColumnElement {
+  return el.kind === 'column'
+}
+
+function isBeam(el: PrototypeElement): el is BeamElement {
+  return el.kind === 'beam'
+}
+
+function isRoof(el: PrototypeElement): el is RoofElement {
+  return el.kind === 'roof'
+}
+
+function isLevel(el: PrototypeElement): el is LevelElement {
+  return el.kind === 'level'
+}
+
 // --- Utility ---
+
+function buildLevelMap(elements: Map<string, PrototypeElement>): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const el of elements.values()) {
+    if (isLevel(el)) {
+      map.set(el.meta.id, el.meta.name)
+    }
+  }
+  return map
+}
+
+function buildMaterialMap(elements: Map<string, PrototypeElement>): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const el of elements.values()) {
+    if (el.kind === 'material') {
+      map.set(el.meta.id, el.meta.name)
+    }
+  }
+  return map
+}
 
 function wallLength(w: WallElement): number {
   return Math.hypot(w.end[0] - w.start[0], w.end[1] - w.start[1])
@@ -117,6 +178,7 @@ export function getDoorSchedule(elements: Map<string, PrototypeElement>): DoorSc
       sillHeight: el.sill_height,
       swing: el.swing,
       hostWall: hostWall?.meta.name ?? el.wall_id ?? '-',
+      hostWallId: el.wall_id ?? '-',
     })
   }
   return rows
@@ -140,17 +202,77 @@ export function getWindowSchedule(elements: Map<string, PrototypeElement>): Wind
 }
 
 export function getRoomSchedule(elements: Map<string, PrototypeElement>): RoomScheduleRow[] {
-  // Rooms are not yet implemented in the kernel-bridge types
-  // but Floor elements can serve as a proxy for area/perimeter
+  const levelMap = buildLevelMap(elements)
   const rows: RoomScheduleRow[] = []
+
+  // Collect room rows
+  const roomLevelIds = new Set<string>()
+  for (const el of elements.values()) {
+    if (!isRoom(el)) continue
+    const levelId = el.meta.level_id ?? undefined
+    if (levelId) roomLevelIds.add(levelId)
+    rows.push({
+      id: el.meta.id,
+      name: el.name || el.meta.name,
+      area: polygonArea(el.boundary),
+      perimeter: polygonPerimeter(el.boundary),
+      level: levelId ? (levelMap.get(levelId) ?? 'Unassigned') : 'Unassigned',
+      source: 'room',
+    })
+  }
+
+  // Floor proxy fallback: for floors that have no corresponding room on the same level
   for (const el of elements.values()) {
     if (!isFloor(el)) continue
+    const floorLevelId = el.meta.level_id ?? undefined
+    if (floorLevelId && roomLevelIds.has(floorLevelId)) continue
+    rows.push({
+      id: el.meta.id,
+      name: el.meta.name + ' (proxy)',
+      area: polygonArea(el.boundary),
+      perimeter: polygonPerimeter(el.boundary),
+      level: floorLevelId ? (levelMap.get(floorLevelId) ?? 'Unassigned') : 'Unassigned',
+      source: 'floor_proxy',
+    })
+  }
+
+  return rows
+}
+
+export function getWallSchedule(elements: Map<string, PrototypeElement>): WallScheduleRow[] {
+  const levelMap = buildLevelMap(elements)
+  const rows: WallScheduleRow[] = []
+
+  // Pre-compute opening areas per wall
+  const wallOpeningAreas = new Map<string, number>()
+  for (const el of elements.values()) {
+    if (isDoor(el) && el.wall_id) {
+      const prev = wallOpeningAreas.get(el.wall_id) ?? 0
+      wallOpeningAreas.set(el.wall_id, prev + el.width * el.height)
+    } else if (isWindow(el) && el.wall_id) {
+      const prev = wallOpeningAreas.get(el.wall_id) ?? 0
+      wallOpeningAreas.set(el.wall_id, prev + el.width * el.height)
+    }
+  }
+
+  for (const el of elements.values()) {
+    if (!isWall(el)) continue
+    const len = wallLength(el)
+    const grossArea = len * el.height
+    const openingArea = wallOpeningAreas.get(el.meta.id) ?? 0
+    const netArea = Math.max(0, grossArea - openingArea)
+    const levelId = el.meta.level_id ?? undefined
     rows.push({
       id: el.meta.id,
       name: el.meta.name,
-      area: polygonArea(el.boundary),
-      perimeter: polygonPerimeter(el.boundary),
-      level: el.meta.level_id ?? '-',
+      length: len,
+      height: el.height,
+      thickness: el.thickness,
+      grossArea,
+      netArea,
+      openingArea,
+      levelName: levelId ? (levelMap.get(levelId) ?? 'Unassigned') : 'Unassigned',
+      materialId: el.meta.material_id ?? '-',
     })
   }
   return rows
@@ -173,17 +295,28 @@ export function getWallQuantities(elements: Map<string, PrototypeElement>): Wall
 }
 
 export function getMaterialTakeoff(elements: Map<string, PrototypeElement>): MaterialTakeoffRow[] {
-  const buckets = new Map<string, { count: number; totalArea: number; totalVolume: number }>()
+  const materialMap = buildMaterialMap(elements)
+
+  // Bucket key = "kind|material_id" to separate by material
+  const buckets = new Map<string, { elementType: string; count: number; totalArea: number; totalVolume: number; materialName: string }>()
+
+  function getBucket(kind: string, materialId: string | null | undefined) {
+    const matId = materialId ?? ''
+    const key = `${kind}|${matId}`
+    let bucket = buckets.get(key)
+    if (!bucket) {
+      const materialName = matId ? (materialMap.get(matId) ?? matId) : '-'
+      bucket = { elementType: kind, count: 0, totalArea: 0, totalVolume: 0, materialName }
+      buckets.set(key, bucket)
+    }
+    return bucket
+  }
 
   for (const el of elements.values()) {
     const kind = el.kind
-    if (kind === 'level') continue // skip level meta-elements
+    if (kind === 'level' || kind === 'material' || kind === 'dimension' || kind === 'text_annotation') continue
 
-    let bucket = buckets.get(kind)
-    if (!bucket) {
-      bucket = { count: 0, totalArea: 0, totalVolume: 0 }
-      buckets.set(kind, bucket)
-    }
+    const bucket = getBucket(kind, el.meta.material_id)
     bucket.count++
 
     if (isWall(el)) {
@@ -198,6 +331,21 @@ export function getMaterialTakeoff(elements: Map<string, PrototypeElement>): Mat
       bucket.totalArea += el.width * el.height
     } else if (isWindow(el)) {
       bucket.totalArea += el.width * el.height
+    } else if (isColumn(el)) {
+      bucket.totalArea += (el.width + el.depth) * 2 * el.height
+      bucket.totalVolume += el.width * el.depth * el.height
+    } else if (isBeam(el)) {
+      const len = Math.sqrt(
+        (el.end[0] - el.start[0]) ** 2 +
+        (el.end[1] - el.start[1]) ** 2 +
+        (el.end[2] - el.start[2]) ** 2,
+      )
+      bucket.totalArea += (el.width + el.depth) * 2 * len
+      bucket.totalVolume += el.width * el.depth * len
+    } else if (isRoof(el)) {
+      const area = polygonArea(el.boundary)
+      bucket.totalArea += area
+      bucket.totalVolume += area * el.thickness
     } else if (isStair(el)) {
       const runLen = (() => {
         if ((el.stair_type ?? 'straight') !== 'spiral') {
@@ -218,8 +366,8 @@ export function getMaterialTakeoff(elements: Map<string, PrototypeElement>): Mat
   }
 
   const rows: MaterialTakeoffRow[] = []
-  for (const [elementType, data] of buckets) {
-    rows.push({ elementType, ...data })
+  for (const data of buckets.values()) {
+    rows.push(data)
   }
   rows.sort((a, b) => a.elementType.localeCompare(b.elementType))
   return rows
@@ -235,7 +383,7 @@ export function toCsv(headers: string[], rows: (string | number)[][]): string {
     }
     return s
   }
-  const lines = [headers.map(escape).join(',')]
+  const lines = ['# BetterCAD Export v1', headers.map(escape).join(',')]
   for (const row of rows) {
     lines.push(row.map(escape).join(','))
   }

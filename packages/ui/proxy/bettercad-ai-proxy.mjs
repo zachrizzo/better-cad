@@ -22,6 +22,7 @@ import { z } from 'zod'
 import { randomUUID } from 'crypto'
 
 const PORT = 3001
+const SCREENSHOT_PREFIX = '__SCREENSHOT_BASE64__'
 
 // ── System prompts ────────────────────────────────────────────────────────────
 
@@ -29,30 +30,69 @@ const BIM_SYSTEM = `You are an expert architectural BIM assistant for BetterCAD.
 Coordinate system: X = east, Y = north, units = meters.
 Origin (0,0) is the project origin.
 For all 2D coordinate tool inputs, use exactly two numeric values: [x, y] (no z coordinate).
-Always call query_building first to understand the current state before creating elements.
-Create buildings logically: walls → floors → doors/windows → roof.
+Use query_scene_summary first for context. Use query_elements for targeted geometry/details. Use query_building only when a full raw dump is explicitly needed.
+Use get_level_id when you need to resolve a level ID by name, elevation, index, or active level.
+Track scene_revision from query_scene_summary. If unchanged, reuse prior summary context instead of re-querying full state.
+CRITICAL: Every physical element (wall, floor, column, stair, roof, beam, foundation, room) MUST have a level_id. Before creating any physical elements, first create levels using create_level, then pass each level's ID as the level_id parameter. If levels already exist (from query_scene_summary/query_elements), reuse them. For multi-story buildings, create one level per story first, then assign elements to the correct level.
+Create buildings logically: levels → walls → floors → doors/windows → roof.
+For create_roof: omit elevation unless the user explicitly requests a manual offset. By default, the roof should auto-elevate to sit on top of supporting geometry on its level.
+Prefer placing roofs on the highest occupied building level; do not invent an extra empty roof level unless the user asks for one.
 Standard ceiling height: 3.0m. Standard wall thickness: 0.2m.
 For doors: position_along_wall is 0.0–1.0 (fraction along wall length).
+When adding multiple doors/windows on the same wall, ensure opening widths do not overlap. Prefer sequential placement and verify with query_elements before adding more openings on that wall.
+Never run add_room/create_room_bundle in parallel for adjacent rooms. Create one room at a time, verify, then continue.
 When creating a simple room, create 4 connected walls forming a rectangle.
+Use add_room when the user asks to create a room: it builds walls + slab + named room + door + windows in one call by default.
+Use create_room only for label-only/space-definition tasks where walls/door/windows already exist.
+You may be creative with room planning when the user allows it: vary room proportions, use non-rectangular room boundaries, and create stronger zoning (public/private/service) with clear circulation.
+Avoid monotonous room grids unless the user asks for it.
+For house/home design requests, do not default to a plain rectangle unless the user explicitly asks for a box/simple layout.
+When creativity is requested, include at least two design moves from this list: articulated footprint (L/T/U shape, inset, bay, courtyard), varied room sizes, asymmetrical circulation spine, angled or curved wall segment, double-height/focal space, indoor-outdoor transition.
+For creative house layouts, make at least one of these true unless user constraints forbid it: (a) outer boundary has 6+ vertices, (b) at least one non-rectangular room, (c) at least two rooms have meaningfully different area (>=30% difference).
+Keep layouts practical while being creative: maintain reasonable circulation paths and ensure each room can be accessed.
+For room layouts, ensure every room has at least one door to a hall, adjacent room, or exterior unless the user explicitly requests sealed/service spaces.
+After room creation or wall edits, verify room access using query_scene_summary (room_access) and add missing doors before finalizing.
+Do not claim elements were created unless the corresponding creation tools actually succeeded. If you provide design/code guidance that is not modeled, label it clearly as guidance only.
+When a build plan is approved, treat its TODO tasks as a contract. Before claiming completion, reconcile each planned task against scene state and completed tool calls.
+If any planned task is still incomplete, explicitly say so and continue execution instead of finalizing.
+If the user asks for furniture in the model, you MUST place actual furniture elements using place_furniture. A text-only furniture list is not a valid substitute unless the user explicitly asks for conceptual guidance only.
+Before finalizing a task that includes furniture, verify with query_elements(kinds:["furniture"]) or query_scene_summary counts and report the actual furniture count. If the count is 0, explicitly state furniture is not yet placed and continue placing it.
+Never create rooms to represent furniture. Do not use create_room/add_room as furniture placeholders.
+If the user requests a furniture item with no exact symbol_type, map it to the nearest supported place_furniture symbol and state the mapping.
+When completing furnishing tasks, ensure room count did not increase during furnishing. If furniture count is unchanged and room count increased, the furnishing task is incomplete.
+If a tool_result is marked as an error, treat that call as failed. Do not mark the task complete, and do not call it a warning.
+After any tool error: diagnose from the message, inspect scene state with query_scene_summary/query_elements when needed, then retry with corrected parameters or choose a different tool.
+Use set_view_mode to switch between '3d', '2d', and 'split' viewports when verification requires a specific view.
+Use take_2d_screenshot to verify plan/layout edits, and take_screenshot for 3D perspective checks.
+For multi-level buildings, work one level at a time: complete one level, verify it in 2D, then proceed to the next level.
+Verification per level is mandatory before continuing: call set_view_mode('2d'), query scene state for that level, take_2d_screenshot, and only then move on.
 For standards, code-compliance, and best-practice questions, call research_best_practices.
 If jurisdiction is missing for code/compliance questions, ask a concise follow-up first.
 Cite returned source URLs and include a short reliability note (government, standards body, or industry source).
 For code answers, note that final authority is the local AHJ.
 When the user asks to remove elements, use delete_element (single) or delete_elements (bulk by kind/ids).
+You can place electrical symbols using place_electrical.
+You can place plumbing fixtures using place_plumbing.
+You can place furniture using place_furniture.
+You can place site elements using place_site_element.
+Use connect_switch_to_fixture to draw switching diagram lines from a switch to the fixture it controls.
 Confirm what you are creating as you build it.`
 
 const PLAN_MODE_ADDENDUM = `
 
 You are in PLAN MODE. Before calling any building tools (create_wall, create_floor,
-create_door, create_window, create_stair, create_roof, create_column, create_room),
+create_door, create_window, create_stair, create_roof, create_column, create_room, add_room, create_room_bundle, create_level, place_electrical, place_plumbing, place_furniture, place_site_element),
 output a structured text plan that includes:
 1) Summary
 2) TODO Task List (Markdown checklist using one item per line in this exact format: - [ ] Task)
 3) Geometry details (element types, approximate coordinates, dimensions)
-4) Assumptions/risks
+4) Layout intent (how circulation and zoning work; include creative choices when requested)
+If the user requests creativity, include a "Creative Moves" subsection with at least 2 concrete moves and show how geometry reflects them.
+5) Assumptions/risks
+If the user requested furniture, include a concrete furniture placement phase that uses place_furniture, then a verification step that reports the resulting furniture count from scene data.
 End your plan with the phrase [PLAN READY].
 Do NOT call any creation tools until the user approves the plan.
-You may call query_building to inspect current state.`
+You may call query_scene_summary/query_elements (or query_building as fallback) to inspect current state.`
 
 // ── MCP tool bridge ───────────────────────────────────────────────────────────
 
@@ -362,9 +402,19 @@ const SEARCH_BUILDING_CODE_TOOL = tool(
  */
 function makeBridgeTool(ws, pendingCalls, name, description, schema) {
   return tool(name, description, schema, (input) => {
+    const asToolText = (value) => {
+      if (typeof value === 'string') return value
+      try {
+        return JSON.stringify(value ?? {})
+      } catch {
+        return String(value)
+      }
+    }
+
     if (ws.readyState !== WebSocket.OPEN) {
       return Promise.resolve({
         content: [{ type: 'text', text: JSON.stringify({ error: 'Browser disconnected' }) }],
+        isError: true,
       })
     }
 
@@ -376,14 +426,28 @@ function makeBridgeTool(ws, pendingCalls, name, description, schema) {
           pendingCalls.delete(callId)
           resolve({
             content: [{ type: 'text', text: JSON.stringify({ error: `Tool ${name} timed out` }) }],
+            isError: true,
           })
         }
       }, 60_000)
 
-      pendingCalls.set(callId, (result) => {
+      pendingCalls.set(callId, ({ result, isError }) => {
         clearTimeout(timer)
         pendingCalls.delete(callId)
-        resolve({ content: [{ type: 'text', text: result }] })
+        const text = asToolText(result)
+        if (isError) {
+          resolve({ content: [{ type: 'text', text }], isError: true })
+          return
+        }
+        if (text.startsWith(SCREENSHOT_PREFIX)) {
+          resolve({
+            // Agent SDK tool-result transport is text-first; returning mixed image blocks
+            // can break downstream parsing. Keep proxy mode stable with text confirmation.
+            content: [{ type: 'text', text: 'Screenshot captured successfully. Continue verification using scene queries and screenshot confirmation.' }],
+          })
+          return
+        }
+        resolve({ content: [{ type: 'text', text }] })
       })
 
       ws.send(JSON.stringify({ type: 'tool_call', callId, name, input }))
@@ -392,88 +456,275 @@ function makeBridgeTool(ws, pendingCalls, name, description, schema) {
 }
 
 function createBimMcpTools(ws, pendingCalls, options = {}) {
-  const { planMode = false, hasWalls = false, elementCount = 0 } = options
+  const { planMode = false } = options
   const bt = (name, desc, schema) => makeBridgeTool(ws, pendingCalls, name, desc, schema)
   const point2 = z.union([
     z.tuple([z.number(), z.number()]),
     z.object({ x: z.number(), y: z.number() }),
   ])
   const boundary2 = z.array(point2).min(3)
+  const bbox2 = z.tuple([z.number(), z.number(), z.number(), z.number()])
+
+  const querySceneSummaryTool = bt(
+    'query_scene_summary',
+    'Returns compact scene context (counts, levels, bounds, room access) plus scene_revision. Prefer this over query_building.',
+    z.object({
+      known_revision: z.string().optional().describe('Last known scene_revision. If unchanged, returns unchanged=true with a minimal payload.'),
+    }),
+  )
+
+  const queryElementsTool = bt(
+    'query_elements',
+    'Returns targeted elements with optional filters (kind, ids, level, bbox, fields). Use this instead of full-scene dumps.',
+    z.object({
+      kinds: z.array(z.string()).optional().describe('Optional kinds filter, e.g. ["wall","door","room"]'),
+      ids: z.array(z.string()).optional().describe('Optional explicit element IDs'),
+      level_id: z.string().optional().describe('Optional level filter'),
+      bbox: bbox2.optional().describe('Optional bbox [min_x, min_y, max_x, max_y] in meters'),
+      fields: z.array(z.string()).optional().describe('Optional fields to return (e.g. ["meta.id","meta.name","start","end"]). "*" returns full elements.'),
+      limit: z.number().int().min(1).max(1000).optional().describe('Max elements to return (default: 200, max: 1000)'),
+    }),
+  )
+
+  const getLevelIdTool = bt(
+    'get_level_id',
+    'Resolve a level ID by level name, elevation, level index, or active level. Returns matching level metadata plus a primary level_id.',
+    z.object({
+      name: z.string().optional().describe('Optional level name to match (case-insensitive). Example: "Ground Floor"'),
+      elevation: z.number().optional().describe('Optional target elevation in meters'),
+      tolerance: z.number().optional().describe('Elevation tolerance in meters when matching elevation (default: 0.01)'),
+      level_index: z.number().int().min(0).optional().describe('Optional 0-based index after sorting levels by elevation ascending'),
+      active_only: z.boolean().optional().describe('If true, only return the currently active UI level'),
+    }),
+  )
 
   const queryBuildingTool = bt(
     'query_building',
-    'Returns all current BIM elements as JSON. Always call this first to understand the current state.',
+    'Returns all current BIM elements as raw JSON. Expensive in context/tokens; use only when a full dump is explicitly needed.',
+    z.object({}),
+  )
+  const setViewModeTool = bt(
+    'set_view_mode',
+    'Switch the UI viewport mode to 3D, 2D, or split view.',
+    z.object({
+      mode: z.enum(['3d', '2d', 'split']).describe('Viewport mode to activate'),
+    }),
+  )
+  const setCameraTool = bt(
+    'set_camera',
+    'Move the 3D viewport camera to a specific position and target.',
+    z.object({
+      position: z.tuple([z.number(), z.number(), z.number()]).describe('Camera position [x, y, z]'),
+      target: z.tuple([z.number(), z.number(), z.number()]).describe('Camera look-at target [x, y, z]'),
+    }),
+  )
+  const takeScreenshotTool = bt(
+    'take_screenshot',
+    'Capture a screenshot of the current 3D viewport.',
+    z.object({}),
+  )
+  const take2DScreenshotTool = bt(
+    'take_2d_screenshot',
+    'Capture a screenshot of the current 2D plan viewport for geometry verification.',
     z.object({}),
   )
 
   // Hard-enforce plan mode: planning can inspect state but cannot mutate model.
-  if (planMode) return [queryBuildingTool, RESEARCH_BEST_PRACTICES_TOOL, SEARCH_BUILDING_CODE_TOOL]
+  if (planMode) {
+    return [
+      querySceneSummaryTool,
+      queryElementsTool,
+      getLevelIdTool,
+      queryBuildingTool,
+      setViewModeTool,
+      setCameraTool,
+      takeScreenshotTool,
+      take2DScreenshotTool,
+      RESEARCH_BEST_PRACTICES_TOOL,
+      SEARCH_BUILDING_CODE_TOOL,
+    ]
+  }
+
+  const levelIdParam = z.string().optional().describe('ID of the level this element belongs to (from create_level or query_scene_summary/query_elements). If omitted, auto-assigns to first available level.')
 
   const tools = [
+    querySceneSummaryTool,
+    queryElementsTool,
+    getLevelIdTool,
     queryBuildingTool,
+    setViewModeTool,
+    setCameraTool,
+    takeScreenshotTool,
+    take2DScreenshotTool,
     RESEARCH_BEST_PRACTICES_TOOL,
     SEARCH_BUILDING_CODE_TOOL,
-    bt('create_wall', 'Create a wall segment. Coordinates in meters.', z.object({
+
+    bt('create_level', 'Create a building level (storey) with a name and elevation. Can auto-generate a main shell (perimeter walls + slab).', z.object({
+      name: z.string().describe('Level name (e.g., "Ground Floor", "Level 1")'),
+      elevation: z.number().describe('Level elevation in meters (e.g., 0.0 for ground, 3.0 for first floor)'),
+      boundary: boundary2.optional().describe('Optional footprint boundary [[x,y],...] used for auto shell'),
+      generate_shell: z.boolean().optional().describe('Whether to auto-generate main shell walls/slab (default: true)'),
+      create_floor: z.boolean().optional().describe('Whether auto shell should create floor slab (default: true)'),
+      wall_height: z.number().optional().describe('Auto shell wall height in meters (default: 3.0)'),
+      wall_thickness: z.number().optional().describe('Auto shell wall thickness in meters (default: 0.2)'),
+      floor_thickness: z.number().optional().describe('Auto shell floor thickness in meters (default: 0.25)'),
+      copy_shell_from_level_id: z.string().optional().describe('Optional level ID to copy shell boundary from when boundary is omitted'),
+    })),
+
+    bt('create_wall', 'Create a wall segment. Coordinates in meters. Requires level_id.', z.object({
       start: point2.describe('Start point [x, y] in meters'),
       end: point2.describe('End point [x, y] in meters'),
       height: z.number().optional().describe('Wall height in meters (default: 3.0)'),
       thickness: z.number().optional().describe('Wall thickness in meters (default: 0.2)'),
+      level_id: levelIdParam,
     })),
 
-    bt('create_floor', 'Create a floor slab with a boundary polygon.', z.object({
+    bt('create_floor', 'Create a floor slab with a boundary polygon. Requires level_id.', z.object({
       boundary: boundary2.describe('Boundary polygon [[x,y],...] in meters'),
       thickness: z.number().optional().describe('Floor thickness in meters (default: 0.25)'),
+      level_id: levelIdParam,
     })),
 
-    bt('create_column', 'Create a structural column.', z.object({
+    bt('create_column', 'Create a structural column. Requires level_id.', z.object({
       center: point2.describe('Center point [x, y] in meters'),
       width: z.number().optional().describe('Column width in meters (default: 0.3)'),
       depth: z.number().optional().describe('Column depth in meters (default: 0.3)'),
       height: z.number().optional().describe('Column height in meters (default: 3.0)'),
+      level_id: levelIdParam,
     })),
 
-    bt('create_stair', 'Create a staircase.', z.object({
+    bt('create_stair', 'Create a staircase. Requires level_id.', z.object({
       start: point2.describe('Start point [x, y] in meters'),
       end: point2.describe('End point [x, y] in meters'),
       width: z.number().optional().describe('Stair width in meters (default: 1.1)'),
       risers: z.number().optional().describe('Number of risers (default: 16)'),
       total_height: z.number().optional().describe('Total height in meters (default: 3.0)'),
+      level_id: levelIdParam,
     })),
 
-    bt('create_roof', 'Create a roof with a boundary polygon.', z.object({
+    bt('create_roof', 'Create a roof with a boundary polygon. Requires level_id.', z.object({
       boundary: boundary2.describe('Boundary polygon [[x,y],...] in meters'),
       roof_type: z.enum(['flat', 'gable', 'shed', 'hip']).optional().describe('Roof type (default: flat)'),
       pitch: z.number().optional().describe('Roof pitch in degrees (default: 0)'),
       elevation: z.number().optional().describe('Roof base elevation in meters (default: 3.0)'),
+      level_id: levelIdParam,
     })),
 
-    bt('create_room', 'Create a room label with a boundary polygon.', z.object({
+    bt('create_room', 'Create only a room label with a boundary polygon (no walls/doors/windows). Requires level_id.', z.object({
       boundary: boundary2.describe('Room boundary [[x,y],...] in meters'),
       name: z.string().describe('Room name (e.g., "Living Room")'),
+      level_id: levelIdParam,
+    })),
+    bt('add_room', 'Create a full room package in one call: perimeter walls + optional slab + room entity + default door + default windows. Requires level_id.', z.object({
+      boundary: boundary2.describe('Room boundary [[x,y],...] in meters'),
+      name: z.string().describe('Room name (e.g., "Living Room")'),
+      level_id: levelIdParam,
+      wall_height: z.number().optional().describe('Perimeter wall height in meters (default: 3.0)'),
+      wall_thickness: z.number().optional().describe('Perimeter wall thickness in meters (default: 0.2)'),
+      create_floor: z.boolean().optional().describe('Whether to create a floor slab from same boundary (default: true)'),
+      floor_thickness: z.number().optional().describe('Floor thickness in meters (default: 0.25)'),
+      create_default_door: z.boolean().optional().describe('Whether to add one default door on perimeter wall (default: true)'),
+      door_wall_index: z.number().int().optional().describe('Optional wall segment index for default door (0-based)'),
+      door_position_along_wall: z.number().min(0).max(1).optional().describe('Door position along selected wall (default: 0.5)'),
+      door_width: z.number().optional().describe('Door width in meters (default: 0.9)'),
+      door_height: z.number().optional().describe('Door height in meters (default: 2.1)'),
+      door_swing: z.enum(['left', 'right']).optional().describe('Door swing direction (default: right)'),
+      create_default_windows: z.boolean().optional().describe('Whether to place default windows on perimeter walls (default: true)'),
+      default_window_count: z.number().int().min(0).optional().describe('How many default windows to create when windows are not explicitly provided (default: 2)'),
+      window_wall_indexes: z.array(z.number().int()).optional().describe('Optional perimeter wall indexes (0-based) for default windows'),
+      window_position_along_wall: z.number().min(0).max(1).optional().describe('Default window position along selected wall (default: 0.5)'),
+      window_width: z.number().optional().describe('Default window width in meters (default: 1.2)'),
+      window_height: z.number().optional().describe('Default window height in meters (default: 1.2)'),
+      window_sill_height: z.number().optional().describe('Default window sill height from floor in meters (default: 0.9)'),
+      windows: z.array(z.object({
+        wall_index: z.number().int().describe('Perimeter wall index (0-based; wraps around if out of range)'),
+        position_along_wall: z.number().min(0).max(1).optional().describe('Position along wall (default: window_position_along_wall or 0.5)'),
+        width: z.number().optional().describe('Window width in meters (default: window_width or 1.2)'),
+        height: z.number().optional().describe('Window height in meters (default: window_height or 1.2)'),
+        sill_height: z.number().optional().describe('Sill height from floor in meters (default: window_sill_height or 0.9)'),
+        name: z.string().optional().describe('Optional custom window name'),
+      })).optional().describe('Optional explicit windows list. If provided, these windows are created instead of default windows.'),
+    })),
+    bt('create_room_bundle', 'Create a full room package in one call: perimeter walls + optional slab + room entity + default door + default windows. Requires level_id.', z.object({
+      boundary: boundary2.describe('Room boundary [[x,y],...] in meters'),
+      name: z.string().describe('Room name (e.g., "Living Room")'),
+      level_id: levelIdParam,
+      wall_height: z.number().optional().describe('Perimeter wall height in meters (default: 3.0)'),
+      wall_thickness: z.number().optional().describe('Perimeter wall thickness in meters (default: 0.2)'),
+      create_floor: z.boolean().optional().describe('Whether to create a floor slab from same boundary (default: true)'),
+      floor_thickness: z.number().optional().describe('Floor thickness in meters (default: 0.25)'),
+      create_default_door: z.boolean().optional().describe('Whether to add one default door on perimeter wall (default: true)'),
+      door_wall_index: z.number().int().optional().describe('Optional wall segment index for default door (0-based)'),
+      door_position_along_wall: z.number().min(0).max(1).optional().describe('Door position along selected wall (default: 0.5)'),
+      door_width: z.number().optional().describe('Door width in meters (default: 0.9)'),
+      door_height: z.number().optional().describe('Door height in meters (default: 2.1)'),
+      door_swing: z.enum(['left', 'right']).optional().describe('Door swing direction (default: right)'),
+      create_default_windows: z.boolean().optional().describe('Whether to place default windows on perimeter walls (default: true)'),
+      default_window_count: z.number().int().min(0).optional().describe('How many default windows to create when windows are not explicitly provided (default: 2)'),
+      window_wall_indexes: z.array(z.number().int()).optional().describe('Optional perimeter wall indexes (0-based) for default windows'),
+      window_position_along_wall: z.number().min(0).max(1).optional().describe('Default window position along selected wall (default: 0.5)'),
+      window_width: z.number().optional().describe('Default window width in meters (default: 1.2)'),
+      window_height: z.number().optional().describe('Default window height in meters (default: 1.2)'),
+      window_sill_height: z.number().optional().describe('Default window sill height from floor in meters (default: 0.9)'),
+      windows: z.array(z.object({
+        wall_index: z.number().int().describe('Perimeter wall index (0-based; wraps around if out of range)'),
+        position_along_wall: z.number().min(0).max(1).optional().describe('Position along wall (default: window_position_along_wall or 0.5)'),
+        width: z.number().optional().describe('Window width in meters (default: window_width or 1.2)'),
+        height: z.number().optional().describe('Window height in meters (default: window_height or 1.2)'),
+        sill_height: z.number().optional().describe('Sill height from floor in meters (default: window_sill_height or 0.9)'),
+        name: z.string().optional().describe('Optional custom window name'),
+      })).optional().describe('Optional explicit windows list. If provided, these windows are created instead of default windows.'),
     })),
     bt('clear_building', 'Remove all elements from the building model.', z.object({})),
+    bt('place_electrical', 'Place an electrical symbol (outlet, switch, light fixture, panel, etc.) on the plan.', z.object({
+      symbol_type: z.enum(['outlet', 'switch', 'light_fixture', 'panel', 'smoke_detector', 'junction_box', 'three_way_switch', 'dimmer_switch', 'gfci_outlet', 'floor_outlet', 'ceiling_fan', 'thermostat']),
+      position: point2.describe('Position [x, y] in meters'),
+      rotation: z.number().optional().describe('Rotation in radians (default: 0)'),
+      circuit_id: z.string().optional().describe('Optional circuit identifier'),
+      connected_to: z.string().optional().describe('Optional element_id of the fixture this switch controls'),
+    })),
+    bt('place_plumbing', 'Place a plumbing fixture symbol (toilet, sink, bathtub, etc.) on the plan.', z.object({
+      symbol_type: z.enum(['toilet', 'sink', 'bathtub', 'shower', 'water_heater', 'hose_bib', 'floor_drain', 'dishwasher', 'washing_machine', 'urinal']),
+      position: point2.describe('Position [x, y] in meters'),
+      rotation: z.number().optional().describe('Rotation in radians (default: 0)'),
+    })),
+    bt('place_furniture', 'Place a real furniture element in the BIM scene (visible geometry), not just a label.', z.object({
+      symbol_type: z.enum(['desk', 'chair', 'table', 'bed', 'sofa', 'dining_table', 'bookshelf', 'wardrobe', 'toilet_stall', 'reception_desk', 'conference_table', 'kitchen_island', 'refrigerator', 'stove', 'washer', 'dryer', 'nightstand', 'coffee_table', 'tv_console', 'console_table', 'bench', 'ottoman', 'vanity']),
+      position: point2.describe('Position [x, y] in meters'),
+      rotation: z.number().optional().describe('Rotation in radians (default: 0)'),
+      width: z.number().optional().describe('Width in meters (optional, type default if omitted)'),
+      depth: z.number().optional().describe('Depth in meters (optional, type default if omitted)'),
+    })),
+    bt('place_site_element', 'Place a site plan element (property line, tree, parking space, compass, etc.).', z.object({
+      detail_type: z.enum(['property_line', 'setback', 'tree', 'parking_space', 'sidewalk', 'driveway', 'compass', 'contour_line', 'fence', 'retaining']),
+      points: z.array(point2).min(1).describe('Points [[x,y],...] defining the element'),
+      radius: z.number().optional().describe('Radius in meters (for trees)'),
+      elevation: z.number().optional().describe('Elevation in meters (for contour lines)'),
+    })),
+    bt('connect_switch_to_fixture', 'Connect a switch to a light fixture so the switching diagram line can be drawn.', z.object({
+      switch_id: z.string().describe('Switch element ID'),
+      fixture_id: z.string().describe('Fixture element ID'),
+    })),
   ]
 
-  if (hasWalls) {
-    tools.push(
-      bt('create_door', 'Create a door in an existing wall. Requires at least one wall to exist.', z.object({
-        wall_id: z.string().describe('ID of the wall to place the door in'),
-        position_along_wall: z.number().min(0).max(1).describe('Position along wall 0.0 (start) to 1.0 (end)'),
-        width: z.number().optional().describe('Door width in meters (default: 0.9)'),
-        height: z.number().optional().describe('Door height in meters (default: 2.1)'),
-        swing: z.enum(['left', 'right']).optional().describe('Door swing direction (default: right)'),
-      })),
-    )
-    tools.push(
-      bt('create_window', 'Create a window in an existing wall. Requires at least one wall to exist.', z.object({
-        wall_id: z.string().describe('ID of the wall to place the window in'),
-        position_along_wall: z.number().min(0).max(1).describe('Position along wall 0.0 (start) to 1.0 (end)'),
-        width: z.number().optional().describe('Window width in meters (default: 1.2)'),
-        height: z.number().optional().describe('Window height in meters (default: 1.2)'),
-        sill_height: z.number().optional().describe('Sill height from floor in meters (default: 0.9)'),
-      })),
-    )
-  }
+  tools.push(
+    bt('create_door', 'Create a door in an existing wall. Requires a valid wall_id.', z.object({
+      wall_id: z.string().describe('ID of the wall to place the door in'),
+      position_along_wall: z.number().min(0).max(1).describe('Position along wall 0.0 (start) to 1.0 (end)'),
+      width: z.number().optional().describe('Door width in meters (default: 0.9)'),
+      height: z.number().optional().describe('Door height in meters (default: 2.1)'),
+      swing: z.enum(['left', 'right']).optional().describe('Door swing direction (default: right)'),
+    })),
+  )
+  tools.push(
+    bt('create_window', 'Create a window in an existing wall. Requires a valid wall_id.', z.object({
+      wall_id: z.string().describe('ID of the wall to place the window in'),
+      position_along_wall: z.number().min(0).max(1).describe('Position along wall 0.0 (start) to 1.0 (end)'),
+      width: z.number().optional().describe('Window width in meters (default: 1.2)'),
+      height: z.number().optional().describe('Window height in meters (default: 1.2)'),
+      sill_height: z.number().optional().describe('Sill height from floor in meters (default: 0.9)'),
+    })),
+  )
 
   tools.push(
     bt('delete_element', 'Delete a BIM element by its ID.', z.object({
@@ -483,11 +734,32 @@ function createBimMcpTools(ws, pendingCalls, options = {}) {
   tools.push(
     bt('delete_elements', 'Delete multiple BIM elements by IDs and/or by kind.', z.object({
       ids: z.array(z.string()).optional().describe('Explicit element IDs to delete'),
-      kind: z.enum(['wall', 'door', 'window', 'floor', 'roof', 'stair', 'column', 'beam', 'room', 'dimension', 'text_annotation', 'level']).optional().describe('Delete all elements of this kind'),
+      kind: z.enum(['wall', 'door', 'window', 'floor', 'roof', 'stair', 'column', 'beam', 'room', 'dimension', 'text_annotation', 'level', 'electrical', 'plumbing', 'furniture', 'site_detail']).optional().describe('Delete all elements of this kind'),
     })),
   )
 
   return tools
+}
+
+function toResultText(value) {
+  if (typeof value === 'string') return value
+  try {
+    const json = JSON.stringify(value ?? {})
+    return typeof json === 'string' ? json : ''
+  } catch {
+    return String(value ?? '')
+  }
+}
+
+function extractTextDelta(message) {
+  if (!message || message.type !== 'stream_event') return null
+  const event = message.event
+  if (!event || typeof event !== 'object') return null
+  if (event.type !== 'content_block_delta') return null
+  const delta = event.delta
+  if (!delta || typeof delta !== 'object') return null
+  if (delta.type !== 'text_delta') return null
+  return typeof delta.text === 'string' ? delta.text : null
 }
 
 // ── HTTP + WebSocket server ───────────────────────────────────────────────────
@@ -502,7 +774,7 @@ const wss = new WebSocketServer({ server: httpServer })
 wss.on('connection', (ws) => {
   console.log('[Proxy] Browser connected')
 
-  /** Map of callId → resolve(resultString) for pending browser tool calls */
+  /** Map of callId → resolve({ result, isError }) for pending browser tool calls */
   const pendingCalls = new Map()
 
   /** Claude Code session ID — reused across turns for conversation context */
@@ -510,6 +782,12 @@ wss.on('connection', (ws) => {
 
   /** Prevent concurrent queries */
   let activeQuery = false
+  /** Active query handle for interruption */
+  let activeQueryHandle = null
+  /** Monotonic turn id to invalidate stale streams after cancellation */
+  let turnCounter = 0
+  let activeTurnId = 0
+  const cancelledTurnIds = new Set()
 
   ws.on('message', async (raw) => {
     let msg
@@ -518,7 +796,10 @@ wss.on('connection', (ws) => {
     // ── Tool result returned from browser ─────────────────────────────────────
     if (msg.type === 'tool_result') {
       const resolve = pendingCalls.get(msg.callId)
-      if (resolve) resolve(msg.result ?? '{}')
+      if (resolve) {
+        const resultText = toResultText(msg.result)
+        resolve({ result: resultText, isError: Boolean(msg.isError) })
+      }
       return
     }
 
@@ -529,26 +810,54 @@ wss.on('connection', (ws) => {
       return
     }
 
+    // ── Cancel active chat turn ───────────────────────────────────────────────
+    if (msg.type === 'cancel') {
+      if (!activeQuery) return
+      const cancelledTurnId = activeTurnId
+      if (cancelledTurnId > 0) cancelledTurnIds.add(cancelledTurnId)
+      const handleToInterrupt = activeQueryHandle
+      activeQuery = false
+      activeQueryHandle = null
+      activeTurnId = 0
+      console.log('[Proxy] Cancel requested by browser')
+
+      // Unblock any pending tool bridge waits immediately.
+      for (const resolve of pendingCalls.values()) {
+        resolve({ result: JSON.stringify({ error: 'Cancelled by user' }), isError: true })
+      }
+      pendingCalls.clear()
+
+      if (handleToInterrupt && typeof handleToInterrupt.interrupt === 'function') {
+        try {
+          await handleToInterrupt.interrupt()
+        } catch (err) {
+          console.warn('[Proxy] Cancel interrupt failed:', err?.message ?? String(err))
+        }
+      }
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'complete' }))
+      }
+      return
+    }
+
     // ── New chat turn ─────────────────────────────────────────────────────────
     if (msg.type === 'chat') {
       if (activeQuery) {
         ws.send(JSON.stringify({ type: 'error', message: 'Still processing previous request' }))
         return
       }
+      const turnId = ++turnCounter
+      activeTurnId = turnId
       activeQuery = true
 
       const prompt = msg.prompt || ''
       const planMode = !!msg.planMode
-      const hasWalls = !!msg.hasWalls
-      const elementCount = Number.isFinite(msg.elementCount) ? Number(msg.elementCount) : 0
 
       console.log(`[Proxy] prompt="${prompt.slice(0, 70)}..." planMode=${planMode} session=${sessionId ?? 'new'}`)
 
       try {
         const bimTools = createBimMcpTools(ws, pendingCalls, {
           planMode,
-          hasWalls,
-          elementCount,
         })
         const mcpServer = createSdkMcpServer({ name: 'bim', tools: bimTools })
 
@@ -559,6 +868,7 @@ wss.on('connection', (ws) => {
           systemPrompt,
           mcpServers: { bim: mcpServer },
           maxTurns: 50,
+          includePartialMessages: true,
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
         }
@@ -566,8 +876,12 @@ wss.on('connection', (ws) => {
         if (sessionId) options.resume = sessionId
 
         let resultSent = false
+        let streamedText = ''
+        const activeQueryResult = query({ prompt, options })
+        activeQueryHandle = activeQueryResult
 
-        for await (const message of query({ prompt, options })) {
+        for await (const message of activeQueryResult) {
+          if (turnId !== activeTurnId) break
           if (ws.readyState !== WebSocket.OPEN) break
 
           // Capture session ID for subsequent turns
@@ -577,10 +891,18 @@ wss.on('connection', (ws) => {
             continue
           }
 
+          // Incremental assistant token streaming
+          const partialDelta = extractTextDelta(message)
+          if (partialDelta && partialDelta.length > 0) {
+            streamedText += partialDelta
+            ws.send(JSON.stringify({ type: 'text_delta', delta: partialDelta }))
+            continue
+          }
+
           // Final result text
-          if ('result' in message && !resultSent) {
+          if (message.type === 'result' && !resultSent) {
             resultSent = true
-            const text = typeof message.result === 'string' ? message.result : JSON.stringify(message.result)
+            const text = toResultText(message.result)
 
             if (ws.readyState !== WebSocket.OPEN) break
 
@@ -588,7 +910,11 @@ wss.on('connection', (ws) => {
               const planText = text.replace('[PLAN READY]', '').trim()
               ws.send(JSON.stringify({ type: 'plan_ready', planText }))
             } else if (text.trim()) {
-              ws.send(JSON.stringify({ type: 'text_delta', delta: text }))
+              if (streamedText.length === 0) {
+                ws.send(JSON.stringify({ type: 'text_delta', delta: text }))
+              } else if (text.startsWith(streamedText) && text.length > streamedText.length) {
+                ws.send(JSON.stringify({ type: 'text_delta', delta: text.slice(streamedText.length) }))
+              }
             }
 
             ws.send(JSON.stringify({ type: 'complete' }))
@@ -596,25 +922,42 @@ wss.on('connection', (ws) => {
         }
 
         // Ensure complete is always sent
-        if (!resultSent && ws.readyState === WebSocket.OPEN) {
+        if (!resultSent && ws.readyState === WebSocket.OPEN && turnId === activeTurnId) {
           ws.send(JSON.stringify({ type: 'complete' }))
         }
       } catch (err) {
-        console.error('[Proxy] Error:', err.message)
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'error', message: err.message }))
+        const wasCancelled = cancelledTurnIds.has(turnId)
+        const message = err instanceof Error ? (err.stack ?? err.message) : String(err)
+        if (wasCancelled) {
+          console.log('[Proxy] Query cancelled')
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'complete' }))
+          }
+        } else {
+          console.error('[Proxy] Error:', message)
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'error', message }))
+          }
         }
       } finally {
-        activeQuery = false
+        cancelledTurnIds.delete(turnId)
+        if (turnId === activeTurnId) {
+          activeQueryHandle = null
+          activeQuery = false
+          activeTurnId = 0
+        }
       }
     }
   })
 
   ws.on('close', () => {
     console.log('[Proxy] Browser disconnected')
+    if (activeQueryHandle && typeof activeQueryHandle.interrupt === 'function') {
+      activeQueryHandle.interrupt().catch(() => {})
+    }
     // Resolve all pending calls so Claude's loop can unblock
     for (const resolve of pendingCalls.values()) {
-      resolve(JSON.stringify({ error: 'WebSocket closed' }))
+      resolve({ result: JSON.stringify({ error: 'WebSocket closed' }), isError: true })
     }
     pendingCalls.clear()
   })
