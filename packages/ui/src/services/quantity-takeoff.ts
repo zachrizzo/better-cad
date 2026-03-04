@@ -10,6 +10,7 @@ import type {
   BeamElement,
   RoofElement,
   LevelElement,
+  CabinetElement,
 } from './kernel-bridge'
 import { downloadBlobAsFile } from '../utils/file-download'
 
@@ -72,6 +73,14 @@ export interface MaterialTakeoffRow {
   materialName: string
 }
 
+export interface CabinetScheduleRow {
+  cabinetType: string
+  count: number
+  totalLinearFeet: number
+  totalWidth: number
+  ids: string[]
+}
+
 // --- Type guards ---
 
 function isWall(el: PrototypeElement): el is WallElement {
@@ -112,6 +121,10 @@ function isRoof(el: PrototypeElement): el is RoofElement {
 
 function isLevel(el: PrototypeElement): el is LevelElement {
   return el.kind === 'level'
+}
+
+function isCabinet(el: PrototypeElement): el is CabinetElement {
+  return el.kind === 'cabinet'
 }
 
 // --- Utility ---
@@ -292,6 +305,28 @@ export function getWallQuantities(elements: Map<string, PrototypeElement>): Wall
     totalVolume += len * el.height * el.thickness
   }
   return { count, totalLength, totalArea, totalVolume }
+}
+
+export function getCabinetSchedule(elements: Map<string, PrototypeElement>): CabinetScheduleRow[] {
+  const buckets = new Map<string, CabinetScheduleRow>()
+
+  for (const el of elements.values()) {
+    if (!isCabinet(el)) continue
+    const type = el.cabinet_type
+    let bucket = buckets.get(type)
+    if (!bucket) {
+      bucket = { cabinetType: type, count: 0, totalLinearFeet: 0, totalWidth: 0, ids: [] }
+      buckets.set(type, bucket)
+    }
+    bucket.count++
+    bucket.totalWidth += el.width
+    bucket.totalLinearFeet += el.width * 3.28084 // meters to feet
+    bucket.ids.push(el.meta.id)
+  }
+
+  const rows = Array.from(buckets.values())
+  rows.sort((a, b) => a.cabinetType.localeCompare(b.cabinetType))
+  return rows
 }
 
 export function getMaterialTakeoff(elements: Map<string, PrototypeElement>): MaterialTakeoffRow[] {

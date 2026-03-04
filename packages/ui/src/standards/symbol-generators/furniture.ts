@@ -16,6 +16,12 @@ function applianceTag(symbolType: FurnitureElement['symbol_type']): string | nul
       return 'WM'
     case 'dryer':
       return 'DR'
+    case 'microwave':
+      return 'MW'
+    case 'oven':
+      return 'OVN'
+    case 'coffee_maker':
+      return 'CM'
     default:
       return null
   }
@@ -289,6 +295,65 @@ export function generateFurniturePrimitives(
       addRect(primitives, [x, y], rotation, width, depth, lineClass)
       addLine(primitives, [x, y], rotation, [-width * 0.44, depth * 0.2], [width * 0.44, depth * 0.2], 'secondary')
       addCircle(primitives, [x, y], rotation, [0, 0], minDim * 0.16, 'secondary')
+      break
+    }
+    case 'microwave': {
+      addRect(primitives, [x, y], rotation, width, depth, lineClass)
+      addText(primitives, [x, y], rotation, 'MW', minDim * 0.24)
+      break
+    }
+    case 'oven': {
+      addRect(primitives, [x, y], rotation, width, depth, lineClass)
+      addText(primitives, [x, y], rotation, 'OVN', minDim * 0.24)
+      break
+    }
+    case 'range_hood': {
+      addRect(primitives, [x, y], rotation, width, depth, lineClass)
+      addArc(primitives, [x, y], rotation, [-width * 0.2, -depth * 0.2], minDim * 0.3, 0, Math.PI / 2, 'secondary')
+      break
+    }
+    case 'plant': {
+      addCircle(primitives, [x, y], rotation, [0, 0], minDim * 0.35, lineClass)
+      const rayLen = minDim * 0.12
+      const rayStart = minDim * 0.38
+      for (let i = 0; i < 8; i++) {
+        const angle = (i * Math.PI) / 4
+        addLine(
+          primitives, [x, y], rotation,
+          [Math.cos(angle) * rayStart, Math.sin(angle) * rayStart],
+          [Math.cos(angle) * (rayStart + rayLen), Math.sin(angle) * (rayStart + rayLen)],
+          'secondary',
+        )
+      }
+      break
+    }
+    case 'mirror': {
+      addRect(primitives, [x, y], rotation, width, depth, lineClass)
+      addLine(primitives, [x, y], rotation, [-width * 0.4, -depth * 0.4], [width * 0.4, depth * 0.4], 'secondary')
+      addLine(primitives, [x, y], rotation, [width * 0.4, -depth * 0.4], [-width * 0.4, depth * 0.4], 'secondary')
+      break
+    }
+    case 'fireplace': {
+      addRect(primitives, [x, y], rotation, width, depth, lineClass)
+      addArc(primitives, [x, y], rotation, [0, -depth * 0.1], minDim * 0.28, Math.PI, Math.PI * 2, 'secondary')
+      break
+    }
+    case 'coffee_maker': {
+      addRect(primitives, [x, y], rotation, width, depth, lineClass)
+      addText(primitives, [x, y], rotation, 'CM', minDim * 0.24)
+      break
+    }
+    case 'artwork': {
+      addRect(primitives, [x, y], rotation, width, depth, lineClass)
+      const cm = minDim * 0.08
+      addLine(primitives, [x, y], rotation, [-width / 2, -depth / 2], [-width / 2 + cm, -depth / 2], 'secondary')
+      addLine(primitives, [x, y], rotation, [-width / 2, -depth / 2], [-width / 2, -depth / 2 + cm], 'secondary')
+      addLine(primitives, [x, y], rotation, [width / 2, -depth / 2], [width / 2 - cm, -depth / 2], 'secondary')
+      addLine(primitives, [x, y], rotation, [width / 2, -depth / 2], [width / 2, -depth / 2 + cm], 'secondary')
+      addLine(primitives, [x, y], rotation, [-width / 2, depth / 2], [-width / 2 + cm, depth / 2], 'secondary')
+      addLine(primitives, [x, y], rotation, [-width / 2, depth / 2], [-width / 2, depth / 2 - cm], 'secondary')
+      addLine(primitives, [x, y], rotation, [width / 2, depth / 2], [width / 2 - cm, depth / 2], 'secondary')
+      addLine(primitives, [x, y], rotation, [width / 2, depth / 2], [width / 2, depth / 2 - cm], 'secondary')
       break
     }
     default:

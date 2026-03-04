@@ -14,6 +14,12 @@ function textForType(symbolType: HvacElement['symbol_type']): string | null {
       return 'EF'
     case 'mini_split':
       return 'MS'
+    case 'air_handler':
+      return 'AH'
+    case 'condensing_unit':
+      return 'CU'
+    case 'damper':
+      return 'D'
     default:
       return null
   }
@@ -88,6 +94,34 @@ export function generateHvacPrimitives(
         zigzagPts.push([lx, ly])
       }
       addPolyline(primitives, [x, y], rotation, zigzagPts, 'secondary')
+      break
+    }
+
+    case 'air_handler': {
+      addRect(primitives, [x, y], rotation, 0.60, 0.40, 'primary')
+      addText(primitives, [x, y], rotation, 'AH', 0.12)
+      break
+    }
+
+    case 'condensing_unit': {
+      addCircle(primitives, [x, y], rotation, [0, 0], 0.25, 'primary')
+      addText(primitives, [x, y], rotation, 'CU', 0.10)
+      break
+    }
+
+    case 'damper': {
+      addLine(primitives, [x, y], rotation, [-0.15, 0], [0.15, 0], 'primary')
+      addText(primitives, [x, y], rotation, 'D', 0.08)
+      break
+    }
+
+    case 'diffuser': {
+      addRect(primitives, [x, y], rotation, 0.30, 0.30, 'primary')
+      // 4 small lines outward (arrows)
+      addLine(primitives, [x, y], rotation, [0, 0.15], [0, 0.22], 'secondary')
+      addLine(primitives, [x, y], rotation, [0, -0.15], [0, -0.22], 'secondary')
+      addLine(primitives, [x, y], rotation, [0.15, 0], [0.22, 0], 'secondary')
+      addLine(primitives, [x, y], rotation, [-0.15, 0], [-0.22, 0], 'secondary')
       break
     }
 

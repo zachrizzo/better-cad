@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { AnnotationDensity, PlanSymbolProfileId } from '../standards/plan-symbol-profile'
 
 type ViewMode = '2d' | '3d' | 'split'
-type ToolType = 'select' | 'foundation' | 'parking' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section' | 'furniture' | 'plumbing' | 'electrical'
+type ToolType = 'select' | 'foundation' | 'parking' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section' | 'furniture' | 'plumbing' | 'electrical' | 'cabinet' | 'hvac' | 'fire_safety' | 'accessibility'
 type Theme = 'dark' | 'light'
 type RightTab = 'properties' | 'view' | 'layers' | 'chat'
 

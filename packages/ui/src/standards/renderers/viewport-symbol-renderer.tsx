@@ -57,12 +57,14 @@ export function renderSymbolPrimitives2D(
     }
     const points = primitivePoints(primitive)
     if (points.length < 2) return
+    const isDashed = 'dashed' in primitive && primitive.dashed === true
     nodes.push(
       <Line
         key={`${keyPrefix}-l-${idx}`}
         points={points}
         color={color}
         lineWidth={PLAN_VIEW_LINEWIDTH_PX[primitive.lineClass]}
+        {...(isDashed ? { dashed: true, dashSize: 0.05, gapSize: 0.05 } : {})}
       />,
     )
   })

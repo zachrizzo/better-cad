@@ -165,6 +165,43 @@ const GENERATORS: Record<HvacSymbolType, HvacGenerator> = {
       defaultHeight: 0.25,
     }
   },
+
+  air_handler(_w, _d) {
+    return {
+      primitives: [
+        { type: 'box', width: 1.2, height: 1.5, depth: 0.8, position: [0, 0.75, 0], material: 'metal_dark' },
+      ],
+      defaultHeight: 1.50,
+    }
+  },
+
+  condensing_unit(_w, _d) {
+    return {
+      primitives: [
+        { type: 'box', width: 0.80, height: 0.70, depth: 0.80, position: [0, 0.35, 0], material: 'metal_dark' },
+        { type: 'cylinder', radiusTop: 0.25, radiusBottom: 0.25, height: 0.02, segments: 24, position: [0, 0.71, 0], material: 'metal_dark' },
+      ],
+      defaultHeight: 0.70,
+    }
+  },
+
+  damper(_w, _d) {
+    return {
+      primitives: [
+        { type: 'box', width: 0.30, height: 0.10, depth: 0.10, position: [0, 2.70, 0], material: 'metal_chrome' },
+      ],
+      defaultHeight: 0.10,
+    }
+  },
+
+  diffuser(_w, _d) {
+    return {
+      primitives: [
+        { type: 'box', width: 0.30, height: 0.02, depth: 0.30, position: [0, 2.78, 0], material: 'plastic_dark' },
+      ],
+      defaultHeight: 0.02,
+    }
+  },
 }
 
 export function generateHvac3D(

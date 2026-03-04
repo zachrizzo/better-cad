@@ -153,16 +153,16 @@ export interface GenericElement {
   [key: string]: unknown
 }
 
-export type ElectricalSymbolType = 'outlet' | 'switch' | 'light_fixture' | 'panel' | 'smoke_detector' | 'junction_box' | 'three_way_switch' | 'dimmer_switch' | 'gfci_outlet' | 'floor_outlet' | 'ceiling_fan' | 'thermostat'
-export type PlumbingSymbolType = 'toilet' | 'sink' | 'bathtub' | 'shower' | 'water_heater' | 'hose_bib' | 'floor_drain' | 'dishwasher' | 'washing_machine' | 'urinal'
-export type FurnitureSymbolType = 'desk' | 'chair' | 'table' | 'bed' | 'sofa' | 'dining_table' | 'bookshelf' | 'wardrobe' | 'toilet_stall' | 'reception_desk' | 'conference_table' | 'kitchen_island' | 'refrigerator' | 'stove' | 'washer' | 'dryer' | 'nightstand' | 'coffee_table' | 'tv_console' | 'console_table' | 'bench' | 'ottoman' | 'vanity'
+export type ElectricalSymbolType = 'outlet' | 'switch' | 'light_fixture' | 'panel' | 'smoke_detector' | 'junction_box' | 'three_way_switch' | 'dimmer_switch' | 'gfci_outlet' | 'floor_outlet' | 'ceiling_fan' | 'thermostat' | 'recessed_light' | 'wall_sconce' | 'pendant_light' | 'track_light' | 'outdoor_light' | 'data_outlet' | 'timer_switch' | 'motion_sensor'
+export type PlumbingSymbolType = 'toilet' | 'sink' | 'bathtub' | 'shower' | 'water_heater' | 'hose_bib' | 'floor_drain' | 'dishwasher' | 'washing_machine' | 'urinal' | 'double_sink' | 'bidet' | 'utility_sink' | 'pedestal_sink'
+export type FurnitureSymbolType = 'desk' | 'chair' | 'table' | 'bed' | 'sofa' | 'dining_table' | 'bookshelf' | 'wardrobe' | 'toilet_stall' | 'reception_desk' | 'conference_table' | 'kitchen_island' | 'refrigerator' | 'stove' | 'washer' | 'dryer' | 'nightstand' | 'coffee_table' | 'tv_console' | 'console_table' | 'bench' | 'ottoman' | 'vanity' | 'microwave' | 'oven' | 'range_hood' | 'plant' | 'mirror' | 'fireplace' | 'coffee_maker' | 'artwork'
 export type SiteDetailType = 'property_line' | 'setback' | 'tree' | 'parking_space' | 'sidewalk' | 'driveway' | 'compass' | 'contour_line' | 'fence' | 'retaining'
 export type TagType = 'room' | 'door' | 'window' | 'wall' | 'column' | 'beam'
 export type HatchPattern = 'concrete' | 'insulation' | 'earth' | 'wood' | 'brick' | 'steel' | 'gravel' | 'glass' | 'none'
 
-export type HvacSymbolType = 'supply_vent' | 'return_vent' | 'thermostat' | 'exhaust_fan' | 'ductwork' | 'mini_split'
-export type FireSafetySymbolType = 'fire_extinguisher' | 'sprinkler_head' | 'exit_sign' | 'pull_station' | 'smoke_alarm' | 'fire_alarm_panel'
-export type AccessibilitySymbolType = 'wheelchair' | 'ramp' | 'grab_bar' | 'accessible_parking' | 'tactile_warning'
+export type HvacSymbolType = 'supply_vent' | 'return_vent' | 'thermostat' | 'exhaust_fan' | 'ductwork' | 'mini_split' | 'air_handler' | 'condensing_unit' | 'damper' | 'diffuser'
+export type FireSafetySymbolType = 'fire_extinguisher' | 'sprinkler_head' | 'exit_sign' | 'pull_station' | 'smoke_alarm' | 'fire_alarm_panel' | 'fire_hose_cabinet' | 'annunciator'
+export type AccessibilitySymbolType = 'wheelchair' | 'ramp' | 'grab_bar' | 'accessible_parking' | 'tactile_warning' | 'ada_restroom' | 'hearing_loop'
 
 export interface ElectricalElement {
   kind: 'electrical'
@@ -255,6 +255,22 @@ export interface AccessibilityElement {
   depth?: number
 }
 
+export type CabinetType = 'base' | 'upper' | 'tall' | 'corner_base' | 'corner_upper' | 'corner_tall' | 'sink_base' | 'lazy_susan' | 'blind_corner' | 'pantry' | 'drawer_base' | 'appliance_garage'
+
+export interface CabinetElement {
+  kind: 'cabinet'
+  meta: ElementMeta
+  cabinet_type: CabinetType
+  position: [number, number]
+  rotation: number
+  width: number
+  depth: number
+  height: number
+  wall_id?: string
+  door_count: number
+  drawer_count: number
+}
+
 export type PrototypeElement =
   | WallElement
   | DoorElement
@@ -279,6 +295,7 @@ export type PrototypeElement =
   | HvacElement
   | FireSafetyElement
   | AccessibilityElement
+  | CabinetElement
   | GenericElement
 
 export interface RegeneratedMesh extends TessellatedMesh {

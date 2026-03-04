@@ -16,6 +16,10 @@ function textForType(symbolType: FireSafetyElement['symbol_type']): string | nul
       return 'SA'
     case 'fire_alarm_panel':
       return 'FACP'
+    case 'fire_hose_cabinet':
+      return 'FHC'
+    case 'annunciator':
+      return 'ANN'
     default:
       return null
   }
@@ -83,6 +87,18 @@ export function generateFireSafetyPrimitives(
     case 'fire_alarm_panel': {
       addRect(primitives, [x, y], rotation, 0.30, 0.20, 'primary')
       addText(primitives, [x, y], rotation, 'FACP', 0.05)
+      break
+    }
+
+    case 'fire_hose_cabinet': {
+      addRect(primitives, [x, y], rotation, 0.60, 0.20, 'primary')
+      addText(primitives, [x, y], rotation, 'FHC', 0.06)
+      break
+    }
+
+    case 'annunciator': {
+      addRect(primitives, [x, y], rotation, 0.40, 0.10, 'primary')
+      addText(primitives, [x, y], rotation, 'ANN', 0.05)
       break
     }
 

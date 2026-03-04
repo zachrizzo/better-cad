@@ -27,6 +27,10 @@ const GENERATORS: Record<PlumbingSymbolType, () => Element3DSpec> = {
   dishwasher: generateDishwasher,
   washing_machine: generateWashingMachine,
   urinal: generateUrinal,
+  double_sink: generateDoubleSink,
+  bidet: generateBidet,
+  utility_sink: generateUtilitySink,
+  pedestal_sink: generatePedestalSink,
 }
 
 // ---------------------------------------------------------------------------
@@ -327,4 +331,49 @@ function generateUrinal(): Element3DSpec {
     },
   ]
   return { primitives, defaultHeight: 1.05 }
+}
+
+function generateDoubleSink(): Element3DSpec {
+  const primitives: PrimitiveSpec[] = [
+    // Vanity cabinet
+    { type: 'box', width: 0.80, height: 0.80, depth: 0.50, position: [0, 0.40, 0], material: 'wood_medium' },
+    // Left basin
+    { type: 'cylinder', radiusTop: 0.14, radiusBottom: 0.14, height: 0.10, segments: 24, position: [-0.18, 0.78, 0], material: 'ceramic_white' },
+    // Right basin
+    { type: 'cylinder', radiusTop: 0.14, radiusBottom: 0.14, height: 0.10, segments: 24, position: [0.18, 0.78, 0], material: 'ceramic_white' },
+  ]
+  return { primitives, defaultHeight: 0.85 }
+}
+
+function generateBidet(): Element3DSpec {
+  const primitives: PrimitiveSpec[] = [
+    { type: 'cylinder', radiusTop: 0.15, radiusBottom: 0.13, height: 0.30, segments: 24, position: [0, 0.15, 0], material: 'ceramic_white' },
+  ]
+  return { primitives, defaultHeight: 0.35 }
+}
+
+function generateUtilitySink(): Element3DSpec {
+  const primitives: PrimitiveSpec[] = [
+    // Deep basin
+    { type: 'box', width: 0.60, height: 0.35, depth: 0.50, position: [0, 0.70, 0], material: 'metal_chrome' },
+    // Left leg
+    { type: 'cylinder', radiusTop: 0.02, radiusBottom: 0.02, height: 0.52, segments: 8, position: [-0.25, 0.26, 0.20], material: 'metal_chrome' },
+    // Right leg
+    { type: 'cylinder', radiusTop: 0.02, radiusBottom: 0.02, height: 0.52, segments: 8, position: [0.25, 0.26, 0.20], material: 'metal_chrome' },
+    // Left rear leg
+    { type: 'cylinder', radiusTop: 0.02, radiusBottom: 0.02, height: 0.52, segments: 8, position: [-0.25, 0.26, -0.20], material: 'metal_chrome' },
+    // Right rear leg
+    { type: 'cylinder', radiusTop: 0.02, radiusBottom: 0.02, height: 0.52, segments: 8, position: [0.25, 0.26, -0.20], material: 'metal_chrome' },
+  ]
+  return { primitives, defaultHeight: 0.87 }
+}
+
+function generatePedestalSink(): Element3DSpec {
+  const primitives: PrimitiveSpec[] = [
+    // Basin
+    { type: 'cylinder', radiusTop: 0.22, radiusBottom: 0.20, height: 0.12, segments: 24, position: [0, 0.80, 0], material: 'ceramic_white' },
+    // Pedestal
+    { type: 'cylinder', radiusTop: 0.08, radiusBottom: 0.10, height: 0.74, segments: 16, position: [0, 0.37, 0], material: 'ceramic_white' },
+  ]
+  return { primitives, defaultHeight: 0.86 }
 }

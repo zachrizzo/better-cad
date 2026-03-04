@@ -222,6 +222,35 @@ export function generatePlumbingPrimitives(
       break
     }
 
+    case 'double_sink': {
+      const w = 0.80
+      const d = 0.50
+      addRect(primitives, [x, y], rotation, w, d, 'primary')
+      addEllipse(primitives, [x, y], rotation, [-w * 0.2, 0], 0.10, 0.07, 'secondary')
+      addEllipse(primitives, [x, y], rotation, [w * 0.2, 0], 0.10, 0.07, 'secondary')
+      addLine(primitives, [x, y], rotation, [0, -d * 0.4], [0, d * 0.4], 'secondary')
+      break
+    }
+
+    case 'bidet': {
+      addEllipse(primitives, [x, y], rotation, [0, 0], 0.15, 0.12, 'primary')
+      break
+    }
+
+    case 'utility_sink': {
+      const w = 0.60
+      const d = 0.50
+      addRect(primitives, [x, y], rotation, w, d, 'primary')
+      addRect(primitives, [x, y], rotation, w * 0.8, d * 0.75, 'secondary')
+      break
+    }
+
+    case 'pedestal_sink': {
+      addEllipse(primitives, [x, y], rotation, [0, 0], 0.18, 0.14, 'primary')
+      addCircle(primitives, [x, y], rotation, [0, 0], 0.04, 'secondary')
+      break
+    }
+
     default: {
       addCircle(primitives, [x, y], rotation, [0, 0], 0.25, spec.lineClass as 'primary')
       break

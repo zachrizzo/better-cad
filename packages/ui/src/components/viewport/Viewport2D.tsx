@@ -30,6 +30,7 @@ import { DoorWindowSymbols2D } from './DoorWindowSymbols2D'
 import { HvacSymbols2D } from './HvacSymbols2D'
 import { FireSafetySymbols2D } from './FireSafetySymbols2D'
 import { AccessibilitySymbols2D } from './AccessibilitySymbols2D'
+import { CabinetSymbols2D } from './CabinetSymbols2D'
 
 interface PlanLine {
   start: [number, number]
@@ -454,6 +455,12 @@ function PlanLines() {
       <SwitchingDiagram2D />
       {/* Furniture symbols */}
       <FurnitureSymbols2D
+        annotationDensity={annotationDensity}
+        showLabels={showFurnitureLabels}
+        symbolProfile={planSymbolProfile}
+      />
+      {/* Cabinet symbols */}
+      <CabinetSymbols2D
         annotationDensity={annotationDensity}
         showLabels={showFurnitureLabels}
         symbolProfile={planSymbolProfile}

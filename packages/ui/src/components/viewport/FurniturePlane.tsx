@@ -6,7 +6,7 @@ import { useBimStore, FURNITURE_DEFAULT_SIZES } from '../../stores/bim-store'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useLevelStore } from '../../stores/level-store'
 import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
-import type { FurnitureElement, PlumbingElement, ElectricalElement } from '../../services/kernel-bridge'
+import type { FurnitureElement, PlumbingElement, ElectricalElement, HvacElement, FireSafetyElement, AccessibilityElement } from '../../services/kernel-bridge'
 import { isFloorElement, useEntityStore } from '../../stores/entity-store'
 import { useKernel } from '../../hooks/useKernel'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
@@ -17,6 +17,9 @@ const TOOL_COLORS: Record<string, string> = {
   furniture: '#a855f7',
   plumbing: '#3b82f6',
   electrical: '#ef4444',
+  hvac: '#7c3aed',
+  fire_safety: '#dc2626',
+  accessibility: '#0891b2',
 }
 
 const PLUMBING_SIZES: Record<string, { width: number; depth: number }> = {
@@ -47,10 +50,47 @@ const ELECTRICAL_SIZES: Record<string, { width: number; depth: number }> = {
   thermostat: { width: 0.1, depth: 0.05 },
 }
 
+const HVAC_SIZES: Record<string, { width: number; depth: number }> = {
+  supply_vent: { width: 0.3, depth: 0.3 },
+  return_vent: { width: 0.6, depth: 0.3 },
+  thermostat: { width: 0.1, depth: 0.1 },
+  exhaust_fan: { width: 0.3, depth: 0.3 },
+  ductwork: { width: 0.6, depth: 0.3 },
+  mini_split: { width: 0.9, depth: 0.2 },
+  air_handler: { width: 0.8, depth: 0.6 },
+  condensing_unit: { width: 0.8, depth: 0.8 },
+  damper: { width: 0.3, depth: 0.1 },
+  diffuser: { width: 0.6, depth: 0.6 },
+}
+
+const FIRE_SAFETY_SIZES: Record<string, { width: number; depth: number }> = {
+  fire_extinguisher: { width: 0.15, depth: 0.15 },
+  sprinkler_head: { width: 0.1, depth: 0.1 },
+  exit_sign: { width: 0.3, depth: 0.05 },
+  pull_station: { width: 0.15, depth: 0.1 },
+  smoke_alarm: { width: 0.15, depth: 0.15 },
+  fire_alarm_panel: { width: 0.4, depth: 0.2 },
+  fire_hose_cabinet: { width: 0.6, depth: 0.2 },
+  annunciator: { width: 0.4, depth: 0.1 },
+}
+
+const ACCESSIBILITY_SIZES: Record<string, { width: number; depth: number }> = {
+  wheelchair: { width: 0.7, depth: 1.2 },
+  ramp: { width: 1.0, depth: 2.0 },
+  grab_bar: { width: 0.6, depth: 0.05 },
+  accessible_parking: { width: 3.6, depth: 5.4 },
+  tactile_warning: { width: 0.6, depth: 0.6 },
+  ada_restroom: { width: 1.5, depth: 1.5 },
+  hearing_loop: { width: 0.3, depth: 0.3 },
+}
+
 function getPreviewSize(tool: string, subtype: string): { width: number; depth: number } {
   if (tool === 'furniture') return FURNITURE_DEFAULT_SIZES[subtype as keyof typeof FURNITURE_DEFAULT_SIZES] ?? { width: 1.0, depth: 0.5 }
   if (tool === 'plumbing') return PLUMBING_SIZES[subtype] ?? { width: 0.5, depth: 0.5 }
   if (tool === 'electrical') return ELECTRICAL_SIZES[subtype] ?? { width: 0.15, depth: 0.15 }
+  if (tool === 'hvac') return HVAC_SIZES[subtype] ?? { width: 0.3, depth: 0.3 }
+  if (tool === 'fire_safety') return FIRE_SAFETY_SIZES[subtype] ?? { width: 0.15, depth: 0.15 }
+  if (tool === 'accessibility') return ACCESSIBILITY_SIZES[subtype] ?? { width: 0.7, depth: 0.7 }
   return { width: 0.5, depth: 0.5 }
 }
 
@@ -69,6 +109,12 @@ export function FurniturePlane() {
   const defaultPlumbingRotation = useBimStore((s) => s.defaultPlumbingRotation)
   const defaultElectricalType = useBimStore((s) => s.defaultElectricalType)
   const defaultElectricalRotation = useBimStore((s) => s.defaultElectricalRotation)
+  const defaultHvacType = useBimStore((s) => s.defaultHvacType)
+  const defaultHvacRotation = useBimStore((s) => s.defaultHvacRotation)
+  const defaultFireSafetyType = useBimStore((s) => s.defaultFireSafetyType)
+  const defaultFireSafetyRotation = useBimStore((s) => s.defaultFireSafetyRotation)
+  const defaultAccessibilityType = useBimStore((s) => s.defaultAccessibilityType)
+  const defaultAccessibilityRotation = useBimStore((s) => s.defaultAccessibilityRotation)
 
   const { kernel, ready } = useKernel()
 
@@ -78,6 +124,7 @@ export function FurniturePlane() {
   const snapPoints = usePlanSnapPoints()
 
   const isActive = activeTool === 'furniture' || activeTool === 'plumbing' || activeTool === 'electrical'
+    || activeTool === 'hvac' || activeTool === 'fire_safety' || activeTool === 'accessibility'
 
   const activeLevelElevation = useMemo(() => {
     const level = levels.find((l) => l.id === activeLevelId)
@@ -97,9 +144,17 @@ export function FurniturePlane() {
 
   const currentSubtype = activeTool === 'furniture' ? defaultFurnitureType
     : activeTool === 'plumbing' ? defaultPlumbingType
+    : activeTool === 'electrical' ? defaultElectricalType
+    : activeTool === 'hvac' ? defaultHvacType
+    : activeTool === 'fire_safety' ? defaultFireSafetyType
+    : activeTool === 'accessibility' ? defaultAccessibilityType
     : defaultElectricalType
   const currentRotation = activeTool === 'furniture' ? defaultFurnitureRotation
     : activeTool === 'plumbing' ? defaultPlumbingRotation
+    : activeTool === 'electrical' ? defaultElectricalRotation
+    : activeTool === 'hvac' ? defaultHvacRotation
+    : activeTool === 'fire_safety' ? defaultFireSafetyRotation
+    : activeTool === 'accessibility' ? defaultAccessibilityRotation
     : defaultElectricalRotation
   const previewSize = getPreviewSize(activeTool, currentSubtype)
   const color = TOOL_COLORS[activeTool] ?? '#888'
@@ -152,7 +207,7 @@ export function FurniturePlane() {
     const label = currentSubtype.replace(/_/g, ' ')
     const namePrefix = label.charAt(0).toUpperCase() + label.slice(1)
 
-    let element: FurnitureElement | PlumbingElement | ElectricalElement
+    let element: FurnitureElement | PlumbingElement | ElectricalElement | HvacElement | FireSafetyElement | AccessibilityElement
 
     if (activeTool === 'furniture') {
       const size = FURNITURE_DEFAULT_SIZES[defaultFurnitureType] ?? { width: 1.0, depth: 0.5 }
@@ -173,13 +228,43 @@ export function FurniturePlane() {
         position: point,
         rotation: rotRad,
       }
-    } else {
+    } else if (activeTool === 'electrical') {
       element = {
         kind: 'electrical',
         meta: { id, name: `${namePrefix} ${elementCount + 1}`, level_id: activeLevelId },
         symbol_type: defaultElectricalType,
         position: point,
         rotation: rotRad,
+      }
+    } else if (activeTool === 'hvac') {
+      const size = HVAC_SIZES[defaultHvacType] ?? { width: 0.3, depth: 0.3 }
+      element = {
+        kind: 'hvac',
+        meta: { id, name: `${namePrefix} ${elementCount + 1}`, level_id: activeLevelId },
+        symbol_type: defaultHvacType,
+        position: point,
+        rotation: rotRad,
+        width: size.width,
+        depth: size.depth,
+      }
+    } else if (activeTool === 'fire_safety') {
+      element = {
+        kind: 'fire_safety',
+        meta: { id, name: `${namePrefix} ${elementCount + 1}`, level_id: activeLevelId },
+        symbol_type: defaultFireSafetyType,
+        position: point,
+        rotation: rotRad,
+      }
+    } else {
+      const size = ACCESSIBILITY_SIZES[defaultAccessibilityType] ?? { width: 0.7, depth: 0.7 }
+      element = {
+        kind: 'accessibility',
+        meta: { id, name: `${namePrefix} ${elementCount + 1}`, level_id: activeLevelId },
+        symbol_type: defaultAccessibilityType,
+        position: point,
+        rotation: rotRad,
+        width: size.width,
+        depth: size.depth,
       }
     }
 
@@ -203,6 +288,9 @@ export function FurniturePlane() {
     defaultElectricalType,
     defaultFurnitureType,
     defaultPlumbingType,
+    defaultHvacType,
+    defaultFireSafetyType,
+    defaultAccessibilityType,
     elementCount,
     kernel,
     ready,

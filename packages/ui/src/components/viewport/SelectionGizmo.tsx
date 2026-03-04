@@ -20,6 +20,7 @@ import {
   isHvacElement,
   isFireSafetyElement,
   isAccessibilityElement,
+  isCabinetElement,
 } from '../../stores/entity-store'
 import type {
   PrototypeElement,
@@ -36,6 +37,7 @@ import type {
   HvacElement,
   FireSafetyElement,
   AccessibilityElement,
+  CabinetElement,
 } from '../../services/kernel-bridge'
 import { getKernel, type KernelBackend } from '../../services/kernel-bridge'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
@@ -119,6 +121,7 @@ function getElementCenter(el: PrototypeElement): [number, number] | null {
   if (isHvacElement(el)) return [el.position[0], el.position[1]]
   if (isFireSafetyElement(el)) return [el.position[0], el.position[1]]
   if (isAccessibilityElement(el)) return [el.position[0], el.position[1]]
+  if (isCabinetElement(el)) return [el.position[0], el.position[1]]
   return null
 }
 
@@ -137,6 +140,7 @@ function getElementHeight(el: PrototypeElement): number {
   if (isHvacElement(el)) return 0.25
   if (isFireSafetyElement(el)) return 0.5
   if (isAccessibilityElement(el)) return 0.5
+  if (isCabinetElement(el)) return (el as CabinetElement).height
   return 1
 }
 
@@ -152,7 +156,8 @@ function supportsRotation(el: PrototypeElement): boolean {
     isFurnitureElement(el) ||
     isPlumbingElement(el) ||
     isHvacElement(el) ||
-    isAccessibilityElement(el)
+    isAccessibilityElement(el) ||
+    isCabinetElement(el)
   )
 }
 
@@ -366,10 +371,11 @@ function GizmoInner({
           isElectricalElement(el) ||
           isHvacElement(el) ||
           isFireSafetyElement(el) ||
-          isAccessibilityElement(el)
+          isAccessibilityElement(el) ||
+          isCabinetElement(el)
         ) {
           // All placement elements have position: [x, y]
-          const pos = (el as FurnitureElement | PlumbingElement | ElectricalElement | HvacElement | FireSafetyElement | AccessibilityElement).position
+          const pos = (el as FurnitureElement | PlumbingElement | ElectricalElement | HvacElement | FireSafetyElement | AccessibilityElement | CabinetElement).position
           updated = {
             ...el,
             position: [pos[0] + kernelDx, pos[1] + kernelDy] as [number, number],
@@ -450,10 +456,11 @@ function GizmoInner({
           isElectricalElement(el) ||
           isHvacElement(el) ||
           isFireSafetyElement(el) ||
-          isAccessibilityElement(el)
+          isAccessibilityElement(el) ||
+          isCabinetElement(el)
         ) {
           // For placement elements, rotation is a single number (additive)
-          const currentRot = (el as FurnitureElement | PlumbingElement | ElectricalElement | HvacElement | FireSafetyElement | AccessibilityElement).rotation
+          const currentRot = (el as FurnitureElement | PlumbingElement | ElectricalElement | HvacElement | FireSafetyElement | AccessibilityElement | CabinetElement).rotation
           updated = {
             ...el,
             rotation: currentRot + angle,

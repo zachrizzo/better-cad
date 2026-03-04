@@ -415,6 +415,86 @@ function generateVanity(w: number, d: number): Element3DSpec {
   }
 }
 
+function generateMicrowave(_w: number, _d: number): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.5, height: 0.3, depth: 0.4, position: [0, 0.15, 0], material: 'metal_dark' },
+      { type: 'plane', width: 0.35, height: 0.22, position: [0, 0.15, 0.201], material: 'glass_tinted' },
+    ],
+    defaultHeight: 0.30,
+  }
+}
+
+function generateOven(_w: number, _d: number): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.76, height: 0.9, depth: 0.65, position: [0, 0.45, 0], material: 'metal_dark' },
+      { type: 'plane', width: 0.60, height: 0.50, position: [0, 0.45, 0.326], material: 'glass_tinted' },
+    ],
+    defaultHeight: 0.90,
+  }
+}
+
+function generateRangeHood(_w: number, _d: number): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.76, height: 0.3, depth: 0.5, position: [0, 0.15, 0], material: 'metal_dark' },
+      { type: 'box', width: 0.70, height: 0.02, depth: 0.44, position: [0, 0.01, 0], material: 'metal_chrome' },
+    ],
+    defaultHeight: 0.30,
+  }
+}
+
+function generatePlant(_w: number, _d: number): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'cylinder', radiusTop: 0.15, radiusBottom: 0.12, height: 0.3, segments: 16, position: [0, 0.15, 0], material: 'wood_medium' },
+      { type: 'sphere', radius: 0.25, segments: 16, position: [0, 0.50, 0], material: 'green_foliage' },
+    ],
+    defaultHeight: 0.75,
+  }
+}
+
+function generateMirror(_w: number, _d: number): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.6, height: 0.9, depth: 0.03, position: [0, 0.45, 0], material: 'wood_light' },
+      { type: 'plane', width: 0.54, height: 0.84, position: [0, 0.45, 0.016], material: 'glass_clear' },
+    ],
+    defaultHeight: 0.90,
+  }
+}
+
+function generateFireplace(_w: number, _d: number): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 1.2, height: 1.0, depth: 0.5, position: [0, 0.5, 0], material: 'stone_gray' },
+      { type: 'box', width: 1.3, height: 0.15, depth: 0.55, position: [0, 1.075, 0], material: 'wood_medium' },
+    ],
+    defaultHeight: 1.15,
+  }
+}
+
+function generateCoffeeMaker(_w: number, _d: number): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.25, height: 0.35, depth: 0.2, position: [0, 0.175, 0], material: 'plastic_dark' },
+      { type: 'cylinder', radiusTop: 0.06, radiusBottom: 0.05, height: 0.15, segments: 12, position: [0, 0.075, 0.12], material: 'glass_clear' },
+    ],
+    defaultHeight: 0.35,
+  }
+}
+
+function generateArtwork(_w: number, _d: number): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.8, height: 0.6, depth: 0.03, position: [0, 0.3, 0], material: 'wood_light' },
+      { type: 'plane', width: 0.72, height: 0.52, position: [0, 0.3, 0.016], material: 'plastic_dark' },
+    ],
+    defaultHeight: 0.60,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Generator dispatch map
 // ---------------------------------------------------------------------------
@@ -444,6 +524,14 @@ const GENERATORS: Record<FurnitureSymbolType, GeneratorFn> = {
   bench: generateBench,
   ottoman: generateOttoman,
   vanity: generateVanity,
+  microwave: generateMicrowave,
+  oven: generateOven,
+  range_hood: generateRangeHood,
+  plant: generatePlant,
+  mirror: generateMirror,
+  fireplace: generateFireplace,
+  coffee_maker: generateCoffeeMaker,
+  artwork: generateArtwork,
 }
 
 // ---------------------------------------------------------------------------

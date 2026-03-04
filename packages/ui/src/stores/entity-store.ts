@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type {
   AccessibilityElement,
   BeamElement,
+  CabinetElement,
   ColumnElement,
   DimensionElement,
   DoorElement,
@@ -246,3 +247,4 @@ export const isTagElement = (e: PrototypeElement): e is TagElement => e.kind ===
 export const isHvacElement = (e: PrototypeElement): e is HvacElement => e.kind === 'hvac'
 export const isFireSafetyElement = (e: PrototypeElement): e is FireSafetyElement => e.kind === 'fire_safety'
 export const isAccessibilityElement = (e: PrototypeElement): e is AccessibilityElement => e.kind === 'accessibility'
+export const isCabinetElement = (e: PrototypeElement): e is CabinetElement => e.kind === 'cabinet'

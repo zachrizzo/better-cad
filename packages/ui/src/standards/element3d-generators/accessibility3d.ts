@@ -227,6 +227,24 @@ const GENERATORS: Record<AccessibilitySymbolType, AccessibilityGenerator> = {
       defaultHeight: 0.02,
     }
   },
+
+  ada_restroom(_w, _d) {
+    return {
+      primitives: [
+        { type: 'box', width: 1.5, height: 2.5, depth: 1.5, position: [0, 1.25, 0], material: 'blue_accent' },
+      ],
+      defaultHeight: 2.50,
+    }
+  },
+
+  hearing_loop(_w, _d) {
+    return {
+      primitives: [
+        { type: 'box', width: 0.3, height: 0.3, depth: 0.05, position: [0, 1.20, 0], material: 'plastic_dark' },
+      ],
+      defaultHeight: 0.30,
+    }
+  },
 }
 
 export function generateAccessibility3D(

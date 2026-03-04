@@ -469,9 +469,9 @@ fn add_electrical_symbol(drawing: &mut dxf::Drawing, elec: &ElectricalElement) {
     let py = elec.position[1];
 
     // Determine layer: lighting vs power
-    let layer = match elec.symbol_type {
-        bcad_domain::ElectricalSymbolType::LightFixture
-        | bcad_domain::ElectricalSymbolType::CeilingFan => "E-LITE",
+    let layer = match elec.symbol_type.as_str() {
+        "light_fixture" | "ceiling_fan" | "recessed_light" | "wall_sconce"
+        | "pendant_light" | "track_light" | "outdoor_light" => "E-LITE",
         _ => "E-POWR",
     };
 
@@ -495,8 +495,8 @@ fn add_plumbing_symbol(drawing: &mut dxf::Drawing, plumb: &PlumbingElement) {
     let py = plumb.position[1];
     let layer = "P-FIXT";
 
-    match plumb.symbol_type {
-        bcad_domain::PlumbingSymbolType::Toilet => {
+    match plumb.symbol_type.as_str() {
+        "toilet" => {
             // Bowl (circle) + tank (rectangle)
             add_circle_approx(drawing, px, py + 0.15, 0.15, layer);
             let boundary = vec![
@@ -507,11 +507,11 @@ fn add_plumbing_symbol(drawing: &mut dxf::Drawing, plumb: &PlumbingElement) {
             ];
             add_closed_polyline(drawing, &boundary, layer);
         }
-        bcad_domain::PlumbingSymbolType::Sink => {
+        "sink" => {
             // Oval approximation
             add_circle_approx(drawing, px, py, 0.2, layer);
         }
-        bcad_domain::PlumbingSymbolType::Bathtub => {
+        "bathtub" => {
             let boundary = vec![
                 [px - 0.4, py - 0.3],
                 [px + 0.4, py - 0.3],
@@ -520,7 +520,7 @@ fn add_plumbing_symbol(drawing: &mut dxf::Drawing, plumb: &PlumbingElement) {
             ];
             add_closed_polyline(drawing, &boundary, layer);
         }
-        bcad_domain::PlumbingSymbolType::Shower => {
+        "shower" => {
             let boundary = vec![
                 [px - 0.4, py - 0.4],
                 [px + 0.4, py - 0.4],

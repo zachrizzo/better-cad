@@ -29,6 +29,14 @@ const GENERATORS: Record<ElectricalSymbolType, () => Element3DSpec> = {
   floor_outlet: generateFloorOutlet,
   ceiling_fan: generateCeilingFan,
   thermostat: generateThermostat,
+  recessed_light: generateRecessedLight,
+  wall_sconce: generateWallSconce,
+  pendant_light: generatePendantLight,
+  track_light: generateTrackLight,
+  outdoor_light: generateOutdoorLight,
+  data_outlet: generateDataOutlet,
+  timer_switch: generateTimerSwitch,
+  motion_sensor: generateMotionSensor,
 }
 
 // ---------------------------------------------------------------------------
@@ -359,4 +367,80 @@ function generateThermostat(): Element3DSpec {
     },
   ]
   return { primitives, defaultHeight: 0.12 }
+}
+
+function generateRecessedLight(): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'cylinder', radiusTop: 0.075, radiusBottom: 0.075, height: 0.05, segments: 20, position: [0, 2.78, 0], material: 'metal_chrome' },
+    ],
+    defaultHeight: 0.05,
+  }
+}
+
+function generateWallSconce(): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'cylinder', radiusTop: 0.08, radiusBottom: 0.08, height: 0.15, segments: 16, position: [0, 1.80, 0], material: 'metal_chrome' },
+    ],
+    defaultHeight: 0.15,
+  }
+}
+
+function generatePendantLight(): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'cylinder', radiusTop: 0.12, radiusBottom: 0.15, height: 0.18, segments: 20, position: [0, 2.20, 0], material: 'metal_dark' },
+      { type: 'cylinder', radiusTop: 0.005, radiusBottom: 0.005, height: 0.50, segments: 8, position: [0, 2.54, 0], material: 'plastic_dark' },
+    ],
+    defaultHeight: 0.68,
+  }
+}
+
+function generateTrackLight(): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 1.0, height: 0.04, depth: 0.04, position: [0, 2.78, 0], material: 'metal_dark' },
+      { type: 'cylinder', radiusTop: 0.03, radiusBottom: 0.03, height: 0.06, segments: 12, position: [-0.30, 2.74, 0], material: 'metal_chrome' },
+      { type: 'cylinder', radiusTop: 0.03, radiusBottom: 0.03, height: 0.06, segments: 12, position: [0, 2.74, 0], material: 'metal_chrome' },
+      { type: 'cylinder', radiusTop: 0.03, radiusBottom: 0.03, height: 0.06, segments: 12, position: [0.30, 2.74, 0], material: 'metal_chrome' },
+    ],
+    defaultHeight: 0.10,
+  }
+}
+
+function generateOutdoorLight(): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.15, height: 0.20, depth: 0.10, position: [0, 2.30, 0], material: 'metal_dark' },
+    ],
+    defaultHeight: 0.20,
+  }
+}
+
+function generateDataOutlet(): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.07, height: 0.07, depth: 0.02, position: [0, 0.30, 0], material: 'plastic_dark' },
+    ],
+    defaultHeight: 0.07,
+  }
+}
+
+function generateTimerSwitch(): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.07, height: 0.11, depth: 0.02, position: [0, 1.10, 0], material: 'plastic_dark' },
+    ],
+    defaultHeight: 0.11,
+  }
+}
+
+function generateMotionSensor(): Element3DSpec {
+  return {
+    primitives: [
+      { type: 'box', width: 0.06, height: 0.06, depth: 0.03, position: [0, 2.50, 0], material: 'plastic_dark' },
+    ],
+    defaultHeight: 0.06,
+  }
 }

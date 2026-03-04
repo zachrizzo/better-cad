@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { FurnitureSymbolType, PlumbingSymbolType, ElectricalSymbolType } from '../services/kernel-bridge'
+import type { FurnitureSymbolType, PlumbingSymbolType, ElectricalSymbolType, CabinetType, HvacSymbolType, FireSafetySymbolType, AccessibilitySymbolType } from '../services/kernel-bridge'
 
 export type SketchExtrudeMode = 'walls' | 'solid'
 export type StairType = 'straight' | 'spiral'
@@ -30,6 +30,29 @@ export const FURNITURE_DEFAULT_SIZES: Record<FurnitureSymbolType, { width: numbe
   bench: { width: 1.5, depth: 0.45 },
   ottoman: { width: 0.7, depth: 0.7 },
   vanity: { width: 1.2, depth: 0.55 },
+  microwave: { width: 0.5, depth: 0.4 },
+  oven: { width: 0.76, depth: 0.65 },
+  range_hood: { width: 0.76, depth: 0.5 },
+  plant: { width: 0.4, depth: 0.4 },
+  mirror: { width: 0.6, depth: 0.05 },
+  fireplace: { width: 1.2, depth: 0.6 },
+  coffee_maker: { width: 0.3, depth: 0.3 },
+  artwork: { width: 0.8, depth: 0.05 },
+}
+
+export const CABINET_DEFAULT_SIZES: Record<CabinetType, { width: number; depth: number; height: number }> = {
+  base: { width: 0.61, depth: 0.61, height: 0.91 },
+  upper: { width: 0.61, depth: 0.30, height: 0.76 },
+  tall: { width: 0.61, depth: 0.61, height: 2.13 },
+  corner_base: { width: 0.61, depth: 0.61, height: 0.91 },
+  corner_upper: { width: 0.61, depth: 0.30, height: 0.76 },
+  corner_tall: { width: 0.61, depth: 0.61, height: 2.13 },
+  sink_base: { width: 0.61, depth: 0.61, height: 0.91 },
+  lazy_susan: { width: 0.91, depth: 0.91, height: 0.91 },
+  blind_corner: { width: 0.46, depth: 0.61, height: 0.91 },
+  pantry: { width: 0.61, depth: 0.61, height: 2.13 },
+  drawer_base: { width: 0.61, depth: 0.61, height: 0.91 },
+  appliance_garage: { width: 0.46, depth: 0.30, height: 0.46 },
 }
 
 export interface WallData {
@@ -91,6 +114,16 @@ interface BimState {
   defaultPlumbingRotation: number
   defaultElectricalType: ElectricalSymbolType
   defaultElectricalRotation: number
+  defaultCabinetType: CabinetType
+  defaultCabinetRotation: number
+  defaultCabinetDoorCount: number
+  defaultCabinetDrawerCount: number
+  defaultHvacType: HvacSymbolType
+  defaultHvacRotation: number
+  defaultFireSafetyType: FireSafetySymbolType
+  defaultFireSafetyRotation: number
+  defaultAccessibilityType: AccessibilitySymbolType
+  defaultAccessibilityRotation: number
   autoExtrudeSketch: boolean
   sketchExtrudeMode: SketchExtrudeMode
   setDefaultFurnitureType: (type: FurnitureSymbolType) => void
@@ -99,6 +132,16 @@ interface BimState {
   setDefaultPlumbingRotation: (rotation: number) => void
   setDefaultElectricalType: (type: ElectricalSymbolType) => void
   setDefaultElectricalRotation: (rotation: number) => void
+  setDefaultCabinetType: (type: CabinetType) => void
+  setDefaultCabinetRotation: (rotation: number) => void
+  setDefaultCabinetDoorCount: (count: number) => void
+  setDefaultCabinetDrawerCount: (count: number) => void
+  setDefaultHvacType: (type: HvacSymbolType) => void
+  setDefaultHvacRotation: (rotation: number) => void
+  setDefaultFireSafetyType: (type: FireSafetySymbolType) => void
+  setDefaultFireSafetyRotation: (rotation: number) => void
+  setDefaultAccessibilityType: (type: AccessibilitySymbolType) => void
+  setDefaultAccessibilityRotation: (rotation: number) => void
   addWall: (wall: WallData) => void
   updateWall: (id: string, patch: Partial<Omit<WallData, 'id'>>) => void
   removeWall: (id: string) => void
@@ -177,6 +220,16 @@ export const useBimStore = create<BimState>()(
       defaultPlumbingRotation: 0,
       defaultElectricalType: 'outlet',
       defaultElectricalRotation: 0,
+      defaultCabinetType: 'base',
+      defaultCabinetRotation: 0,
+      defaultCabinetDoorCount: 2,
+      defaultCabinetDrawerCount: 0,
+      defaultHvacType: 'supply_vent',
+      defaultHvacRotation: 0,
+      defaultFireSafetyType: 'fire_extinguisher',
+      defaultFireSafetyRotation: 0,
+      defaultAccessibilityType: 'wheelchair',
+      defaultAccessibilityRotation: 0,
       autoExtrudeSketch: false,
       sketchExtrudeMode: 'walls',
       setDefaultFurnitureType: (type) => set({ defaultFurnitureType: type }),
@@ -185,6 +238,16 @@ export const useBimStore = create<BimState>()(
       setDefaultPlumbingRotation: (rotation) => set({ defaultPlumbingRotation: ((rotation % 360) + 360) % 360 }),
       setDefaultElectricalType: (type) => set({ defaultElectricalType: type }),
       setDefaultElectricalRotation: (rotation) => set({ defaultElectricalRotation: ((rotation % 360) + 360) % 360 }),
+      setDefaultCabinetType: (type) => set({ defaultCabinetType: type }),
+      setDefaultCabinetRotation: (rotation) => set({ defaultCabinetRotation: ((rotation % 360) + 360) % 360 }),
+      setDefaultCabinetDoorCount: (count) => set({ defaultCabinetDoorCount: Math.max(0, Math.round(count)) }),
+      setDefaultCabinetDrawerCount: (count) => set({ defaultCabinetDrawerCount: Math.max(0, Math.round(count)) }),
+      setDefaultHvacType: (type) => set({ defaultHvacType: type }),
+      setDefaultHvacRotation: (rotation) => set({ defaultHvacRotation: ((rotation % 360) + 360) % 360 }),
+      setDefaultFireSafetyType: (type) => set({ defaultFireSafetyType: type }),
+      setDefaultFireSafetyRotation: (rotation) => set({ defaultFireSafetyRotation: ((rotation % 360) + 360) % 360 }),
+      setDefaultAccessibilityType: (type) => set({ defaultAccessibilityType: type }),
+      setDefaultAccessibilityRotation: (rotation) => set({ defaultAccessibilityRotation: ((rotation % 360) + 360) % 360 }),
       addWall: (wall) =>
         set((s) => {
           const walls = new Map(s.walls)
@@ -305,6 +368,16 @@ export const useBimStore = create<BimState>()(
         defaultPlumbingRotation: state.defaultPlumbingRotation,
         defaultElectricalType: state.defaultElectricalType,
         defaultElectricalRotation: state.defaultElectricalRotation,
+        defaultCabinetType: state.defaultCabinetType,
+        defaultCabinetRotation: state.defaultCabinetRotation,
+        defaultCabinetDoorCount: state.defaultCabinetDoorCount,
+        defaultCabinetDrawerCount: state.defaultCabinetDrawerCount,
+        defaultHvacType: state.defaultHvacType,
+        defaultHvacRotation: state.defaultHvacRotation,
+        defaultFireSafetyType: state.defaultFireSafetyType,
+        defaultFireSafetyRotation: state.defaultFireSafetyRotation,
+        defaultAccessibilityType: state.defaultAccessibilityType,
+        defaultAccessibilityRotation: state.defaultAccessibilityRotation,
         autoExtrudeSketch: state.autoExtrudeSketch,
         sketchExtrudeMode: state.sketchExtrudeMode,
       }),

@@ -95,6 +95,19 @@ export function generateAccessibilityPrimitives(
       break
     }
 
+    case 'ada_restroom': {
+      addRect(primitives, [x, y], rotation, 1.50, 1.50, 'primary')
+      addText(primitives, [x, y], rotation, 'ADA', 0.12)
+      addWheelchairSymbol(primitives, x, y, rotation, 0.5)
+      break
+    }
+
+    case 'hearing_loop': {
+      addCircle(primitives, [x, y], rotation, [0, 0], 0.15, 'primary')
+      addText(primitives, [x, y], rotation, 'HL', 0.08)
+      break
+    }
+
     default: {
       addCircle(primitives, [x, y], rotation, [0, 0], 0.15, spec.lineClass as 'primary')
       break

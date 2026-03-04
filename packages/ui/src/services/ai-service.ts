@@ -80,11 +80,15 @@ You can place electrical symbols (outlets, switches, light fixtures, panels, smo
 You can place plumbing fixtures (toilets, sinks, bathtubs, showers, water heaters, hose bibs) using place_plumbing.
 You can place furniture (desks, chairs, tables, beds, sofas, dining tables, bookshelves, wardrobes, kitchen islands, refrigerators, stoves, nightstands, coffee tables, TV consoles, console tables, benches, ottomans, vanities) using place_furniture.
 You can place site elements (property lines, setbacks, trees, parking spaces, sidewalks, driveways, compass, contour lines, fences) using place_site_element.
+You can place kitchen cabinets (base, upper, tall, corner, sink_base, lazy_susan, blind_corner, pantry, drawer_base, appliance_garage) using place_cabinet.
+You can place HVAC elements (supply_vent, return_vent, thermostat, exhaust_fan, ductwork, mini_split, air_handler, condensing_unit, damper, diffuser) using place_hvac.
+You can place fire safety elements (fire_extinguisher, sprinkler_head, exit_sign, pull_station, smoke_alarm, fire_alarm_panel, fire_hose_cabinet, annunciator) using place_fire_safety.
+You can place accessibility elements (wheelchair, ramp, grab_bar, accessible_parking, tactile_warning, ada_restroom, hearing_loop) using place_accessibility.
 Use connect_switch_to_fixture to draw switching diagram lines from a switch to the light fixture it controls.`
 
 const PLAN_MODE_ADDENDUM = `
 
-You are in PLAN MODE. Before calling any building tools (create_wall, create_floor, create_door, create_window, create_stair, create_roof, create_column, create_room, add_room, create_room_bundle, create_beam, create_foundation, create_level, create_dimension, create_text_annotation, place_electrical, place_plumbing, place_furniture, place_site_element), output a structured text plan that includes:
+You are in PLAN MODE. Before calling any building tools (create_wall, create_floor, create_door, create_window, create_stair, create_roof, create_column, create_room, add_room, create_room_bundle, create_beam, create_foundation, create_level, create_dimension, create_text_annotation, place_electrical, place_plumbing, place_furniture, place_site_element, place_cabinet, place_hvac, place_fire_safety, place_accessibility), output a structured text plan that includes:
 1) Summary
 2) TODO Task List (Markdown checklist using one item per line in this exact format: - [ ] Task)
 3) Geometry details (element types, approximate coordinates, dimensions)
@@ -691,6 +695,67 @@ const BIM_TOOLS_BASE: Anthropic.Tool[] = [
       required: ['switch_id', 'fixture_id'],
     },
   },
+  {
+    name: 'place_cabinet',
+    description: 'Place a kitchen cabinet element. Cabinet types: base, upper, tall, corner_base, corner_upper, corner_tall, sink_base, lazy_susan, blind_corner, pantry, drawer_base, appliance_garage',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        cabinet_type: { type: 'string', enum: ['base', 'upper', 'tall', 'corner_base', 'corner_upper', 'corner_tall', 'sink_base', 'lazy_susan', 'blind_corner', 'pantry', 'drawer_base', 'appliance_garage'] },
+        x: { type: 'number', description: 'X position in meters' },
+        y: { type: 'number', description: 'Y position in meters' },
+        width: { type: 'number', description: 'Width in meters (default: 0.61)' },
+        depth: { type: 'number', description: 'Depth in meters (default: 0.61)' },
+        height: { type: 'number', description: 'Height in meters (default: 0.91)' },
+        rotation: { type: 'number', description: 'Rotation in degrees (default: 0)' },
+        door_count: { type: 'number', description: 'Number of doors (default: 2)' },
+        drawer_count: { type: 'number', description: 'Number of drawers (default: 0)' },
+      },
+      required: ['cabinet_type', 'x', 'y'],
+    },
+  },
+  {
+    name: 'place_hvac',
+    description: 'Place an HVAC element. Types: supply_vent, return_vent, thermostat, exhaust_fan, ductwork, mini_split, air_handler, condensing_unit, damper, diffuser',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        symbol_type: { type: 'string' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        rotation: { type: 'number' },
+      },
+      required: ['symbol_type', 'x', 'y'],
+    },
+  },
+  {
+    name: 'place_fire_safety',
+    description: 'Place a fire safety element. Types: fire_extinguisher, sprinkler_head, exit_sign, pull_station, smoke_alarm, fire_alarm_panel, fire_hose_cabinet, annunciator',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        symbol_type: { type: 'string' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        rotation: { type: 'number' },
+      },
+      required: ['symbol_type', 'x', 'y'],
+    },
+  },
+  {
+    name: 'place_accessibility',
+    description: 'Place an accessibility element. Types: wheelchair, ramp, grab_bar, accessible_parking, tactile_warning, ada_restroom, hearing_loop',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        symbol_type: { type: 'string' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        rotation: { type: 'number' },
+      },
+      required: ['symbol_type', 'x', 'y'],
+    },
+  },
 ]
 
 const DOOR_TOOL: Anthropic.Tool = {
@@ -756,7 +821,7 @@ const DELETE_ELEMENTS_TOOL: Anthropic.Tool = {
       },
       kind: {
         type: 'string',
-        enum: ['wall', 'door', 'window', 'floor', 'roof', 'stair', 'column', 'beam', 'room', 'dimension', 'text_annotation', 'level', 'electrical', 'plumbing', 'furniture', 'site_detail'],
+        enum: ['wall', 'door', 'window', 'floor', 'roof', 'stair', 'column', 'beam', 'room', 'dimension', 'text_annotation', 'level', 'electrical', 'plumbing', 'furniture', 'site_detail', 'cabinet', 'hvac', 'fire_safety', 'accessibility'],
         description: 'Delete all elements of this kind',
       },
     },
@@ -3455,6 +3520,100 @@ async function executeTool(name: string, input: ToolInput, kernel: KernelBackend
       const id = await kernel.createElement(elDef)
       await syncEntitiesAndRegenerateMeshes(kernel)
       return JSON.stringify({ success: true, id, message: `Site element ${detail_type} placed` })
+    }
+
+    case 'place_cabinet': {
+      const cabinet_type = input.cabinet_type as string
+      const validCabinetTypes = ['base', 'upper', 'tall', 'corner_base', 'corner_upper', 'corner_tall', 'sink_base', 'lazy_susan', 'blind_corner', 'pantry', 'drawer_base', 'appliance_garage']
+      if (!validCabinetTypes.includes(cabinet_type)) {
+        throw new Error(`Invalid cabinet_type: expected one of ${validCabinetTypes.join(', ')}`)
+      }
+      const cabX = parseFiniteNumber(input.x, 'x')
+      const cabY = parseFiniteNumber(input.y, 'y')
+      const cabWidth = parseOptionalFiniteNumber(input.width, 0.61, 'width')
+      const cabDepth = parseOptionalFiniteNumber(input.depth, 0.61, 'depth')
+      const cabHeight = parseOptionalFiniteNumber(input.height, 0.91, 'height')
+      const cabRotation = parseOptionalFiniteNumber(input.rotation, 0, 'rotation')
+      const cabDoorCount = parseOptionalFiniteNumber(input.door_count, 2, 'door_count')
+      const cabDrawerCount = parseOptionalFiniteNumber(input.drawer_count, 0, 'drawer_count')
+      const cabLevelId = await resolveLevelId(input, kernel)
+      const cabId = await kernel.createElement({
+        kind: 'cabinet',
+        meta: { id: crypto.randomUUID(), name: `Cabinet (${cabinet_type})`, level_id: cabLevelId },
+        cabinet_type,
+        position: [cabX, cabY] as [number, number],
+        width: cabWidth,
+        depth: cabDepth,
+        height: cabHeight,
+        rotation: cabRotation,
+        door_count: cabDoorCount,
+        drawer_count: cabDrawerCount,
+      } as any)
+      await syncEntitiesAndRegenerateMeshes(kernel)
+      return JSON.stringify({ success: true, id: cabId, message: `Cabinet ${cabinet_type} (${cabWidth}m x ${cabDepth}m x ${cabHeight}m) placed at [${cabX}, ${cabY}]` })
+    }
+
+    case 'place_hvac': {
+      const hvacSymbolType = input.symbol_type as string
+      const validHvacTypes = ['supply_vent', 'return_vent', 'thermostat', 'exhaust_fan', 'ductwork', 'mini_split', 'air_handler', 'condensing_unit', 'damper', 'diffuser']
+      if (!validHvacTypes.includes(hvacSymbolType)) {
+        throw new Error(`Invalid symbol_type: expected one of ${validHvacTypes.join(', ')}`)
+      }
+      const hvacX = parseFiniteNumber(input.x, 'x')
+      const hvacY = parseFiniteNumber(input.y, 'y')
+      const hvacRotation = parseOptionalFiniteNumber(input.rotation, 0, 'rotation')
+      const hvacLevelId = await resolveLevelId(input, kernel)
+      const hvacId = await kernel.createElement({
+        kind: 'hvac',
+        meta: { id: crypto.randomUUID(), name: `HVAC (${hvacSymbolType})`, level_id: hvacLevelId },
+        symbol_type: hvacSymbolType,
+        position: [hvacX, hvacY] as [number, number],
+        rotation: hvacRotation,
+      } as any)
+      await syncEntitiesAndRegenerateMeshes(kernel)
+      return JSON.stringify({ success: true, id: hvacId, message: `HVAC ${hvacSymbolType} placed at [${hvacX}, ${hvacY}]` })
+    }
+
+    case 'place_fire_safety': {
+      const fireSymbolType = input.symbol_type as string
+      const validFireTypes = ['fire_extinguisher', 'sprinkler_head', 'exit_sign', 'pull_station', 'smoke_alarm', 'fire_alarm_panel', 'fire_hose_cabinet', 'annunciator']
+      if (!validFireTypes.includes(fireSymbolType)) {
+        throw new Error(`Invalid symbol_type: expected one of ${validFireTypes.join(', ')}`)
+      }
+      const fireX = parseFiniteNumber(input.x, 'x')
+      const fireY = parseFiniteNumber(input.y, 'y')
+      const fireRotation = parseOptionalFiniteNumber(input.rotation, 0, 'rotation')
+      const fireLevelId = await resolveLevelId(input, kernel)
+      const fireId = await kernel.createElement({
+        kind: 'fire_safety',
+        meta: { id: crypto.randomUUID(), name: `Fire Safety (${fireSymbolType})`, level_id: fireLevelId },
+        symbol_type: fireSymbolType,
+        position: [fireX, fireY] as [number, number],
+        rotation: fireRotation,
+      } as any)
+      await syncEntitiesAndRegenerateMeshes(kernel)
+      return JSON.stringify({ success: true, id: fireId, message: `Fire safety ${fireSymbolType} placed at [${fireX}, ${fireY}]` })
+    }
+
+    case 'place_accessibility': {
+      const accSymbolType = input.symbol_type as string
+      const validAccTypes = ['wheelchair', 'ramp', 'grab_bar', 'accessible_parking', 'tactile_warning', 'ada_restroom', 'hearing_loop']
+      if (!validAccTypes.includes(accSymbolType)) {
+        throw new Error(`Invalid symbol_type: expected one of ${validAccTypes.join(', ')}`)
+      }
+      const accX = parseFiniteNumber(input.x, 'x')
+      const accY = parseFiniteNumber(input.y, 'y')
+      const accRotation = parseOptionalFiniteNumber(input.rotation, 0, 'rotation')
+      const accLevelId = await resolveLevelId(input, kernel)
+      const accId = await kernel.createElement({
+        kind: 'accessibility',
+        meta: { id: crypto.randomUUID(), name: `Accessibility (${accSymbolType})`, level_id: accLevelId },
+        symbol_type: accSymbolType,
+        position: [accX, accY] as [number, number],
+        rotation: accRotation,
+      } as any)
+      await syncEntitiesAndRegenerateMeshes(kernel)
+      return JSON.stringify({ success: true, id: accId, message: `Accessibility ${accSymbolType} placed at [${accX}, ${accY}]` })
     }
 
     case 'connect_switch_to_fixture': {

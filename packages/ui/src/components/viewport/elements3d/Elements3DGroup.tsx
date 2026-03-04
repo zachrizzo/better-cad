@@ -8,6 +8,7 @@ import {
   isHvacElement,
   isFireSafetyElement,
   isAccessibilityElement,
+  isCabinetElement,
 } from '../../../stores/entity-store'
 import { useUIStore } from '../../../stores/ui-store'
 import { Primitive3DGroup } from './Primitive3DGroup'
@@ -27,7 +28,8 @@ function isNonStructuralElement(el: PrototypeElement): boolean {
     isElectricalElement(el) ||
     isHvacElement(el) ||
     isFireSafetyElement(el) ||
-    isAccessibilityElement(el)
+    isAccessibilityElement(el) ||
+    isCabinetElement(el)
   )
 }
 

@@ -214,6 +214,52 @@ export function generateElectricalPrimitives(
     case 'junction_box':
       addJunctionBox(primitives, center, rotation)
       break
+    case 'recessed_light': {
+      addCircle(primitives, center, rotation, [0, 0], 0.075, 'primary')
+      // Filled appearance: inner circle
+      addCircle(primitives, center, rotation, [0, 0], 0.04, 'secondary')
+      break
+    }
+    case 'wall_sconce': {
+      addArc(primitives, center, rotation, [0, 0], 0.10, Math.PI / 2, Math.PI * 1.5, 'primary')
+      addLine(primitives, center, rotation, [0, -0.10], [0, 0.10], 'primary')
+      break
+    }
+    case 'pendant_light': {
+      addCircle(primitives, center, rotation, [0, 0], 0.10, 'primary')
+      addLine(primitives, center, rotation, [0, 0.10], [0, 0.20], 'secondary')
+      break
+    }
+    case 'track_light': {
+      addRect(primitives, center, rotation, 0.40, 0.06, 'primary')
+      addCircle(primitives, center, rotation, [-0.12, 0], 0.02, 'secondary')
+      addCircle(primitives, center, rotation, [0, 0], 0.02, 'secondary')
+      addCircle(primitives, center, rotation, [0.12, 0], 0.02, 'secondary')
+      break
+    }
+    case 'outdoor_light': {
+      addCircle(primitives, center, rotation, [0, 0], 0.09, 'primary')
+      addText(primitives, center, rotation, 'WP', 0.05)
+      break
+    }
+    case 'data_outlet': {
+      // Triangle pointing down
+      const triPts: Point2[] = [[-0.07, 0.05], [0.07, 0.05], [0, -0.07]]
+      addLine(primitives, center, rotation, triPts[0], triPts[1], 'primary')
+      addLine(primitives, center, rotation, triPts[1], triPts[2], 'primary')
+      addLine(primitives, center, rotation, triPts[2], triPts[0], 'primary')
+      break
+    }
+    case 'timer_switch': {
+      addCircle(primitives, center, rotation, [0, 0], 0.07, 'primary')
+      addText(primitives, center, rotation, 'ST', 0.05)
+      break
+    }
+    case 'motion_sensor': {
+      addCircle(primitives, center, rotation, [0, 0], 0.07, 'primary')
+      addText(primitives, center, rotation, 'MS', 0.05)
+      break
+    }
     default:
       // Fallback: simple circle
       addCircle(primitives, center, rotation, [0, 0], 0.09, 'primary')
@@ -229,6 +275,7 @@ export function generateElectricalPrimitives(
   const hasBakedText = [
     'gfci_outlet', 'switch', 'three_way_switch', 'dimmer_switch',
     'ceiling_fan', 'smoke_detector', 'thermostat', 'junction_box',
+    'outdoor_light', 'timer_switch', 'motion_sensor',
   ].includes(element.symbol_type)
 
   if (tag && !hasBakedText && (options.showLabels || options.annotationDensity !== 'minimal')) {
@@ -263,6 +310,12 @@ function defaultTagForType(symbolType: ElectricalElement['symbol_type']): string
       return 'GFI'
     case 'floor_outlet':
       return 'FLR'
+    case 'outdoor_light':
+      return 'WP'
+    case 'timer_switch':
+      return 'ST'
+    case 'motion_sensor':
+      return 'MS'
     default:
       return null
   }

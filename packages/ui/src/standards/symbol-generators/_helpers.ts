@@ -25,6 +25,7 @@ export function addRect(
   depth: number,
   lineClass: LineClass,
   offset: Point2 = [0, 0],
+  dashed?: boolean,
 ): void {
   const [ox, oy] = offset
   const points = rectPoints(width, depth).map(([px, py]) => [px + ox, py + oy] as Point2)
@@ -33,6 +34,7 @@ export function addRect(
     points: transformPoints(points, center, rotation),
     closed: true,
     lineClass,
+    ...(dashed ? { dashed: true } : {}),
   })
 }
 
@@ -43,11 +45,13 @@ export function addLine(
   start: Point2,
   end: Point2,
   lineClass: LineClass,
+  dashed?: boolean,
 ): void {
   primitives.push({
     kind: 'polyline',
     points: transformPoints([start, end], center, rotation),
     lineClass,
+    ...(dashed ? { dashed: true } : {}),
   })
 }
 
@@ -58,12 +62,14 @@ export function addCircle(
   localCenter: Point2,
   radius: number,
   lineClass: LineClass,
+  dashed?: boolean,
 ): void {
   primitives.push({
     kind: 'circle',
     center: localToWorld(center, rotation, localCenter),
     radius,
     lineClass,
+    ...(dashed ? { dashed: true } : {}),
   })
 }
 
@@ -76,6 +82,7 @@ export function addArc(
   startAngle: number,
   endAngle: number,
   lineClass: LineClass,
+  dashed?: boolean,
 ): void {
   primitives.push({
     kind: 'arc',
@@ -84,6 +91,7 @@ export function addArc(
     startAngle: startAngle + rotation,
     endAngle: endAngle + rotation,
     lineClass,
+    ...(dashed ? { dashed: true } : {}),
   })
 }
 
@@ -111,12 +119,14 @@ export function addPolyline(
   localPoints: Point2[],
   lineClass: LineClass,
   closed?: boolean,
+  dashed?: boolean,
 ): void {
   primitives.push({
     kind: 'polyline',
     points: transformPoints(localPoints, center, rotation),
     closed,
     lineClass,
+    ...(dashed ? { dashed: true } : {}),
   })
 }
 

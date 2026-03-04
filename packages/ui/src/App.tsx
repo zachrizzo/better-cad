@@ -26,6 +26,7 @@ import { ElevationCamera } from './components/viewport/ElevationCamera'
 import { DimensionPlane, DimensionOverlay3D } from './components/viewport/DimensionPlane'
 import { TextAnnotationPlane, TextAnnotationOverlay3D } from './components/viewport/TextAnnotationPlane'
 import { FurniturePlane } from './components/viewport/FurniturePlane'
+import { CabinetPlane } from './components/viewport/CabinetPlane'
 import { MeasurePlane } from './components/tools/MeasureTool'
 import { SelectionGizmo } from './components/viewport/SelectionGizmo'
 import { Elements3DGroup } from './components/viewport/elements3d/Elements3DGroup'
@@ -90,6 +91,10 @@ const TOOL_OPTIONS = [
   { tool: 'furniture', label: 'Furniture', title: 'Furniture placement tool', shortcut: 'I' },
   { tool: 'plumbing', label: 'Plumbing', title: 'Plumbing fixture tool', shortcut: 'U' },
   { tool: 'electrical', label: 'Electrical', title: 'Electrical symbol tool', shortcut: 'E' },
+  { tool: 'cabinet', label: 'Cabinet', title: 'Kitchen cabinet tool', shortcut: 'J' },
+  { tool: 'hvac', label: 'HVAC', title: 'HVAC element tool', shortcut: 'V' },
+  { tool: 'fire_safety', label: 'Fire Safety', title: 'Fire safety element tool', shortcut: 'G' },
+  { tool: 'accessibility', label: 'Access.', title: 'Accessibility element tool', shortcut: 'Y' },
   { tool: 'measure', label: 'Measure', title: 'Measure tool', shortcut: 'M' },
   { tool: 'section', label: 'Section', title: 'Section cut tool', shortcut: '-' },
 ] as const
@@ -375,6 +380,7 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
       <DimensionPlane />
       <TextAnnotationPlane />
       <FurniturePlane />
+      <CabinetPlane />
       <DimensionOverlay3D />
       <TextAnnotationOverlay3D />
       <SelectionGizmo />

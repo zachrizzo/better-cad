@@ -258,7 +258,7 @@ interface ShortcutCallbacks {
   onToolSelect?: (tool: ToolType) => void
 }
 
-type ToolType = 'select' | 'foundation' | 'parking' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section' | 'furniture' | 'plumbing' | 'electrical'
+type ToolType = 'select' | 'foundation' | 'parking' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section' | 'furniture' | 'plumbing' | 'electrical' | 'cabinet' | 'hvac' | 'fire_safety' | 'accessibility'
 
 export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
   const setActiveTool = useUIStore((s) => s.setActiveTool)
@@ -326,7 +326,9 @@ export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
           break
         case 'g':
         case 'G':
-          if (!e.ctrlKey && !e.metaKey) useUIStore.getState().toggleGrid()
+          if (!e.ctrlKey && !e.metaKey) {
+            selectTool('fire_safety')
+          }
           break
         case 'm':
         case 'M':
@@ -406,6 +408,24 @@ export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
             selectTool('electrical')
           }
           break
+        case 'j':
+        case 'J':
+          if (!e.ctrlKey && !e.metaKey) {
+            selectTool('cabinet')
+          }
+          break
+        case 'v':
+        case 'V':
+          if (!e.ctrlKey && !e.metaKey) {
+            selectTool('hvac')
+          }
+          break
+        case 'y':
+        case 'Y':
+          if (!e.ctrlKey && !e.metaKey) {
+            selectTool('accessibility')
+          }
+          break
         case 'r':
         case 'R':
           if (!e.ctrlKey && !e.metaKey) {
@@ -416,6 +436,12 @@ export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
               useBimStore.getState().setDefaultPlumbingRotation(useBimStore.getState().defaultPlumbingRotation + 90)
             } else if (currentTool === 'electrical') {
               useBimStore.getState().setDefaultElectricalRotation(useBimStore.getState().defaultElectricalRotation + 90)
+            } else if (currentTool === 'hvac') {
+              useBimStore.getState().setDefaultHvacRotation(useBimStore.getState().defaultHvacRotation + 90)
+            } else if (currentTool === 'fire_safety') {
+              useBimStore.getState().setDefaultFireSafetyRotation(useBimStore.getState().defaultFireSafetyRotation + 90)
+            } else if (currentTool === 'accessibility') {
+              useBimStore.getState().setDefaultAccessibilityRotation(useBimStore.getState().defaultAccessibilityRotation + 90)
             } else {
               void rotateSelectedElement()
             }

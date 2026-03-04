@@ -67,7 +67,9 @@ export function drawSymbolPrimitivesPdf(
     const points = primitivePoints(primitive)
     if (points.length < 2) continue
 
+    const isDashed = 'dashed' in primitive && primitive.dashed === true
     doc.setLineWidth(PLAN_LINEWEIGHTS_MM[primitive.lineClass])
+    if (isDashed) doc.setLineDashPattern([2, 2], 0)
     for (let i = 0; i < points.length - 1; i += 1) {
       const a = points[i]
       const bpt = points[i + 1]
@@ -78,6 +80,7 @@ export function drawSymbolPrimitivesPdf(
         toPageY(bpt[1]),
       )
     }
+    if (isDashed) doc.setLineDashPattern([], 0)
   }
   doc.setDrawColor(0)
   doc.setTextColor(0)

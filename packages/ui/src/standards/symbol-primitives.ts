@@ -7,6 +7,7 @@ export interface PolylinePrimitive {
   points: Point2[]
   closed?: boolean
   lineClass: SymbolLineClass
+  dashed?: boolean
 }
 
 export interface CirclePrimitive {
@@ -14,6 +15,7 @@ export interface CirclePrimitive {
   center: Point2
   radius: number
   lineClass: SymbolLineClass
+  dashed?: boolean
 }
 
 export interface ArcPrimitive {
@@ -23,6 +25,7 @@ export interface ArcPrimitive {
   startAngle: number
   endAngle: number
   lineClass: SymbolLineClass
+  dashed?: boolean
 }
 
 export interface TextPrimitive {

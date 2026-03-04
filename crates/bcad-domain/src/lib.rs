@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const PROTOTYPE_FORMAT: &str = "bettercad-model-v5";
-pub const PROTOTYPE_VERSION: u32 = 5;
+pub const PROTOTYPE_FORMAT: &str = "bettercad-model-v6";
+pub const PROTOTYPE_VERSION: u32 = 6;
 
 pub const STANDARD_LAYERS: &[(&str, &str)] = &[
     ("A-WALL", "Walls"),
@@ -505,7 +505,7 @@ impl Default for HatchPattern {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElectricalElement {
     pub meta: ElementMeta,
-    pub symbol_type: ElectricalSymbolType,
+    pub symbol_type: String,
     pub position: [f64; 2],
     #[serde(default)]
     pub rotation: f64,
@@ -518,7 +518,7 @@ pub struct ElectricalElement {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlumbingElement {
     pub meta: ElementMeta,
-    pub symbol_type: PlumbingSymbolType,
+    pub symbol_type: String,
     pub position: [f64; 2],
     #[serde(default)]
     pub rotation: f64,
@@ -527,7 +527,7 @@ pub struct PlumbingElement {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FurnitureElement {
     pub meta: ElementMeta,
-    pub symbol_type: FurnitureSymbolType,
+    pub symbol_type: String,
     pub position: [f64; 2],
     #[serde(default)]
     pub rotation: f64,
@@ -536,6 +536,66 @@ pub struct FurnitureElement {
     #[serde(default = "default_furniture_depth")]
     pub depth: f64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HvacElement {
+    pub meta: ElementMeta,
+    pub symbol_type: String,
+    pub position: [f64; 2],
+    #[serde(default)]
+    pub rotation: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FireSafetyElement {
+    pub meta: ElementMeta,
+    pub symbol_type: String,
+    pub position: [f64; 2],
+    #[serde(default)]
+    pub rotation: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessibilityElement {
+    pub meta: ElementMeta,
+    pub symbol_type: String,
+    pub position: [f64; 2],
+    #[serde(default)]
+    pub rotation: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CabinetElement {
+    pub meta: ElementMeta,
+    pub cabinet_type: String,
+    pub position: [f64; 2],
+    #[serde(default)]
+    pub rotation: f64,
+    #[serde(default = "default_cabinet_width")]
+    pub width: f64,
+    #[serde(default = "default_cabinet_depth")]
+    pub depth: f64,
+    #[serde(default = "default_cabinet_height")]
+    pub height: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_id: Option<String>,
+    #[serde(default)]
+    pub door_count: u32,
+    #[serde(default)]
+    pub drawer_count: u32,
+}
+
+fn default_cabinet_width() -> f64 { 0.61 }
+fn default_cabinet_depth() -> f64 { 0.61 }
+fn default_cabinet_height() -> f64 { 0.91 }
 
 fn default_furniture_width() -> f64 { 0.6 }
 fn default_furniture_depth() -> f64 { 0.6 }
@@ -612,6 +672,10 @@ pub enum Element {
     LeaderAnnotation(LeaderAnnotationElement),
     Keynote(KeynoteElement),
     Tag(TagElement),
+    Hvac(HvacElement),
+    FireSafety(FireSafetyElement),
+    Accessibility(AccessibilityElement),
+    Cabinet(CabinetElement),
 }
 
 impl Element {
@@ -642,6 +706,10 @@ impl Element {
             Element::LeaderAnnotation(e) => &e.meta.id,
             Element::Keynote(e) => &e.meta.id,
             Element::Tag(e) => &e.meta.id,
+            Element::Hvac(e) => &e.meta.id,
+            Element::FireSafety(e) => &e.meta.id,
+            Element::Accessibility(e) => &e.meta.id,
+            Element::Cabinet(e) => &e.meta.id,
         }
     }
 
@@ -672,6 +740,10 @@ impl Element {
             Element::LeaderAnnotation(e) => &e.meta,
             Element::Keynote(e) => &e.meta,
             Element::Tag(e) => &e.meta,
+            Element::Hvac(e) => &e.meta,
+            Element::FireSafety(e) => &e.meta,
+            Element::Accessibility(e) => &e.meta,
+            Element::Cabinet(e) => &e.meta,
         }
     }
 
@@ -702,6 +774,10 @@ impl Element {
             Element::LeaderAnnotation(_) => "leader_annotation",
             Element::Keynote(_) => "keynote",
             Element::Tag(_) => "tag",
+            Element::Hvac(_) => "hvac",
+            Element::FireSafety(_) => "fire_safety",
+            Element::Accessibility(_) => "accessibility",
+            Element::Cabinet(_) => "cabinet",
         }
     }
 
@@ -721,6 +797,10 @@ impl Element {
                 | Element::Electrical(_)
                 | Element::Plumbing(_)
                 | Element::Furniture(_)
+                | Element::Hvac(_)
+                | Element::FireSafety(_)
+                | Element::Accessibility(_)
+                | Element::Cabinet(_)
         )
     }
 }
@@ -897,7 +977,8 @@ impl PrototypeState {
             | Element::Roof(_)
             | Element::Room(_) => 2,
             Element::Door(_) | Element::Window(_) => 3,
-            Element::Electrical(_) | Element::Plumbing(_) | Element::Furniture(_) | Element::SiteDetail(_) => 3,
+            Element::Electrical(_) | Element::Plumbing(_) | Element::Furniture(_) | Element::SiteDetail(_)
+            | Element::Hvac(_) | Element::FireSafety(_) | Element::Accessibility(_) | Element::Cabinet(_) => 3,
             Element::View(_) | Element::Sheet(_) | Element::Generic(_) => 4,
             Element::LeaderAnnotation(_) | Element::Keynote(_) | Element::Tag(_) => 5,
         });

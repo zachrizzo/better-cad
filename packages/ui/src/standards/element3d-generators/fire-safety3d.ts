@@ -175,6 +175,24 @@ const GENERATORS: Record<FireSafetySymbolType, FireSafetyGenerator> = {
       defaultHeight: 0.50,
     }
   },
+
+  fire_hose_cabinet() {
+    return {
+      primitives: [
+        { type: 'box', width: 0.6, height: 0.6, depth: 0.2, position: [0, 0.3, 0], material: 'fire_red' },
+      ],
+      defaultHeight: 0.60,
+    }
+  },
+
+  annunciator() {
+    return {
+      primitives: [
+        { type: 'box', width: 0.4, height: 0.4, depth: 0.1, position: [0, 1.30, 0], material: 'plastic_dark' },
+      ],
+      defaultHeight: 0.40,
+    }
+  },
 }
 
 export function generateFireSafety3D(symbolType: FireSafetySymbolType): Element3DSpec {
