@@ -14,8 +14,15 @@ import {
   useEntityStore,
 } from '../stores/entity-store'
 import type { PrototypeElement } from '../services/kernel-bridge'
+import type { MeasurementSnapMode } from '../utils/measurement-snap-settings'
 
 type Point2 = [number, number]
+type MutablePlanSnapCandidate = { point: Point2; modes: Set<MeasurementSnapMode> }
+
+export interface PlanSnapCandidate {
+  point: Point2
+  modes: MeasurementSnapMode[]
+}
 
 const SNAP_POINT_PRECISION = 0.01
 const EDGE_SAMPLE_SPACING = 0.25
@@ -28,6 +35,7 @@ let snapCache:
     elementsRef: Map<string, PrototypeElement>
     cadMeshesRef: Map<string, CadMeshData>
     levelsRef: Level[]
+    candidates: PlanSnapCandidate[]
     points: Point2[]
   }
   | null = null
@@ -36,21 +44,31 @@ function quantize(value: number): number {
   return Math.round(value / SNAP_POINT_PRECISION) * SNAP_POINT_PRECISION
 }
 
-function addSnapPoint(bucket: Map<string, Point2>, x: number, z: number): boolean {
+function addSnapCandidate(
+  bucket: Map<string, MutablePlanSnapCandidate>,
+  x: number,
+  z: number,
+  mode: MeasurementSnapMode,
+): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(z)) return false
   const qx = quantize(x)
   const qz = quantize(z)
   const key = `${qx}:${qz}`
-  if (!bucket.has(key)) {
-    bucket.set(key, [qx, qz])
+  const existing = bucket.get(key)
+  if (!existing) {
+    bucket.set(key, {
+      point: [qx, qz],
+      modes: new Set([mode]),
+    })
     return true
   }
+  existing.modes.add(mode)
   return false
 }
 
 function collectElementSnapPoints(
   elements: Iterable<PrototypeElement>,
-  bucket: Map<string, Point2>,
+  bucket: Map<string, MutablePlanSnapCandidate>,
   hiddenLevelIds: Set<string>,
 ) {
   for (const element of elements) {
@@ -58,38 +76,38 @@ function collectElementSnapPoints(
     if (levelId && hiddenLevelIds.has(levelId)) continue
 
     if (isWallElement(element)) {
-      addSnapPoint(bucket, element.start[0], element.start[1])
-      addSnapPoint(bucket, element.end[0], element.end[1])
+      addSnapCandidate(bucket, element.start[0], element.start[1], 'endpoint')
+      addSnapCandidate(bucket, element.end[0], element.end[1], 'endpoint')
       continue
     }
     if (isFloorElement(element) || isRoofElement(element) || isRoomElement(element)) {
       for (const [x, z] of element.boundary) {
-        addSnapPoint(bucket, x, z)
+        addSnapCandidate(bucket, x, z, 'endpoint')
       }
       continue
     }
     if (isStairElement(element)) {
-      addSnapPoint(bucket, element.start[0], element.start[1])
-      addSnapPoint(bucket, element.end[0], element.end[1])
+      addSnapCandidate(bucket, element.start[0], element.start[1], 'endpoint')
+      addSnapCandidate(bucket, element.end[0], element.end[1], 'endpoint')
       continue
     }
     if (isColumnElement(element)) {
-      addSnapPoint(bucket, element.center[0], element.center[1])
+      addSnapCandidate(bucket, element.center[0], element.center[1], 'center')
       continue
     }
     if (isBeamElement(element)) {
       // Beam XY in kernel maps to XZ in scene placement tools.
-      addSnapPoint(bucket, element.start[0], element.start[1])
-      addSnapPoint(bucket, element.end[0], element.end[1])
+      addSnapCandidate(bucket, element.start[0], element.start[1], 'endpoint')
+      addSnapCandidate(bucket, element.end[0], element.end[1], 'endpoint')
       continue
     }
     if (isDimensionElement(element)) {
-      addSnapPoint(bucket, element.p1[0], element.p1[1])
-      addSnapPoint(bucket, element.p2[0], element.p2[1])
+      addSnapCandidate(bucket, element.p1[0], element.p1[1], 'endpoint')
+      addSnapCandidate(bucket, element.p2[0], element.p2[1], 'endpoint')
       continue
     }
     if (isTextAnnotationElement(element)) {
-      addSnapPoint(bucket, element.position[0], element.position[1])
+      addSnapCandidate(bucket, element.position[0], element.position[1], 'nearest')
       continue
     }
   }
@@ -127,7 +145,7 @@ function collectUniqueMeshEdges(
 
 function collectMeshSnapPoints(
   meshes: Iterable<Pick<CadMeshData, 'positions' | 'indices'>>,
-  bucket: Map<string, Point2>,
+  bucket: Map<string, MutablePlanSnapCandidate>,
 ) {
   for (const mesh of meshes) {
     const vertexCount = Math.floor(mesh.positions.length / 3)
@@ -140,7 +158,7 @@ function collectMeshSnapPoints(
     for (let i = 0; i < vertexCount && pointsAdded < MAX_MESH_POINTS_PER_MESH; i += vertexStride) {
       const x = mesh.positions[i * 3]
       const z = mesh.positions[i * 3 + 2]
-      if (addSnapPoint(bucket, x, z)) {
+      if (addSnapCandidate(bucket, x, z, 'nearest')) {
         pointsAdded += 1
       }
     }
@@ -156,9 +174,9 @@ function collectMeshSnapPoints(
       const bx = mesh.positions[b * 3]
       const bz = mesh.positions[b * 3 + 2]
 
-      if (addSnapPoint(bucket, ax, az)) pointsAdded += 1
+      if (addSnapCandidate(bucket, ax, az, 'nearest')) pointsAdded += 1
       if (pointsAdded >= MAX_MESH_POINTS_PER_MESH) break
-      if (addSnapPoint(bucket, bx, bz)) pointsAdded += 1
+      if (addSnapCandidate(bucket, bx, bz, 'nearest')) pointsAdded += 1
       if (pointsAdded >= MAX_MESH_POINTS_PER_MESH) break
 
       const edgeLength2D = Math.hypot(bx - ax, bz - az)
@@ -169,7 +187,7 @@ function collectMeshSnapPoints(
         const t = s / (sampleCount + 1)
         const sx = ax + (bx - ax) * t
         const sz = az + (bz - az) * t
-        if (addSnapPoint(bucket, sx, sz)) {
+        if (addSnapCandidate(bucket, sx, sz, 'nearest')) {
           pointsAdded += 1
         }
       }
@@ -177,7 +195,7 @@ function collectMeshSnapPoints(
   }
 }
 
-export function usePlanSnapPoints(): Point2[] {
+export function usePlanSnapCandidates(): PlanSnapCandidate[] {
   const elements = useEntityStore((s) => s.elements)
   const cadMeshes = useDocumentStore((s) => s.cadMeshes)
   const levels = useLevelStore((s) => s.levels)
@@ -189,7 +207,7 @@ export function usePlanSnapPoints(): Point2[] {
       snapCache.cadMeshesRef === cadMeshes &&
       snapCache.levelsRef === levels
     ) {
-      return snapCache.points
+      return snapCache.candidates
     }
 
     const hiddenLevelIds = new Set(
@@ -198,7 +216,7 @@ export function usePlanSnapPoints(): Point2[] {
         .map((level) => level.id),
     )
 
-    const bucket = new Map<string, Point2>()
+    const bucket = new Map<string, MutablePlanSnapCandidate>()
     collectElementSnapPoints(elements.values(), bucket, hiddenLevelIds)
 
     const visibleMeshes: Array<Pick<CadMeshData, 'positions' | 'indices'>> = []
@@ -209,15 +227,25 @@ export function usePlanSnapPoints(): Point2[] {
     }
 
     collectMeshSnapPoints(visibleMeshes, bucket)
-    const points = Array.from(bucket.values())
+    const candidates = Array.from(bucket.values(), (candidate) => ({
+      point: candidate.point,
+      modes: Array.from(candidate.modes.values()),
+    }))
+    const points = candidates.map((candidate) => candidate.point)
     snapCache = {
       elementsRef: elements,
       cadMeshesRef: cadMeshes,
       levelsRef: levels,
+      candidates,
       points,
     }
-    return points
+    return candidates
   }, [elements, cadMeshes, levels])
+}
+
+export function usePlanSnapPoints(): Point2[] {
+  const candidates = usePlanSnapCandidates()
+  return useMemo(() => candidates.map((candidate) => candidate.point), [candidates])
 }
 
 export function snapPlanPoint(
@@ -243,6 +271,37 @@ export function snapPlanPoint(
 
   if (nearest && nearestDist <= threshold) {
     return { point: nearest, snapped: nearest }
+  }
+
+  return { point: raw, snapped: null }
+}
+
+export function snapPlanCandidate(
+  raw: Point2,
+  candidates: PlanSnapCandidate[],
+  enabledModes: MeasurementSnapMode[],
+  threshold: number,
+): { point: Point2; snapped: PlanSnapCandidate | null } {
+  if (enabledModes.length === 0 || candidates.length === 0) {
+    return { point: raw, snapped: null }
+  }
+
+  const enabledModeSet = new Set(enabledModes)
+  let nearest: PlanSnapCandidate | null = null
+  let nearestDist = Infinity
+
+  for (const candidate of candidates) {
+    if (!candidate.modes.some((mode) => enabledModeSet.has(mode))) continue
+
+    const d = Math.hypot(raw[0] - candidate.point[0], raw[1] - candidate.point[1])
+    if (d < nearestDist) {
+      nearestDist = d
+      nearest = candidate
+    }
+  }
+
+  if (nearest && nearestDist <= threshold) {
+    return { point: nearest.point, snapped: nearest }
   }
 
   return { point: raw, snapped: null }
