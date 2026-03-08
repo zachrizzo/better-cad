@@ -27,6 +27,7 @@ import { DimensionPlane, DimensionOverlay3D } from './components/viewport/Dimens
 import { TextAnnotationPlane, TextAnnotationOverlay3D } from './components/viewport/TextAnnotationPlane'
 import { FurniturePlane } from './components/viewport/FurniturePlane'
 import { CabinetPlane } from './components/viewport/CabinetPlane'
+import { Viewport3DInteractionLayer } from './components/viewport/Viewport3DInteractionLayer'
 import { MeasurePlane } from './components/tools/MeasureTool'
 import { SelectionGizmo } from './components/viewport/SelectionGizmo'
 import { Elements3DGroup } from './components/viewport/elements3d/Elements3DGroup'
@@ -126,6 +127,26 @@ type SaveFeedback = {
   id: number
   tone: 'info' | 'success' | 'error'
   message: string
+}
+
+function ViewportHint({
+  heading,
+  hint,
+  measurementReadout,
+}: {
+  heading: string
+  hint?: string | null
+  measurementReadout?: string | null
+}) {
+  if (!hint && !measurementReadout) return null
+
+  return (
+    <div className="viewport-hint">
+      <strong>{heading}</strong>
+      {hint && <span>{hint}</span>}
+      {measurementReadout && <span className="viewport-hint-metrics">{measurementReadout}</span>}
+    </div>
+  )
 }
 
 function HeaderMenu({ label, actions }: { label: string; actions: MenuAction[] }) {
@@ -364,6 +385,7 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
 
       {/* 3D parametric elements (furniture, plumbing, electrical, HVAC, fire safety, accessibility) */}
       <Elements3DGroup elementLevelInfo={elementLevelInfo} />
+      <Viewport3DInteractionLayer enabled={isSelectMode && activeView == null} planeY={activeSurfaceElevation} />
 
       <DrawingPlaneGuide />
       <WallPlane />
@@ -463,6 +485,7 @@ export default function App() {
   const measurementCursor = useMeasurementStore((s) => s.cursor)
   const toolReadout = useMeasurementStore((s) => s.toolReadout)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
+  const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const lightingPreset = useSettingsStore((s) => s.lightingPreset)
   const setLightingPreset = useSettingsStore((s) => s.setLightingPreset)
@@ -939,6 +962,8 @@ export default function App() {
   const splitDividerColor = theme === 'light' ? '#d0d0d0' : '#3a3a50'
   const drawingPlaneHint = viewMode !== '2d' ? getDrawingPlaneHint(activeTool) : null
   const isSketchMode = activeTool === 'sketch'
+  const drawingPlaneHeading = `Drawing Plane: ${activeLevel?.name ?? 'Ground'} (XZ), Y=${formatLength(activeSurfaceElevation, lengthUnit)}${slabOffset > 0 ? ' (on slab)' : ''}`
+  const planViewHeading = `Plan View: ${activeLevel?.name ?? 'Ground'} (XY), Elevation Y=${formatLength(activeSurfaceElevation, lengthUnit)}`
 
   const measurementReadout = useMemo(() => {
     const cursorText = measurementCursor
@@ -947,6 +972,10 @@ export default function App() {
     if (cursorText && toolReadout) return `${cursorText} • ${toolReadout}`
     return cursorText ?? toolReadout
   }, [lengthUnit, measurementCursor, toolReadout])
+
+  useEffect(() => {
+    setMeasurementCursor(null)
+  }, [setMeasurementCursor, viewMode])
 
   const suppressViewportContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -1188,11 +1217,19 @@ export default function App() {
         {viewMode === '2d' ? (
           <div className="viewport" onContextMenu={suppressViewportContextMenu}>
             <Viewport2D background={viewportBackground} />
+            <ViewportHint
+              heading={planViewHeading}
+              measurementReadout={measurementReadout}
+            />
           </div>
         ) : viewMode === 'split' ? (
           <>
             <div className="viewport" style={{ flex: 1 }} onContextMenu={suppressViewportContextMenu}>
               <Viewport2D background={viewportBackground} />
+              <ViewportHint
+                heading={planViewHeading}
+                measurementReadout={measurementReadout}
+              />
             </div>
             <div
               className="viewport"
@@ -1217,16 +1254,11 @@ export default function App() {
                   onHoverBody={setHoveredBodyId}
                 />
               </Canvas>
-              {drawingPlaneHint && (
-                <div className="viewport-hint">
-                  <strong>
-                    Drawing Plane: {activeLevel?.name ?? 'Ground'} (XZ), Y={formatLength(activeSurfaceElevation, lengthUnit)}
-                    {slabOffset > 0 ? ' (on slab)' : ''}
-                  </strong>
-                  <span>{drawingPlaneHint}</span>
-                  {measurementReadout && <span className="viewport-hint-metrics">{measurementReadout}</span>}
-                </div>
-              )}
+              <ViewportHint
+                heading={drawingPlaneHeading}
+                hint={drawingPlaneHint}
+                measurementReadout={measurementReadout}
+              />
             </div>
           </>
         ) : (
@@ -1249,16 +1281,11 @@ export default function App() {
                 onHoverBody={setHoveredBodyId}
               />
             </Canvas>
-            {drawingPlaneHint && (
-              <div className="viewport-hint">
-                <strong>
-                  Drawing Plane: {activeLevel?.name ?? 'Ground'} (XZ), Y={formatLength(activeSurfaceElevation, lengthUnit)}
-                  {slabOffset > 0 ? ' (on slab)' : ''}
-                </strong>
-                <span>{drawingPlaneHint}</span>
-                {measurementReadout && <span className="viewport-hint-metrics">{measurementReadout}</span>}
-              </div>
-            )}
+            <ViewportHint
+              heading={drawingPlaneHeading}
+              hint={drawingPlaneHint}
+              measurementReadout={measurementReadout}
+            />
           </div>
         )}
         <div
