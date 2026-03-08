@@ -16,8 +16,10 @@ import {
 } from '../../stores/entity-store'
 import type { BeamElement, ColumnElement, DimensionElement, FloorElement, PrototypeElement, RoofElement, RoomElement, StairElement, TextAnnotationElement, WallElement } from '../../services/kernel-bridge'
 import { useLevelStore } from '../../stores/level-store'
+import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { useUIStore } from '../../stores/ui-store'
+import { intersectPointerWithPlan } from '../../utils/intersect-pointer-with-plan'
 import { formatLength } from '../../utils/units'
 import { buildVisibleWallOutlineLines } from '../../utils/wall-outline'
 import { polygonCentroid } from '../../services/room-detection'
@@ -570,6 +572,58 @@ function Viewport2DScreenshotSync() {
   return null
 }
 
+function Viewport2DInteractionLayer() {
+  const { gl, camera } = useThree()
+  const activeLevelId = useLevelStore((s) => s.activeLevelId)
+  const levels = useLevelStore((s) => s.levels)
+  const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
+  const activeLevelElevation = useMemo(() => {
+    const level = levels.find((candidate) => candidate.id === activeLevelId)
+    return level?.elevation ?? 0
+  }, [levels, activeLevelId])
+
+  useEffect(() => {
+    const canvas = gl.domElement
+
+    const clearCursor = () => {
+      setMeasurementCursor(null)
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) {
+        clearCursor()
+        return
+      }
+
+      const ndc = {
+        x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        y: 1 - ((event.clientY - rect.top) / rect.height) * 2,
+      }
+      const point = intersectPointerWithPlan(camera, ndc)
+
+      if (!point) {
+        clearCursor()
+        return
+      }
+
+      setMeasurementCursor([point[0], activeLevelElevation, point[1]])
+    }
+
+    canvas.addEventListener('pointermove', handlePointerMove)
+    canvas.addEventListener('pointerleave', clearCursor)
+    canvas.addEventListener('pointercancel', clearCursor)
+    return () => {
+      clearCursor()
+      canvas.removeEventListener('pointermove', handlePointerMove)
+      canvas.removeEventListener('pointerleave', clearCursor)
+      canvas.removeEventListener('pointercancel', clearCursor)
+    }
+  }, [activeLevelElevation, camera, gl, setMeasurementCursor])
+
+  return null
+}
+
 export function Viewport2D({ background }: Viewport2DProps) {
   const activeTool = useUIStore((s) => s.activeTool)
   const selectBody = useUIStore((s) => s.selectBody)
@@ -593,6 +647,7 @@ export function Viewport2D({ background }: Viewport2DProps) {
       <color attach="background" args={[background]} />
       <PlanLines />
       <MapControls enableRotate={false} screenSpacePanning makeDefault />
+      <Viewport2DInteractionLayer />
       <Viewport2DScreenshotSync />
     </Canvas>
   )
