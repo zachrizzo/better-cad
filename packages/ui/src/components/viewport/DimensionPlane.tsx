@@ -7,11 +7,12 @@ import { useKernel } from '../../hooks/useKernel'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { formatLength } from '../../utils/units'
-import { usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
+import { snapPlanCandidate, type PlanSnapCandidate, usePlanSnapCandidates } from '../../hooks/usePlanSnapPoints'
 import { isWallElement, isDimensionElement, useEntityStore } from '../../stores/entity-store'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { useLevelStore } from '../../stores/level-store'
 import type { DimensionElement, WallElement } from '../../services/kernel-bridge'
+import { getEnabledMeasurementSnapModes } from '../../utils/measurement-snap-settings'
 
 const SNAP_DISTANCE = 0.2
 const DEFAULT_OFFSET = 0.5
@@ -26,6 +27,7 @@ export function DimensionPlane() {
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const elements = useEntityStore((s) => s.elements)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
+  const dimensionSnapModeSettings = useSettingsStore((s) => s.measurementSnapSettings.dimension)
   const activeLevelId = useLevelStore((s) => s.activeLevelId)
   const levels = useLevelStore((s) => s.levels)
   const activeLevelElevation = useMemo(() => {
@@ -42,36 +44,28 @@ export function DimensionPlane() {
     () => Array.from(elements.values()).filter(isWallElement),
     [elements],
   )
-  const planSnapPoints = usePlanSnapPoints()
+  const planSnapCandidates = usePlanSnapCandidates()
+  const enabledSnapModes = useMemo(
+    () => getEnabledMeasurementSnapModes(dimensionSnapModeSettings, snapEnabled),
+    [dimensionSnapModeSettings, snapEnabled],
+  )
 
   // Snap points: wall endpoints, door/window edges
-  const snapPoints = useMemo<Point2[]>(() => {
-    const points: Point2[] = []
-    wallElements.forEach((wall: WallElement) => {
-      points.push(wall.start, wall.end)
-    })
-    points.push(...planSnapPoints)
-    return points
-  }, [wallElements, planSnapPoints])
+  const snapCandidates = useMemo<PlanSnapCandidate[]>(() => {
+    const wallCandidates = wallElements.flatMap<PlanSnapCandidate>((wall: WallElement) => [
+      { point: wall.start, modes: ['endpoint'] },
+      { point: wall.end, modes: ['endpoint'] },
+    ])
+    return [...wallCandidates, ...planSnapCandidates]
+  }, [planSnapCandidates, wallElements])
 
   const snapToNearest = useCallback((raw: Point2): { point: Point2; snapped: Point2 | null } => {
-    if (!snapEnabled) {
-      return { point: raw, snapped: null }
+    const { point, snapped } = snapPlanCandidate(raw, snapCandidates, enabledSnapModes, SNAP_DISTANCE)
+    return {
+      point,
+      snapped: snapped?.point ?? null,
     }
-    let nearest: Point2 | null = null
-    let nearestDist = Infinity
-    for (const sp of snapPoints) {
-      const d = Math.hypot(raw[0] - sp[0], raw[1] - sp[1])
-      if (d < nearestDist) {
-        nearestDist = d
-        nearest = sp
-      }
-    }
-    if (nearest && nearestDist <= SNAP_DISTANCE) {
-      return { point: nearest, snapped: nearest }
-    }
-    return { point: raw, snapped: null }
-  }, [snapPoints, snapEnabled])
+  }, [enabledSnapModes, snapCandidates])
 
   useEffect(() => {
     if (activeTool !== 'dimension') {

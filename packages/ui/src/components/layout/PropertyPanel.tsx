@@ -9,12 +9,19 @@ import type { FurnitureSymbolType, PlumbingSymbolType, ElectricalSymbolType } fr
 import { LENGTH_UNITS, metersToUnitValue, type LengthUnit, unitValueToMeters } from '../../utils/units'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { LevelManager } from '../panels/LevelManager'
+import {
+  getEnabledMeasurementSnapModes,
+  isMeasurementSnapTool,
+  MEASUREMENT_SNAP_MODE_LABELS,
+  MEASUREMENT_SNAP_MODES,
+} from '../../utils/measurement-snap-settings'
 
 const MIN_VALUE = 0.01
 
 export function PropertyPanel() {
   const selectedBodyId = useUIStore((s) => s.selectedBodyId)
   const activeTool = useUIStore((s) => s.activeTool)
+  const snapEnabled = useUIStore((s) => s.snapEnabled)
   const planSymbolProfile = useUIStore((s) => s.planSymbolProfile)
   const annotationDensity = useUIStore((s) => s.annotationDensity)
   const showFurnitureLabels = useUIStore((s) => s.showFurnitureLabels)
@@ -24,6 +31,8 @@ export function PropertyPanel() {
   const setShowFurnitureLabels = useUIStore((s) => s.setShowFurnitureLabels)
   const setShowMepText = useUIStore((s) => s.setShowMepText)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
+  const measurementSnapSettings = useSettingsStore((s) => s.measurementSnapSettings)
+  const setMeasurementSnapMode = useSettingsStore((s) => s.setMeasurementSnapMode)
   const setLengthUnit = useSettingsStore((s) => s.setLengthUnit)
 
   const defaultWallHeight = useBimStore((s) => s.defaultWallHeight)
@@ -136,6 +145,15 @@ export function PropertyPanel() {
   const showFurnitureDefaults = activeTool === 'furniture'
   const showPlumbingDefaults = activeTool === 'plumbing'
   const showElectricalDefaults = activeTool === 'electrical'
+  const measurementSnapTool = isMeasurementSnapTool(activeTool) ? activeTool : null
+  const showMeasurementSnapSettings = measurementSnapTool !== null
+  const activeMeasurementSnapSettings = measurementSnapTool ? measurementSnapSettings[measurementSnapTool] : null
+  const enabledMeasurementSnapModeLabels = useMemo(
+    () => activeMeasurementSnapSettings
+      ? getEnabledMeasurementSnapModes(activeMeasurementSnapSettings).map((mode) => MEASUREMENT_SNAP_MODE_LABELS[mode])
+      : [],
+    [activeMeasurementSnapSettings],
+  )
   const showAnyToolDefaults = (
     showWallDefaults ||
     showDoorDefaults ||
@@ -779,7 +797,34 @@ export function PropertyPanel() {
         </>
       )}
 
-      {!showAnyToolDefaults && (
+      {showMeasurementSnapSettings && activeMeasurementSnapSettings && measurementSnapTool && (
+        <>
+          <div className="property-panel-title" style={{ marginTop: 14 }}>
+            Snap Modes
+          </div>
+          <div className="property-panel-meta">
+            Shared {measurementSnapTool} snap settings for 2D and 3D workflows.
+            <br />
+            Global Snap: {snapEnabled ? 'ON' : 'OFF'}
+            <br />
+            Active modes: {snapEnabled
+              ? (enabledMeasurementSnapModeLabels.length > 0 ? enabledMeasurementSnapModeLabels.join(', ') : 'None')
+              : 'Disabled by global Snap toggle'}
+          </div>
+          {MEASUREMENT_SNAP_MODES.map((mode) => (
+            <div className="property-row" key={`${measurementSnapTool}-${mode}`}>
+              <label className="property-label">{MEASUREMENT_SNAP_MODE_LABELS[mode]}</label>
+              <input
+                type="checkbox"
+                checked={activeMeasurementSnapSettings[mode]}
+                onChange={(e) => setMeasurementSnapMode(measurementSnapTool, mode, e.target.checked)}
+              />
+            </div>
+          ))}
+        </>
+      )}
+
+      {!showAnyToolDefaults && !showMeasurementSnapSettings && (
         <div className="property-panel-meta">No tool defaults for {activeTool}.</div>
       )}
 

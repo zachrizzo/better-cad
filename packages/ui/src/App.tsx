@@ -67,6 +67,11 @@ import type { TessellatedMesh, WallElement } from './services/kernel-bridge'
 import { downloadArrayBufferAsFile } from './utils/file-download'
 import { linearArray, polarArray, isArrayableElement } from './services/array-tools'
 import { setOpenArrayDialogCallback } from './hooks/useKeyboardShortcuts'
+import {
+  getEnabledMeasurementSnapModes,
+  isMeasurementSnapTool,
+  MEASUREMENT_SNAP_MODE_LABELS,
+} from './utils/measurement-snap-settings'
 import './App.css'
 
 // Lazy-load ChatPanel + @anthropic-ai/sdk so they don't run during initial app render
@@ -488,6 +493,7 @@ export default function App() {
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
   const lightingPreset = useSettingsStore((s) => s.lightingPreset)
+  const measurementSnapSettings = useSettingsStore((s) => s.measurementSnapSettings)
   const setLightingPreset = useSettingsStore((s) => s.setLightingPreset)
   const wallsVisible = useSettingsStore((s) => s.wallsVisible)
   const toggleWallsVisible = useSettingsStore((s) => s.toggleWallsVisible)
@@ -964,6 +970,14 @@ export default function App() {
   const isSketchMode = activeTool === 'sketch'
   const drawingPlaneHeading = `Drawing Plane: ${activeLevel?.name ?? 'Ground'} (XZ), Y=${formatLength(activeSurfaceElevation, lengthUnit)}${slabOffset > 0 ? ' (on slab)' : ''}`
   const planViewHeading = `Plan View: ${activeLevel?.name ?? 'Ground'} (XY), Elevation Y=${formatLength(activeSurfaceElevation, lengthUnit)}`
+  const measurementSnapModeText = useMemo(() => {
+    if (!isMeasurementSnapTool(activeTool)) return null
+    const enabledModes = getEnabledMeasurementSnapModes(measurementSnapSettings[activeTool], snapEnabled)
+    if (enabledModes.length === 0) {
+      return snapEnabled ? 'Snap Modes: None' : 'Snap Modes: Off'
+    }
+    return `Snap Modes: ${enabledModes.map((mode) => MEASUREMENT_SNAP_MODE_LABELS[mode]).join(', ')}`
+  }, [activeTool, measurementSnapSettings, snapEnabled])
 
   const measurementReadout = useMemo(() => {
     const cursorText = measurementCursor
@@ -1415,6 +1429,7 @@ export default function App() {
           {roofElements.length > 0 && <span>Roofs: {roofElements.length}</span>}
           {roomElements.length > 0 && <span>Rooms: {roomElements.length}</span>}
           {selectedBodyId && <span>Selected: {selectedBodyId} (Del remove | Ctrl+D copy | Ctrl+Shift+D array | R rotate | drag gizmo to move)</span>}
+          {measurementSnapModeText && <span>{measurementSnapModeText}</span>}
           {activeTool === 'measure' && <span>Click two points to measure</span>}
           {activeTool === 'foundation' && <span>Place a foundation slab first; other structural tools require support.</span>}
           {activeTool === 'door' && <span>Hover a wall, preview snap, then click to place door - swing:{defaultDoorSwing}</span>}

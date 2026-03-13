@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { LengthUnit } from '../utils/units'
+import {
+  cloneMeasurementSnapSettings,
+  DEFAULT_MEASUREMENT_SNAP_SETTINGS,
+  type MeasurementSnapMode,
+  type MeasurementSnapSettings,
+  type MeasurementSnapTool,
+  updateMeasurementSnapMode,
+} from '../utils/measurement-snap-settings'
 
 export type LightingPreset = 'daylight' | 'evening' | 'studio'
 
@@ -67,9 +75,11 @@ export const LIGHTING_PRESETS: Record<LightingPreset, LightingPresetConfig> = {
 interface SettingsState {
   lengthUnit: LengthUnit
   lightingPreset: LightingPreset
+  measurementSnapSettings: MeasurementSnapSettings
   wallsVisible: boolean
   setLengthUnit: (unit: LengthUnit) => void
   setLightingPreset: (preset: LightingPreset) => void
+  setMeasurementSnapMode: (tool: MeasurementSnapTool, mode: MeasurementSnapMode, enabled: boolean) => void
   toggleWallsVisible: () => void
 }
 
@@ -78,9 +88,13 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       lengthUnit: 'm',
       lightingPreset: 'daylight',
+      measurementSnapSettings: cloneMeasurementSnapSettings(DEFAULT_MEASUREMENT_SNAP_SETTINGS),
       wallsVisible: true,
       setLengthUnit: (lengthUnit) => set({ lengthUnit }),
       setLightingPreset: (lightingPreset) => set({ lightingPreset }),
+      setMeasurementSnapMode: (tool, mode, enabled) => set((state) => ({
+        measurementSnapSettings: updateMeasurementSnapMode(state.measurementSnapSettings, tool, mode, enabled),
+      })),
       toggleWallsVisible: () => set((state) => ({ wallsVisible: !state.wallsVisible })),
     }),
     {
@@ -88,6 +102,7 @@ export const useSettingsStore = create<SettingsState>()(
       partialize: (state) => ({
         lengthUnit: state.lengthUnit,
         lightingPreset: state.lightingPreset,
+        measurementSnapSettings: state.measurementSnapSettings,
         wallsVisible: state.wallsVisible,
       }),
     },

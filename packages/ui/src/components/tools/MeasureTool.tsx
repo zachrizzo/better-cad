@@ -1,11 +1,12 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { Line, Html } from '@react-three/drei'
 import { useUIStore } from '../../stores/ui-store'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
-import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
+import { snapPlanCandidate, usePlanSnapCandidates } from '../../hooks/usePlanSnapPoints'
 import { useActiveDrawingSurface } from '../../hooks/useActiveDrawingSurface'
+import { getEnabledMeasurementSnapModes } from '../../utils/measurement-snap-settings'
 import { formatLength } from '../../utils/units'
 
 // Measure tool state: two points clicked, shows distance
@@ -46,15 +47,20 @@ export function MeasurePlane() {
   const activeTool = useUIStore((s) => s.activeTool)
   const snapEnabled = useUIStore((s) => s.snapEnabled)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
+  const measurementSnapModeSettings = useSettingsStore((s) => s.measurementSnapSettings.measure)
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
-  const snapPoints = usePlanSnapPoints()
+  const snapCandidates = usePlanSnapCandidates()
   const { activeSurfaceElevation } = useActiveDrawingSurface()
   const planeRef = useRef<THREE.Mesh>(null)
   const [pt1, setPt1] = useState<[number, number, number] | null>(null)
   const [pt2, setPt2] = useState<[number, number, number] | null>(null)
   const [cursorPos, setCursorPos] = useState<[number, number, number] | null>(null)
   const [snapMarker, setSnapMarker] = useState<[number, number] | null>(null)
+  const enabledSnapModes = useMemo(
+    () => getEnabledMeasurementSnapModes(measurementSnapModeSettings, snapEnabled),
+    [measurementSnapModeSettings, snapEnabled],
+  )
 
   useEffect(() => {
     if (activeTool !== 'measure') {
@@ -65,10 +71,10 @@ export function MeasurePlane() {
   }, [activeTool, setMeasurementCursor, setToolReadout])
 
   const applySnap = useCallback((point: [number, number, number]): [number, number, number] => {
-    const { point: snappedPoint, snapped } = snapPlanPoint([point[0], point[2]], snapPoints, snapEnabled, 0.3)
-    setSnapMarker(snapped)
+    const { point: snappedPoint, snapped } = snapPlanCandidate([point[0], point[2]], snapCandidates, enabledSnapModes, 0.3)
+    setSnapMarker(snapped?.point ?? null)
     return [snappedPoint[0], activeSurfaceElevation, snappedPoint[1]]
-  }, [activeSurfaceElevation, snapEnabled, snapPoints])
+  }, [activeSurfaceElevation, enabledSnapModes, snapCandidates])
 
   const handleClick = (e: { point?: THREE.Vector3 }) => {
     if (activeTool !== 'measure') return
