@@ -489,6 +489,7 @@ export default function App() {
   const setMaterials = useMaterialStore((s) => s.setMaterials)
   const measurementCursor = useMeasurementStore((s) => s.cursor)
   const toolReadout = useMeasurementStore((s) => s.toolReadout)
+  const clearMeasurement = useMeasurementStore((s) => s.clear)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
@@ -988,8 +989,8 @@ export default function App() {
   }, [lengthUnit, measurementCursor, toolReadout])
 
   useEffect(() => {
-    setMeasurementCursor(null)
-  }, [setMeasurementCursor, viewMode])
+    clearMeasurement()
+  }, [clearMeasurement, viewMode])
 
   const suppressViewportContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
