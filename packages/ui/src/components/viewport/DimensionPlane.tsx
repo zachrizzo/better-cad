@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
-import { Line, Text } from '@react-three/drei'
+import { Line, Text, Html } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import { useUIStore } from '../../stores/ui-store'
 import { useKernel } from '../../hooks/useKernel'
@@ -12,7 +12,7 @@ import { isWallElement, isDimensionElement, useEntityStore } from '../../stores/
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { useLevelStore } from '../../stores/level-store'
 import type { DimensionElement, WallElement } from '../../services/kernel-bridge'
-import { getEnabledMeasurementSnapModes } from '../../utils/measurement-snap-settings'
+import { getEnabledMeasurementSnapModes, MEASUREMENT_SNAP_MODE_LABELS } from '../../utils/measurement-snap-settings'
 
 const SNAP_DISTANCE = 0.2
 const DEFAULT_OFFSET = 0.5
@@ -39,6 +39,7 @@ export function DimensionPlane() {
   const [p1, setP1] = useState<Point2 | null>(null)
   const [cursorPoint, setCursorPoint] = useState<Point2 | null>(null)
   const [snapMarker, setSnapMarker] = useState<Point2 | null>(null)
+  const [snappedCandidate, setSnappedCandidate] = useState<PlanSnapCandidate | null>(null)
 
   const wallElements = useMemo(
     () => Array.from(elements.values()).filter(isWallElement),
@@ -61,6 +62,7 @@ export function DimensionPlane() {
 
   const snapToNearest = useCallback((raw: Point2): { point: Point2; snapped: Point2 | null } => {
     const { point, snapped } = snapPlanCandidate(raw, snapCandidates, enabledSnapModes, SNAP_DISTANCE)
+    setSnappedCandidate(snapped)
     return {
       point,
       snapped: snapped?.point ?? null,
@@ -194,6 +196,13 @@ export function DimensionPlane() {
           <ringGeometry args={[0.1, 0.14, 20]} />
           <meshBasicMaterial color="#00ff88" side={THREE.DoubleSide} />
         </mesh>
+      )}
+
+      {/* Snap type label */}
+      {snapMarker && snappedCandidate && (
+        <Html position={[snapMarker[0], planeY + 0.2, snapMarker[1]]} center>
+          <div className="snap-type-label">{MEASUREMENT_SNAP_MODE_LABELS[snappedCandidate.modes[0]]}</div>
+        </Html>
       )}
     </>
   )

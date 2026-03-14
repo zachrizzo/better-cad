@@ -4,9 +4,9 @@ import { Line, Html } from '@react-three/drei'
 import { useUIStore } from '../../stores/ui-store'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
-import { snapPlanCandidate, usePlanSnapCandidates } from '../../hooks/usePlanSnapPoints'
+import { snapPlanCandidate, usePlanSnapCandidates, type PlanSnapCandidate } from '../../hooks/usePlanSnapPoints'
 import { useActiveDrawingSurface } from '../../hooks/useActiveDrawingSurface'
-import { getEnabledMeasurementSnapModes } from '../../utils/measurement-snap-settings'
+import { getEnabledMeasurementSnapModes, MEASUREMENT_SNAP_MODE_LABELS } from '../../utils/measurement-snap-settings'
 import { formatLength } from '../../utils/units'
 
 // Measure tool state: two points clicked, shows distance
@@ -57,6 +57,7 @@ export function MeasurePlane() {
   const [pt2, setPt2] = useState<[number, number, number] | null>(null)
   const [cursorPos, setCursorPos] = useState<[number, number, number] | null>(null)
   const [snapMarker, setSnapMarker] = useState<[number, number] | null>(null)
+  const [snappedCandidate, setSnappedCandidate] = useState<PlanSnapCandidate | null>(null)
   const enabledSnapModes = useMemo(
     () => getEnabledMeasurementSnapModes(measurementSnapModeSettings, snapEnabled),
     [measurementSnapModeSettings, snapEnabled],
@@ -65,6 +66,7 @@ export function MeasurePlane() {
   useEffect(() => {
     if (activeTool !== 'measure') {
       setSnapMarker(null)
+      setSnappedCandidate(null)
       setMeasurementCursor(null)
       setToolReadout(null)
     }
@@ -73,8 +75,16 @@ export function MeasurePlane() {
   const applySnap = useCallback((point: [number, number, number]): [number, number, number] => {
     const { point: snappedPoint, snapped } = snapPlanCandidate([point[0], point[2]], snapCandidates, enabledSnapModes, 0.3)
     setSnapMarker(snapped?.point ?? null)
+    setSnappedCandidate(snapped)
     return [snappedPoint[0], activeSurfaceElevation, snappedPoint[1]]
   }, [activeSurfaceElevation, enabledSnapModes, snapCandidates])
+
+  const formatDeltas = useCallback((from: [number, number, number], to: [number, number, number]) => {
+    const dx = Math.abs(to[0] - from[0])
+    const dz = Math.abs(to[2] - from[2])
+    const d = Math.sqrt((to[0] - from[0]) ** 2 + (to[1] - from[1]) ** 2 + (to[2] - from[2]) ** 2)
+    return `dX:${formatLength(dx, lengthUnit)} dY:${formatLength(dz, lengthUnit)} D:${formatLength(d, lengthUnit)}`
+  }, [lengthUnit])
 
   const handleClick = (e: { point?: THREE.Vector3 }) => {
     if (activeTool !== 'measure') return
@@ -83,27 +93,22 @@ export function MeasurePlane() {
     const point = applySnap([hitPoint.x, hitPoint.y, hitPoint.z])
     setMeasurementCursor(point)
 
+    // If a measurement is already complete, reset and start fresh
+    if (pt1 && pt2) {
+      setPt1(point)
+      setPt2(null)
+      setCursorPos(null)
+      setToolReadout(`Measure start X:${formatLength(point[0], lengthUnit)} Z:${formatLength(point[2], lengthUnit)}`)
+      return
+    }
+
     if (!pt1) {
       setPt1(point)
       setPt2(null)
       setToolReadout(`Measure start X:${formatLength(point[0], lengthUnit)} Z:${formatLength(point[2], lengthUnit)}`)
     } else {
-      const p2: [number, number, number] = point
-      setPt2(p2)
-      const dx = p2[0] - pt1[0]
-      const dy = p2[1] - pt1[1]
-      const dz = p2[2] - pt1[2]
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
-      setToolReadout(`Distance: ${formatLength(d, lengthUnit)}`)
-      console.log(`[BetterCAD] Measure: ${d.toFixed(3)} units`)
-      // After showing measurement, reset for next measurement on next click
-      setTimeout(() => {
-        setPt1(null)
-        setPt2(null)
-        setCursorPos(null)
-        setSnapMarker(null)
-        setToolReadout(null)
-      }, 3000)
+      setPt2(point)
+      setToolReadout(formatDeltas(pt1, point))
     }
   }
 
@@ -114,11 +119,7 @@ export function MeasurePlane() {
     setMeasurementCursor(point)
     setCursorPos(point)
     if (pt1 && !pt2) {
-      const dx = point[0] - pt1[0]
-      const dy = point[1] - pt1[1]
-      const dz = point[2] - pt1[2]
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
-      setToolReadout(`Measure preview: ${formatLength(d, lengthUnit)}`)
+      setToolReadout(formatDeltas(pt1, point))
     } else if (!pt1) {
       setToolReadout('Measure: pick first point')
     }
@@ -195,10 +196,22 @@ export function MeasurePlane() {
         </mesh>
       )}
 
-      {/* Distance label - rendered as a small sphere at midpoint with color indicating measurement */}
+      {/* Snap type label */}
+      {snapMarker && snappedCandidate && (
+        <Html position={[snapMarker[0], activeSurfaceElevation + 0.15, snapMarker[1]]} center>
+          <div className="snap-type-label">{MEASUREMENT_SNAP_MODE_LABELS[snappedCandidate.modes[0]]}</div>
+        </Html>
+      )}
+
+      {/* Distance label with deltas */}
       {pt1 && pt2 && distance !== null && (
         <Html position={[(pt1[0] + pt2[0]) / 2, (pt1[1] + pt2[1]) / 2 + 0.28, (pt1[2] + pt2[2]) / 2]} center>
-          <div className="measurement-badge">{formatLength(distance, lengthUnit)}</div>
+          <div className="measurement-badge">
+            <span>{formatLength(distance, lengthUnit)}</span>
+            <span className="measurement-badge-deltas">
+              dX:{formatLength(Math.abs(pt2[0] - pt1[0]), lengthUnit)} dY:{formatLength(Math.abs(pt2[2] - pt1[2]), lengthUnit)}
+            </span>
+          </div>
         </Html>
       )}
     </>

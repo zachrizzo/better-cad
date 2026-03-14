@@ -5,8 +5,8 @@ import type { ThreeEvent } from '@react-three/fiber'
 import { useUIStore } from '../../stores/ui-store'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
-import { snapPlanCandidate, usePlanSnapCandidates } from '../../hooks/usePlanSnapPoints'
-import { getEnabledMeasurementSnapModes } from '../../utils/measurement-snap-settings'
+import { snapPlanCandidate, usePlanSnapCandidates, type PlanSnapCandidate } from '../../hooks/usePlanSnapPoints'
+import { getEnabledMeasurementSnapModes, MEASUREMENT_SNAP_MODE_LABELS } from '../../utils/measurement-snap-settings'
 import { formatLength } from '../../utils/units'
 import { useLevelStore } from '../../stores/level-store'
 
@@ -39,6 +39,7 @@ export function MeasurePlane2D() {
   const [pt2, setPt2] = useState<Point2 | null>(null)
   const [cursorPos, setCursorPos] = useState<Point2 | null>(null)
   const [snapMarker, setSnapMarker] = useState<Point2 | null>(null)
+  const [snappedCandidate, setSnappedCandidate] = useState<PlanSnapCandidate | null>(null)
 
   const enabledSnapModes = useMemo(
     () => getEnabledMeasurementSnapModes(measurementSnapModeSettings, snapEnabled),
@@ -51,6 +52,7 @@ export function MeasurePlane2D() {
       setPt2(null)
       setCursorPos(null)
       setSnapMarker(null)
+      setSnappedCandidate(null)
       setMeasurementCursor(null)
       setToolReadout(null)
     }
@@ -59,15 +61,31 @@ export function MeasurePlane2D() {
   const applySnap = useCallback((raw: Point2): Point2 => {
     const { point, snapped } = snapPlanCandidate(raw, snapCandidates, enabledSnapModes, SNAP_THRESHOLD)
     setSnapMarker(snapped?.point ?? null)
+    setSnappedCandidate(snapped)
     return point
   }, [enabledSnapModes, snapCandidates])
+
+  const formatDeltas = useCallback((from: Point2, to: Point2) => {
+    const dx = Math.abs(to[0] - from[0])
+    const dy = Math.abs(to[1] - from[1])
+    const d = Math.hypot(to[0] - from[0], to[1] - from[1])
+    return `dX:${formatLength(dx, lengthUnit)} dY:${formatLength(dy, lengthUnit)} D:${formatLength(d, lengthUnit)}`
+  }, [lengthUnit])
 
   const handleClick = useCallback((e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation()
     if (activeTool !== 'measure') return
-    // In the 2D orthographic canvas: e.point.x = plan X, e.point.y = plan Y (kernel Y)
     const raw: Point2 = [e.point.x, e.point.y]
     const point = applySnap(raw)
+
+    // If a measurement is already complete, reset and start fresh
+    if (pt1 && pt2) {
+      setPt1(point)
+      setPt2(null)
+      setCursorPos(null)
+      setToolReadout(`Measure start X:${formatLength(point[0], lengthUnit)} Y:${formatLength(point[1], lengthUnit)}`)
+      return
+    }
 
     if (!pt1) {
       setPt1(point)
@@ -75,32 +93,22 @@ export function MeasurePlane2D() {
       setToolReadout(`Measure start X:${formatLength(point[0], lengthUnit)} Y:${formatLength(point[1], lengthUnit)}`)
     } else {
       setPt2(point)
-      const d = Math.hypot(point[0] - pt1[0], point[1] - pt1[1])
-      setToolReadout(`Distance: ${formatLength(d, lengthUnit)}`)
-      setTimeout(() => {
-        setPt1(null)
-        setPt2(null)
-        setCursorPos(null)
-        setSnapMarker(null)
-        setToolReadout(null)
-      }, 3000)
+      setToolReadout(formatDeltas(pt1, point))
     }
-  }, [activeTool, applySnap, lengthUnit, pt1, setToolReadout])
+  }, [activeTool, applySnap, formatDeltas, lengthUnit, pt1, pt2, setToolReadout])
 
   const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
     if (activeTool !== 'measure') return
     const raw: Point2 = [e.point.x, e.point.y]
     const point = applySnap(raw)
     setCursorPos(point)
-    // Store cursor in 3D world format: [x, elevation, y]
     setMeasurementCursor([point[0], activeLevelElevation, point[1]])
     if (pt1 && !pt2) {
-      const d = Math.hypot(point[0] - pt1[0], point[1] - pt1[1])
-      setToolReadout(`Measure preview: ${formatLength(d, lengthUnit)}`)
+      setToolReadout(formatDeltas(pt1, point))
     } else if (!pt1) {
       setToolReadout('Measure: pick first point')
     }
-  }, [activeLevelElevation, activeTool, applySnap, lengthUnit, pt1, pt2, setMeasurementCursor, setToolReadout])
+  }, [activeLevelElevation, activeTool, applySnap, formatDeltas, pt1, pt2, setMeasurementCursor, setToolReadout])
 
   const handlePointerLeave = useCallback(() => {
     setSnapMarker(null)
@@ -180,10 +188,22 @@ export function MeasurePlane2D() {
         </mesh>
       )}
 
-      {/* Distance label */}
+      {/* Snap type label */}
+      {snapMarker && snappedCandidate && (
+        <Html position={[snapMarker[0], snapMarker[1] + 0.2, z + 0.02]} center>
+          <div className="snap-type-label">{MEASUREMENT_SNAP_MODE_LABELS[snappedCandidate.modes[0]]}</div>
+        </Html>
+      )}
+
+      {/* Distance label with deltas */}
       {pt1 && pt2 && distance !== null && (
         <Html position={[(pt1[0] + pt2[0]) / 2, (pt1[1] + pt2[1]) / 2, z + 0.02]} center>
-          <div className="measurement-badge">{formatLength(distance, lengthUnit)}</div>
+          <div className="measurement-badge">
+            <span>{formatLength(distance, lengthUnit)}</span>
+            <span className="measurement-badge-deltas">
+              dX:{formatLength(Math.abs(pt2[0] - pt1[0]), lengthUnit)} dY:{formatLength(Math.abs(pt2[1] - pt1[1]), lengthUnit)}
+            </span>
+          </div>
         </Html>
       )}
     </>

@@ -1,17 +1,17 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
-import { Line } from '@react-three/drei'
+import { Line, Html } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import { useUIStore } from '../../stores/ui-store'
 import { useKernel } from '../../hooks/useKernel'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { formatLength } from '../../utils/units'
-import { snapPlanCandidate, usePlanSnapCandidates } from '../../hooks/usePlanSnapPoints'
+import { snapPlanCandidate, usePlanSnapCandidates, type PlanSnapCandidate } from '../../hooks/usePlanSnapPoints'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { useLevelStore } from '../../stores/level-store'
 import type { DimensionElement } from '../../services/kernel-bridge'
-import { getEnabledMeasurementSnapModes } from '../../utils/measurement-snap-settings'
+import { getEnabledMeasurementSnapModes, MEASUREMENT_SNAP_MODE_LABELS } from '../../utils/measurement-snap-settings'
 
 type Point2 = [number, number]
 
@@ -43,6 +43,7 @@ export function DimensionPlane2D() {
   const [p1, setP1] = useState<Point2 | null>(null)
   const [cursorPoint, setCursorPoint] = useState<Point2 | null>(null)
   const [snapMarker, setSnapMarker] = useState<Point2 | null>(null)
+  const [snappedCandidate, setSnappedCandidate] = useState<PlanSnapCandidate | null>(null)
 
   const planSnapCandidates = usePlanSnapCandidates()
   const enabledSnapModes = useMemo(
@@ -52,6 +53,7 @@ export function DimensionPlane2D() {
 
   const snapToNearest = useCallback((raw: Point2): { point: Point2; snapped: Point2 | null } => {
     const { point, snapped } = snapPlanCandidate(raw, planSnapCandidates, enabledSnapModes, SNAP_DISTANCE)
+    setSnappedCandidate(snapped)
     return { point, snapped: snapped?.point ?? null }
   }, [enabledSnapModes, planSnapCandidates])
 
@@ -187,6 +189,13 @@ export function DimensionPlane2D() {
           <ringGeometry args={[0.1, 0.14, 20]} />
           <meshBasicMaterial color="#00ff88" side={THREE.DoubleSide} />
         </mesh>
+      )}
+
+      {/* Snap type label */}
+      {snapMarker && snappedCandidate && (
+        <Html position={[snapMarker[0], snapMarker[1] + 0.2, z + 0.02]} center>
+          <div className="snap-type-label">{MEASUREMENT_SNAP_MODE_LABELS[snappedCandidate.modes[0]]}</div>
+        </Html>
       )}
     </>
   )
