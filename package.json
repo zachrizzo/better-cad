@@ -5,6 +5,7 @@
   "description": "Free, cross-platform CAD tool for architects",
   "scripts": {
     "dev": "pnpm --filter @bettercad/ui dev",
+    "tauri:dev": "bash scripts/tauri-dev.sh",
     "build": "pnpm --filter @bettercad/ui build",
     "build:wasm": "bash scripts/build-wasm.sh",
     "check": "pnpm --filter @bettercad/ui typecheck",

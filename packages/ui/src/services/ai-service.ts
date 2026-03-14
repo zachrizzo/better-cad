@@ -3644,11 +3644,53 @@ async function executeTool(name: string, input: ToolInput, kernel: KernelBackend
   }
 }
 
+// ── AI transport selection ─────────────────────────────────────────────────
+
+const DEFAULT_PROXY_WS_URL = 'ws://localhost:3001'
+
+function getAnthropicApiKey(): string | null {
+  const token = import.meta.env.VITE_ANTHROPIC_API_KEY?.trim()
+  return token ? token : null
+}
+
+function getConfiguredProxyUrl(): string | null {
+  const url = import.meta.env.VITE_AI_PROXY_WS?.trim()
+  return url ? url : null
+}
+
+function getPreferredProxyUrl(): string | null {
+  const configuredProxyUrl = getConfiguredProxyUrl()
+  if (configuredProxyUrl) return configuredProxyUrl
+
+  // Default to the local proxy when no direct browser key is configured.
+  if (!getAnthropicApiKey()) return DEFAULT_PROXY_WS_URL
+  return null
+}
+
+function buildAiSetupError(attemptedProxyUrl?: string): Error {
+  const lines = [
+    'AI is not configured for BetterCAD.',
+    '',
+    'Use one of these setup options:',
+    '1. Recommended: local proxy',
+    '   - In a new terminal: `cd packages/ui/proxy && npm install && npm start`',
+    `   - Optional config file: \`packages/ui/.env\` with \`VITE_AI_PROXY_WS=${attemptedProxyUrl ?? DEFAULT_PROXY_WS_URL}\``,
+    '2. Direct Anthropic API from the browser',
+    '   - In `packages/ui/.env` set `VITE_ANTHROPIC_API_KEY=...`',
+  ]
+
+  if (attemptedProxyUrl) {
+    lines.push('', `Attempted proxy URL: ${attemptedProxyUrl}`)
+  }
+
+  return new Error(lines.join('\n'))
+}
+
 // ── Direct Anthropic API (requires VITE_ANTHROPIC_API_KEY) ─────────────────
 
 function getClient(): Anthropic {
-  const token = import.meta.env.VITE_ANTHROPIC_API_KEY
-  if (!token) throw new Error('VITE_ANTHROPIC_API_KEY not set in .env')
+  const token = getAnthropicApiKey()
+  if (!token) throw buildAiSetupError()
   return new Anthropic({ apiKey: token, dangerouslyAllowBrowser: true })
 }
 
@@ -3764,8 +3806,8 @@ async function* streamBimChatDirect(
 let _proxyWs: WebSocket | null = null
 
 async function getProxyWs(): Promise<WebSocket> {
-  const url = import.meta.env.VITE_AI_PROXY_WS
-  if (!url) throw new Error('VITE_AI_PROXY_WS not set in .env')
+  const url = getPreferredProxyUrl()
+  if (!url) throw buildAiSetupError()
 
   if (_proxyWs && _proxyWs.readyState === WebSocket.OPEN) return _proxyWs
 
@@ -3775,10 +3817,7 @@ async function getProxyWs(): Promise<WebSocket> {
     _proxyWs!.onopen = () => resolve()
     _proxyWs!.onerror = () =>
       reject(
-        new Error(
-          `Cannot connect to AI proxy at ${url}\n` +
-            'Run:  cd packages/ui/proxy && npm install && npm start',
-        ),
+        buildAiSetupError(url),
       )
   })
 
@@ -3943,7 +3982,7 @@ export async function* streamBimChat(
   planMode: boolean,
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
-  if (import.meta.env.VITE_AI_PROXY_WS) {
+  if (getPreferredProxyUrl()) {
     yield* streamBimChatViaProxy(apiMessages, elements, kernel, planMode, signal)
   } else {
     yield* streamBimChatDirect(apiMessages, elements, kernel, planMode, signal)

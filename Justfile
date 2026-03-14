@@ -10,7 +10,7 @@ dev:
 
 # Start Tauri desktop dev
 tauri-dev:
-    cd packages/ui && pnpm tauri dev
+    bash scripts/tauri-dev.sh
 
 # Check all Rust code compiles
 check-all:
