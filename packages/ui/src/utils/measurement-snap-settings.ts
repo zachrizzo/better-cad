@@ -2,7 +2,7 @@ export const MEASUREMENT_SNAP_TOOLS = ['measure', 'dimension'] as const
 
 export type MeasurementSnapTool = typeof MEASUREMENT_SNAP_TOOLS[number]
 
-export const MEASUREMENT_SNAP_MODES = ['endpoint', 'center', 'nearest'] as const
+export const MEASUREMENT_SNAP_MODES = ['endpoint', 'midpoint', 'intersection', 'center', 'nearest'] as const
 
 export type MeasurementSnapMode = typeof MEASUREMENT_SNAP_MODES[number]
 
@@ -12,6 +12,8 @@ export type MeasurementSnapSettings = Record<MeasurementSnapTool, MeasurementSna
 
 export const MEASUREMENT_SNAP_MODE_LABELS: Record<MeasurementSnapMode, string> = {
   endpoint: 'Endpoint',
+  midpoint: 'Midpoint',
+  intersection: 'Intersection',
   center: 'Center',
   nearest: 'Nearest',
 }
@@ -19,11 +21,15 @@ export const MEASUREMENT_SNAP_MODE_LABELS: Record<MeasurementSnapMode, string> =
 export const DEFAULT_MEASUREMENT_SNAP_SETTINGS: MeasurementSnapSettings = {
   measure: {
     endpoint: true,
+    midpoint: true,
+    intersection: true,
     center: true,
     nearest: true,
   },
   dimension: {
     endpoint: true,
+    midpoint: true,
+    intersection: true,
     center: true,
     nearest: true,
   },

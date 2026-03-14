@@ -11,11 +11,15 @@ describe('measurement snap settings', () => {
   it('enables all measurement snap modes by default for measure and dimension', () => {
     expect(getEnabledMeasurementSnapModes(DEFAULT_MEASUREMENT_SNAP_SETTINGS.measure)).toEqual([
       'endpoint',
+      'midpoint',
+      'intersection',
       'center',
       'nearest',
     ])
     expect(getEnabledMeasurementSnapModes(DEFAULT_MEASUREMENT_SNAP_SETTINGS.dimension)).toEqual([
       'endpoint',
+      'midpoint',
+      'intersection',
       'center',
       'nearest',
     ])
@@ -37,6 +41,8 @@ describe('measurement snap settings', () => {
   it('reports when no per-tool snap modes remain enabled', () => {
     const settings = {
       endpoint: false,
+      midpoint: false,
+      intersection: false,
       center: false,
       nearest: false,
     }

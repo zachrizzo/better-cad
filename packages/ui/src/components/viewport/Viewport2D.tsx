@@ -23,6 +23,8 @@ import { intersectPointerWithPlan } from '../../utils/intersect-pointer-with-pla
 import { formatLength } from '../../utils/units'
 import { buildVisibleWallOutlineLines } from '../../utils/wall-outline'
 import { polygonCentroid } from '../../services/room-detection'
+import { MeasurePlane2D } from './MeasurePlane2D'
+import { DimensionPlane2D } from './DimensionPlane2D'
 import { resolveRoomName } from '../../services/room-utils'
 import { MepSymbols2D } from './MepSymbols2D'
 import { SwitchingDiagram2D } from './SwitchingDiagram2D'
@@ -649,6 +651,8 @@ export function Viewport2D({ background }: Viewport2DProps) {
       <MapControls enableRotate={false} screenSpacePanning makeDefault />
       <Viewport2DInteractionLayer />
       <Viewport2DScreenshotSync />
+      <MeasurePlane2D />
+      <DimensionPlane2D />
     </Canvas>
   )
 }

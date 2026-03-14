@@ -381,47 +381,305 @@ html, body, #root {
   min-width: 0;
   background: var(--bg-secondary);
   border-left: none;
-  padding: 12px;
+  padding: 14px 16px;
   overflow-y: auto;
 }
+
 .property-panel-title {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 12px;
+  letter-spacing: 1.2px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
+
 .property-row {
   display: flex;
   align-items: center;
-  margin-bottom: 8px;
-  gap: 8px;
+  margin-bottom: 6px;
+  gap: 10px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  transition: background 0.12s ease;
 }
+.property-row:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 40%, transparent);
+}
+
 .property-label {
   color: var(--text-secondary);
   font-size: 12px;
-  width: 50px;
+  min-width: 70px;
   flex-shrink: 0;
+  user-select: none;
 }
+
 .property-input {
   flex: 1;
   background: var(--bg-primary);
   border: 1px solid var(--border);
   color: var(--text-primary);
-  padding: 4px 8px;
+  padding: 5px 10px;
   font-size: 12px;
-  border-radius: 3px;
+  border-radius: 5px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.property-input:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
 }
 .property-input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Number inputs — tighter spinner controls */
+.property-input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.property-input[type="number"]::-webkit-inner-spin-button,
+.property-input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.property-input[type="number"]:hover::-webkit-inner-spin-button,
+.property-input[type="number"]:hover::-webkit-outer-spin-button,
+.property-input[type="number"]:focus::-webkit-inner-spin-button,
+.property-input[type="number"]:focus::-webkit-outer-spin-button {
+  opacity: 1;
+}
+
+/* Select inputs */
+select.property-input {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239ca5c4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+/* Custom checkbox toggle */
+.property-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border);
+  background: var(--bg-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  position: relative;
+}
+.property-row input[type="checkbox"]:hover {
+  border-color: var(--accent);
+}
+.property-row input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.property-row input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.property-row input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Snap mode rows — compact pill layout */
+.snap-mode-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.snap-mode-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+.snap-mode-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: color-mix(in srgb, var(--bg-tertiary) 50%, var(--bg-primary));
+}
+.snap-mode-chip.active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-primary));
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--text-primary);
+}
+.snap-mode-chip .chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+.snap-mode-chip.active .chip-dot {
+  background: var(--accent);
 }
 
 .property-panel-meta {
-  margin: 4px 0 10px;
+  margin: 2px 0 10px;
+  padding: 0 6px;
   color: var(--text-muted);
   font-size: 11px;
-  line-height: 1.3;
+  line-height: 1.4;
+}
+
+/* ---------- Layer Panel ---------- */
+.layer-panel {
+  padding: 14px 16px;
+  font-size: 12px;
+}
+
+.layer-preset-section {
+  margin-bottom: 12px;
+}
+.layer-preset-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.layer-preset-select {
+  width: 100%;
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239ca5c4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  transition: border-color 0.15s ease;
+}
+.layer-preset-select:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.layer-preset-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.layer-active-indicator {
+  margin-bottom: 10px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.layer-active-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  user-select: none;
+}
+.layer-row:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 50%, transparent);
+}
+.layer-row.active {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-primary));
+}
+.layer-row.hidden {
+  opacity: 0.4;
+}
+
+.layer-row-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  color: var(--text-muted);
+  font-size: 13px;
+  transition: background 0.12s ease, color 0.12s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+.layer-row-btn:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  color: var(--text-primary);
+}
+.layer-row-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.layer-color-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1.5px solid color-mix(in srgb, var(--border) 60%, transparent);
+  flex-shrink: 0;
+}
+
+.layer-row-id {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.layer-row-name {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 /* ---------- View Panel ---------- */

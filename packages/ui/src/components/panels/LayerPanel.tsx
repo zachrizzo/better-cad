@@ -1,7 +1,41 @@
 import { useCallback } from 'react'
 import { useLayerStore, LAYER_PRESETS } from '../../stores/layer-store'
 import type { LayerInfo } from '../../stores/layer-store'
-import { useUIStore } from '../../stores/ui-store'
+
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z" />
+      <circle cx="8" cy="8" r="2" />
+    </svg>
+  )
+}
+
+function EyeOffIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 2l12 12M6.5 6.5a2 2 0 002.9 2.9M1.5 8s2.1-3.7 5.3-4.4M10.5 5.2C13 6.5 14.5 8 14.5 8s-2.5 4.5-6.5 4.5c-.8 0-1.5-.1-2.2-.4" />
+    </svg>
+  )
+}
+
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
+      <path d="M5.5 7V5a2.5 2.5 0 015 0v2" />
+    </svg>
+  )
+}
+
+function UnlockIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
+      <path d="M5.5 7V5a2.5 2.5 0 015 0" />
+    </svg>
+  )
+}
 
 function LayerRow({ layer, isActive, onToggleVisibility, onToggleLock, onSetActive }: {
   layer: LayerInfo
@@ -10,91 +44,36 @@ function LayerRow({ layer, isActive, onToggleVisibility, onToggleLock, onSetActi
   onToggleLock: (id: string, locked: boolean) => void
   onSetActive: (id: string) => void
 }) {
-  const theme = useUIStore((s) => s.theme)
-  const isDark = theme === 'dark'
+  const classes = ['layer-row']
+  if (isActive) classes.push('active')
+  if (!layer.visible) classes.push('hidden')
 
   return (
     <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 4,
-        padding: '3px 6px',
-        borderRadius: 4,
-        background: isActive
-          ? (isDark ? 'rgba(100,149,237,0.25)' : 'rgba(100,149,237,0.15)')
-          : 'transparent',
-        cursor: 'pointer',
-        fontSize: 12,
-        opacity: layer.visible ? 1 : 0.45,
-      }}
+      className={classes.join(' ')}
       onClick={() => onSetActive(layer.id)}
       title={`Set ${layer.name} as active layer`}
     >
-      {/* Visibility toggle */}
       <button
+        className="layer-row-btn"
         onClick={(e) => { e.stopPropagation(); onToggleVisibility(layer.id) }}
-        style={{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: '0 2px',
-          fontSize: 14,
-          lineHeight: 1,
-          color: isDark ? '#ccc' : '#555',
-        }}
         title={layer.visible ? 'Hide layer' : 'Show layer'}
       >
-        {layer.visible ? '\u{1F441}' : '\u2014'}
+        {layer.visible ? <EyeIcon /> : <EyeOffIcon />}
       </button>
 
-      {/* Lock toggle */}
       <button
+        className="layer-row-btn"
         onClick={(e) => { e.stopPropagation(); onToggleLock(layer.id, !layer.locked) }}
-        style={{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: '0 2px',
-          fontSize: 12,
-          lineHeight: 1,
-          color: isDark ? '#ccc' : '#555',
-        }}
         title={layer.locked ? 'Unlock layer' : 'Lock layer'}
       >
-        {layer.locked ? '\u{1F512}' : '\u{1F513}'}
+        {layer.locked ? <LockIcon /> : <UnlockIcon />}
       </button>
 
-      {/* Color indicator */}
-      <span
-        style={{
-          display: 'inline-block',
-          width: 10,
-          height: 10,
-          borderRadius: 2,
-          backgroundColor: layer.color,
-          border: `1px solid ${isDark ? '#666' : '#ccc'}`,
-          flexShrink: 0,
-        }}
-      />
+      <span className="layer-color-swatch" style={{ backgroundColor: layer.color }} />
 
-      {/* Layer name */}
-      <span style={{
-        flex: 1,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-        color: isDark ? '#ddd' : '#222',
-      }}>
-        {layer.id}
-      </span>
-      <span style={{
-        fontSize: 10,
-        color: isDark ? '#999' : '#888',
-        flexShrink: 0,
-      }}>
-        {layer.name}
-      </span>
+      <span className="layer-row-id">{layer.id}</span>
+      <span className="layer-row-name">{layer.name}</span>
     </div>
   )
 }
@@ -106,8 +85,6 @@ export function LayerPanel() {
   const setLayerLocked = useLayerStore((s) => s.setLayerLocked)
   const setActiveLayer = useLayerStore((s) => s.setActiveLayer)
   const setPreset = useLayerStore((s) => s.setPreset)
-  const theme = useUIStore((s) => s.theme)
-  const isDark = theme === 'dark'
 
   const handlePresetChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -117,30 +94,18 @@ export function LayerPanel() {
   )
 
   return (
-    <div style={{ padding: 8, fontSize: 12 }}>
+    <div className="layer-panel">
       <div className="property-panel-title">Layers</div>
 
-      {/* Preset dropdown */}
-      <div style={{ marginBottom: 8 }}>
-        <label
-          htmlFor="layer-preset-select"
-          style={{ display: 'block', fontSize: 11, marginBottom: 3, color: isDark ? '#aaa' : '#666' }}
-        >
+      <div className="layer-preset-section">
+        <label className="layer-preset-label" htmlFor="layer-preset-select">
           Preset
         </label>
         <select
           id="layer-preset-select"
+          className="layer-preset-select"
           onChange={handlePresetChange}
           defaultValue=""
-          style={{
-            width: '100%',
-            padding: '4px 6px',
-            fontSize: 12,
-            borderRadius: 4,
-            border: `1px solid ${isDark ? '#555' : '#ccc'}`,
-            background: isDark ? '#2a2a2a' : '#fff',
-            color: isDark ? '#ddd' : '#222',
-          }}
         >
           <option value="" disabled>
             Choose preset...
@@ -153,23 +118,11 @@ export function LayerPanel() {
         </select>
       </div>
 
-      {/* Active layer indicator */}
-      <div style={{
-        marginBottom: 6,
-        fontSize: 11,
-        color: isDark ? '#aaa' : '#666',
-      }}>
-        Active: <strong style={{ color: isDark ? '#7ec8e3' : '#1e6fa0' }}>{activeLayerId}</strong>
+      <div className="layer-active-indicator">
+        Active layer: <span className="layer-active-name">{activeLayerId}</span>
       </div>
 
-      {/* Layer list */}
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 1,
-        maxHeight: 400,
-        overflowY: 'auto',
-      }}>
+      <div className="layer-list">
         {layers.map((layer) => (
           <LayerRow
             key={layer.id}

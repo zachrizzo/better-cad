@@ -10,7 +10,6 @@ import { LENGTH_UNITS, metersToUnitValue, type LengthUnit, unitValueToMeters } f
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { LevelManager } from '../panels/LevelManager'
 import {
-  getEnabledMeasurementSnapModes,
   isMeasurementSnapTool,
   MEASUREMENT_SNAP_MODE_LABELS,
   MEASUREMENT_SNAP_MODES,
@@ -148,12 +147,6 @@ export function PropertyPanel() {
   const measurementSnapTool = isMeasurementSnapTool(activeTool) ? activeTool : null
   const showMeasurementSnapSettings = measurementSnapTool !== null
   const activeMeasurementSnapSettings = measurementSnapTool ? measurementSnapSettings[measurementSnapTool] : null
-  const enabledMeasurementSnapModeLabels = useMemo(
-    () => activeMeasurementSnapSettings
-      ? getEnabledMeasurementSnapModes(activeMeasurementSnapSettings).map((mode) => MEASUREMENT_SNAP_MODE_LABELS[mode])
-      : [],
-    [activeMeasurementSnapSettings],
-  )
   const showAnyToolDefaults = (
     showWallDefaults ||
     showDoorDefaults ||
@@ -802,25 +795,27 @@ export function PropertyPanel() {
           <div className="property-panel-title" style={{ marginTop: 14 }}>
             Snap Modes
           </div>
-          <div className="property-panel-meta">
-            Shared {measurementSnapTool} snap settings for 2D and 3D workflows.
-            <br />
-            Global Snap: {snapEnabled ? 'ON' : 'OFF'}
-            <br />
-            Active modes: {snapEnabled
-              ? (enabledMeasurementSnapModeLabels.length > 0 ? enabledMeasurementSnapModeLabels.join(', ') : 'None')
-              : 'Disabled by global Snap toggle'}
-          </div>
-          {MEASUREMENT_SNAP_MODES.map((mode) => (
-            <div className="property-row" key={`${measurementSnapTool}-${mode}`}>
-              <label className="property-label">{MEASUREMENT_SNAP_MODE_LABELS[mode]}</label>
-              <input
-                type="checkbox"
-                checked={activeMeasurementSnapSettings[mode]}
-                onChange={(e) => setMeasurementSnapMode(measurementSnapTool, mode, e.target.checked)}
-              />
+          {!snapEnabled && (
+            <div className="property-panel-meta">
+              Snap is off globally. Press S to enable.
             </div>
-          ))}
+          )}
+          <div className="snap-mode-grid">
+            {MEASUREMENT_SNAP_MODES.map((mode) => {
+              const checked = activeMeasurementSnapSettings[mode]
+              return (
+                <button
+                  key={`${measurementSnapTool}-${mode}`}
+                  className={`snap-mode-chip${checked ? ' active' : ''}`}
+                  onClick={() => setMeasurementSnapMode(measurementSnapTool, mode, !checked)}
+                  style={{ opacity: snapEnabled ? 1 : 0.45 }}
+                >
+                  <span className="chip-dot" />
+                  {MEASUREMENT_SNAP_MODE_LABELS[mode]}
+                </button>
+              )
+            })}
+          </div>
         </>
       )}
 

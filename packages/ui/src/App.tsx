@@ -390,7 +390,7 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
 
       {/* 3D parametric elements (furniture, plumbing, electrical, HVAC, fire safety, accessibility) */}
       <Elements3DGroup elementLevelInfo={elementLevelInfo} />
-      <Viewport3DInteractionLayer enabled={isSelectMode && activeView == null} planeY={activeSurfaceElevation} />
+      <Viewport3DInteractionLayer enabled={activeView == null} planeY={activeSurfaceElevation} />
 
       <DrawingPlaneGuide />
       <WallPlane />
@@ -523,6 +523,16 @@ export default function App() {
   const loadInputRef = useRef<HTMLInputElement>(null)
   const sidePanelResizeStartXRef = useRef(0)
   const sidePanelResizeStartWidthRef = useRef(SIDE_PANEL_DEFAULT_WIDTH)
+  const transientReadoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const setTransientToolReadout = useCallback((msg: string, ms = 3000) => {
+    if (transientReadoutTimerRef.current) clearTimeout(transientReadoutTimerRef.current)
+    setToolReadout(msg)
+    transientReadoutTimerRef.current = setTimeout(() => {
+      setToolReadout(null)
+      transientReadoutTimerRef.current = null
+    }, ms)
+  }, [setToolReadout])
 
   const showSaveFeedback = useCallback((tone: SaveFeedback['tone'], message: string) => {
     setSaveFeedback({
@@ -651,13 +661,13 @@ export default function App() {
 
   const handleCleanUpWalls = async () => {
     if (!ready || !kernel) return
-    setToolReadout('Cleaning up walls...')
+    setTransientToolReadout('Cleaning up walls...')
     try {
       const count = await autoJoinWalls(kernel, activeLevelId)
-      setToolReadout(count > 0 ? `${count} wall joints cleaned up.` : 'No wall cleanup needed.')
+      setTransientToolReadout(count > 0 ? `${count} wall joints cleaned up.` : 'No wall cleanup needed.')
     } catch (err) {
       console.error('[BetterCAD] Wall cleanup failed:', err)
-      setToolReadout('Wall cleanup failed.')
+      setTransientToolReadout('Wall cleanup failed.')
     }
   }
 
@@ -668,7 +678,7 @@ export default function App() {
       (e): e is WallElement => isWallElement(e) && (!e.meta.level_id || e.meta.level_id === activeLevelId),
     )
     if (levelWalls.length < 3) {
-      setToolReadout('Detect Rooms needs at least 3 walls on the active level.')
+      setTransientToolReadout('Detect Rooms needs at least 3 walls on the active level.')
       return
     }
 
@@ -900,11 +910,11 @@ export default function App() {
       if (rule.fallback && rule.fallback !== tool) {
         setActiveTool(rule.fallback)
       }
-      setToolReadout(rule.reason ?? `${toolLabelByTool.get(tool) ?? tool} is not available right now.`)
+      setTransientToolReadout(rule.reason ?? `${toolLabelByTool.get(tool) ?? tool} is not available right now.`)
       return
     }
     setActiveTool(tool)
-  }, [setActiveTool, setToolReadout, toolLabelByTool, toolRulesByTool])
+  }, [setActiveTool, setTransientToolReadout, toolLabelByTool, toolRulesByTool])
 
   useEffect(() => {
     const activeRule = toolRulesByTool.get(activeTool)
@@ -914,8 +924,8 @@ export default function App() {
       setActiveTool(activeRule.fallback)
     }
     const message = activeRule.reason ?? `${toolLabelByTool.get(activeTool) ?? activeTool} is not available right now.`
-    setToolReadout(message)
-  }, [activeTool, setActiveTool, setToolReadout, toolLabelByTool, toolRulesByTool])
+    setTransientToolReadout(message)
+  }, [activeTool, setActiveTool, setTransientToolReadout, toolLabelByTool, toolRulesByTool])
 
   useEffect(() => {
     if (wallsVisible || !selectedBodyId) return
@@ -991,6 +1001,10 @@ export default function App() {
   useEffect(() => {
     clearMeasurement()
   }, [clearMeasurement, viewMode])
+
+  useEffect(() => {
+    setToolReadout(null)
+  }, [activeTool, setToolReadout])
 
   const suppressViewportContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()

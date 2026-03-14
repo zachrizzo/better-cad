@@ -105,6 +105,15 @@ export const useSettingsStore = create<SettingsState>()(
         measurementSnapSettings: state.measurementSnapSettings,
         wallsVisible: state.wallsVisible,
       }),
+      merge: (persisted, current) => {
+        const merged = { ...current, ...(persisted as Partial<SettingsState>) }
+        // Ensure new snap modes added after initial persist are present with defaults
+        merged.measurementSnapSettings = {
+          measure: { ...DEFAULT_MEASUREMENT_SNAP_SETTINGS.measure, ...merged.measurementSnapSettings?.measure },
+          dimension: { ...DEFAULT_MEASUREMENT_SNAP_SETTINGS.dimension, ...merged.measurementSnapSettings?.dimension },
+        }
+        return merged as SettingsState
+      },
     },
   ),
 )
