@@ -1108,26 +1108,33 @@ select.property-input {
 }
 
 .level-btn {
-  background: transparent;
+  background: var(--bg-primary);
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: 4px 10px;
+  border-radius: 5px;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.4;
+  transition: all 0.15s ease;
+  user-select: none;
 }
 
 .level-btn:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 60%, var(--bg-primary));
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--text-primary);
+}
+
+.level-btn:active {
   background: var(--bg-tertiary);
-  border-color: var(--accent);
 }
 
 .level-btn-vis {
   font-weight: 700;
-  width: 18px;
+  width: 22px;
   text-align: center;
-  padding: 1px 2px;
+  padding: 3px 2px;
 }
 
 .level-vis-visible {
@@ -1149,21 +1156,27 @@ select.property-input {
 
 .level-btn-remove:hover {
   border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-primary));
 }
 
 .level-btn-ok {
   color: #4ade80;
 }
 
+.level-btn-ok:hover {
+  border-color: #4ade80;
+  background: color-mix(in srgb, #4ade80 10%, var(--bg-primary));
+}
+
 .level-btn-add {
-  margin-top: 4px;
+  margin-top: 0;
 }
 
 .level-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 .level-edit-row {
