@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { LengthUnit } from '../utils/units'
+import type { DimensionStyleId } from '../utils/dimension-styles'
+import type { WallFace } from '../services/wall-reference'
 import {
   cloneMeasurementSnapSettings,
   DEFAULT_MEASUREMENT_SNAP_SETTINGS,
@@ -77,10 +79,20 @@ interface SettingsState {
   lightingPreset: LightingPreset
   measurementSnapSettings: MeasurementSnapSettings
   wallsVisible: boolean
+  defaultDimensionStyle: DimensionStyleId
+  dimensionPrecision: number
+  dimensionFractional: boolean
+  wallReferenceMode: WallFace
+  wallFinishThickness: number
   setLengthUnit: (unit: LengthUnit) => void
   setLightingPreset: (preset: LightingPreset) => void
   setMeasurementSnapMode: (tool: MeasurementSnapTool, mode: MeasurementSnapMode, enabled: boolean) => void
   toggleWallsVisible: () => void
+  setDefaultDimensionStyle: (style: DimensionStyleId) => void
+  setDimensionPrecision: (precision: number) => void
+  setDimensionFractional: (fractional: boolean) => void
+  setWallReferenceMode: (mode: WallFace) => void
+  setWallFinishThickness: (thickness: number) => void
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -90,12 +102,22 @@ export const useSettingsStore = create<SettingsState>()(
       lightingPreset: 'daylight',
       measurementSnapSettings: cloneMeasurementSnapSettings(DEFAULT_MEASUREMENT_SNAP_SETTINGS),
       wallsVisible: true,
+      defaultDimensionStyle: 'aia',
+      dimensionPrecision: 2,
+      dimensionFractional: false,
+      wallReferenceMode: 'centerline' as WallFace,
+      wallFinishThickness: 0.013,
       setLengthUnit: (lengthUnit) => set({ lengthUnit }),
       setLightingPreset: (lightingPreset) => set({ lightingPreset }),
       setMeasurementSnapMode: (tool, mode, enabled) => set((state) => ({
         measurementSnapSettings: updateMeasurementSnapMode(state.measurementSnapSettings, tool, mode, enabled),
       })),
       toggleWallsVisible: () => set((state) => ({ wallsVisible: !state.wallsVisible })),
+      setDefaultDimensionStyle: (defaultDimensionStyle) => set({ defaultDimensionStyle }),
+      setDimensionPrecision: (dimensionPrecision) => set({ dimensionPrecision }),
+      setDimensionFractional: (dimensionFractional) => set({ dimensionFractional }),
+      setWallReferenceMode: (wallReferenceMode) => set({ wallReferenceMode }),
+      setWallFinishThickness: (wallFinishThickness) => set({ wallFinishThickness }),
     }),
     {
       name: 'bettercad-settings',
@@ -104,6 +126,11 @@ export const useSettingsStore = create<SettingsState>()(
         lightingPreset: state.lightingPreset,
         measurementSnapSettings: state.measurementSnapSettings,
         wallsVisible: state.wallsVisible,
+        defaultDimensionStyle: state.defaultDimensionStyle,
+        dimensionPrecision: state.dimensionPrecision,
+        dimensionFractional: state.dimensionFractional,
+        wallReferenceMode: state.wallReferenceMode,
+        wallFinishThickness: state.wallFinishThickness,
       }),
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as Partial<SettingsState>) }
@@ -112,6 +139,8 @@ export const useSettingsStore = create<SettingsState>()(
           measure: { ...DEFAULT_MEASUREMENT_SNAP_SETTINGS.measure, ...merged.measurementSnapSettings?.measure },
           dimension: { ...DEFAULT_MEASUREMENT_SNAP_SETTINGS.dimension, ...merged.measurementSnapSettings?.dimension },
         }
+        // Ensure defaultDimensionStyle has a valid fallback
+        if (!merged.defaultDimensionStyle) merged.defaultDimensionStyle = 'aia'
         return merged as SettingsState
       },
     },

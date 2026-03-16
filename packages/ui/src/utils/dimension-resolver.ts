@@ -1,8 +1,8 @@
-import type { PrototypeElement } from '../services/kernel-bridge'
+import type { PrototypeElement, WallElement, DoorElement, WindowElement } from '../services/kernel-bridge'
 
 export interface DimensionAnchor {
   element_id: string
-  anchor: 'start' | 'end' | 'center'
+  anchor: 'start' | 'end' | 'center' | 'opening_left' | 'opening_right'
 }
 
 export function resolveDimensionPoint(
@@ -11,6 +11,31 @@ export function resolveDimensionPoint(
 ): [number, number] | null {
   const el = elements.find((e) => e.meta?.id === anchorDef.element_id)
   if (!el) return null
+
+  // Opening anchors for doors/windows
+  if (anchorDef.anchor === 'opening_left' || anchorDef.anchor === 'opening_right') {
+    if (el.kind === 'door' || el.kind === 'window') {
+      const opening = el as DoorElement | WindowElement
+      const wall = elements.find((e) => e.meta?.id === opening.wall_id) as WallElement | undefined
+      if (!wall) return null
+
+      const dx = wall.end[0] - wall.start[0]
+      const dy = wall.end[1] - wall.start[1]
+      const wallLen = Math.hypot(dx, dy)
+      if (wallLen < 1e-6) return null
+
+      const ux = dx / wallLen
+      const uy = dy / wallLen
+      const halfW = opening.width / 2
+      const cx = wall.start[0] + ux * opening.position_along_wall
+      const cy = wall.start[1] + uy * opening.position_along_wall
+
+      if (anchorDef.anchor === 'opening_left') {
+        return [cx - ux * halfW, cy - uy * halfW]
+      }
+      return [cx + ux * halfW, cy + uy * halfW]
+    }
+  }
 
   if ('start' in el && 'end' in el) {
     const start = el.start as [number, number]

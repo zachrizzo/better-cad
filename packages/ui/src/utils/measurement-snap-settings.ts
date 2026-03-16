@@ -36,7 +36,14 @@ export const DEFAULT_MEASUREMENT_SNAP_SETTINGS: MeasurementSnapSettings = {
 }
 
 export function isMeasurementSnapTool(tool: string): tool is MeasurementSnapTool {
-  return tool === 'measure' || tool === 'dimension'
+  return tool === 'measure' || tool === 'dimension' || tool === 'measure_path' || tool === 'measure_area' || tool === 'measure_angle' || tool === 'spot_elevation'
+}
+
+/** Map extended tool names to their base snap-settings key */
+export function resolveSnapToolKey(tool: string): MeasurementSnapTool {
+  if (tool === 'measure_path' || tool === 'measure_area' || tool === 'measure_angle') return 'measure'
+  if (tool === 'spot_elevation') return 'dimension'
+  return tool as MeasurementSnapTool
 }
 
 export function cloneMeasurementSnapSettings(

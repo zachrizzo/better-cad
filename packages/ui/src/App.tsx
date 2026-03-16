@@ -29,6 +29,12 @@ import { FurniturePlane } from './components/viewport/FurniturePlane'
 import { CabinetPlane } from './components/viewport/CabinetPlane'
 import { Viewport3DInteractionLayer } from './components/viewport/Viewport3DInteractionLayer'
 import { MeasurePlane } from './components/tools/MeasureTool'
+import { PathMeasurePlane } from './components/tools/PathMeasureTool'
+import { AreaMeasurePlane } from './components/tools/AreaMeasureTool'
+import { AngleMeasurePlane } from './components/tools/AngleMeasureTool'
+import { SpotElevationPlane, SpotElevationOverlay3D } from './components/viewport/SpotElevationPlane'
+import { DimensionToolbar } from './components/panels/DimensionToolbar'
+import { useAssociativeDimensions } from './hooks/useAssociativeDimensions'
 import { SelectionGizmo } from './components/viewport/SelectionGizmo'
 import { Elements3DGroup } from './components/viewport/elements3d/Elements3DGroup'
 import { Viewport2D } from './components/viewport/Viewport2D'
@@ -102,6 +108,10 @@ const TOOL_OPTIONS = [
   { tool: 'fire_safety', label: 'Fire Safety', title: 'Fire safety element tool', shortcut: 'G' },
   { tool: 'accessibility', label: 'Access.', title: 'Accessibility element tool', shortcut: 'Y' },
   { tool: 'measure', label: 'Measure', title: 'Measure tool', shortcut: 'M' },
+  { tool: 'measure_path', label: 'Path', title: 'Cumulative path measurement', shortcut: '' },
+  { tool: 'measure_area', label: 'Area', title: 'Polygon area measurement', shortcut: '' },
+  { tool: 'measure_angle', label: 'Angle', title: '3-point angle measurement', shortcut: '' },
+  { tool: 'spot_elevation', label: 'Spot Elev', title: 'Spot elevation callout', shortcut: '' },
   { tool: 'section', label: 'Section', title: 'Section cut tool', shortcut: '-' },
 ] as const
 
@@ -404,6 +414,11 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
       <SketchPlane />
       <SectionPlane />
       <MeasurePlane />
+      <PathMeasurePlane />
+      <AreaMeasurePlane />
+      <AngleMeasurePlane />
+      <SpotElevationPlane />
+      <SpotElevationOverlay3D />
       <DimensionPlane />
       <TextAnnotationPlane />
       <FurniturePlane />
@@ -505,6 +520,7 @@ export default function App() {
   })
   const clearActiveView = useViewStore((s) => s.clearActiveView)
   const { kernel, ready, error: kernelError } = useKernel()
+  useAssociativeDimensions(kernel)
 
   const [kernelStatus, setKernelStatus] = useState('loading...')
   const [meshInfo, setMeshInfo] = useState('')
@@ -1241,6 +1257,7 @@ export default function App() {
 
       {/* Sketch sub-toolbar */}
       {isSketchMode && <SketchToolbar />}
+      {activeTool === 'dimension' && <DimensionToolbar />}
 
       <div className="viewport-area">
         {viewMode === '2d' ? (
@@ -1446,6 +1463,10 @@ export default function App() {
           {selectedBodyId && <span>Selected: {selectedBodyId} (Del remove | Ctrl+D copy | Ctrl+Shift+D array | R rotate | drag gizmo to move)</span>}
           {measurementSnapModeText && <span>{measurementSnapModeText}</span>}
           {activeTool === 'measure' && <span>Click two points to measure</span>}
+          {activeTool === 'measure_path' && <span>Click points to measure cumulative path (right-click to finish)</span>}
+          {activeTool === 'measure_area' && <span>Click to define polygon area (click near first point to close)</span>}
+          {activeTool === 'measure_angle' && <span>Click 3 points: A, vertex B, C to measure angle</span>}
+          {activeTool === 'spot_elevation' && <span>Click to place elevation marker</span>}
           {activeTool === 'foundation' && <span>Place a foundation slab first; other structural tools require support.</span>}
           {activeTool === 'door' && <span>Hover a wall, preview snap, then click to place door - swing:{defaultDoorSwing}</span>}
           {activeTool === 'window' && <span>Hover a wall, then click to place a window</span>}

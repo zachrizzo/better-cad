@@ -52,6 +52,7 @@ export function MeasurePlane() {
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const snapCandidates = usePlanSnapCandidates()
   const { activeSurfaceElevation } = useActiveDrawingSurface()
+  const resetCounter = useMeasurementStore((s) => s.resetCounter)
   const planeRef = useRef<THREE.Mesh>(null)
   const [pt1, setPt1] = useState<[number, number, number] | null>(null)
   const [pt2, setPt2] = useState<[number, number, number] | null>(null)
@@ -71,6 +72,15 @@ export function MeasurePlane() {
       setToolReadout(null)
     }
   }, [activeTool, setMeasurementCursor, setToolReadout])
+
+  // Reset local state when an external reset is requested (e.g. Escape key)
+  useEffect(() => {
+    setPt1(null)
+    setPt2(null)
+    setCursorPos(null)
+    setSnapMarker(null)
+    setSnappedCandidate(null)
+  }, [resetCounter])
 
   const applySnap = useCallback((point: [number, number, number]): [number, number, number] => {
     const { point: snappedPoint, snapped } = snapPlanCandidate([point[0], point[2]], snapCandidates, enabledSnapModes, 0.3)

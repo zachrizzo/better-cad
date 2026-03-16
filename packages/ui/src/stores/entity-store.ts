@@ -16,6 +16,7 @@ import type {
   PlumbingElement,
   PrototypeElement,
   RoofElement,
+  SpotElevationElement,
   RoomElement,
   SiteDetailElement,
   StairElement,
@@ -247,4 +248,5 @@ export const isTagElement = (e: PrototypeElement): e is TagElement => e.kind ===
 export const isHvacElement = (e: PrototypeElement): e is HvacElement => e.kind === 'hvac'
 export const isFireSafetyElement = (e: PrototypeElement): e is FireSafetyElement => e.kind === 'fire_safety'
 export const isAccessibilityElement = (e: PrototypeElement): e is AccessibilityElement => e.kind === 'accessibility'
+export const isSpotElevationElement = (e: PrototypeElement): e is SpotElevationElement => e.kind === 'spot_elevation'
 export const isCabinetElement = (e: PrototypeElement): e is CabinetElement => e.kind === 'cabinet'

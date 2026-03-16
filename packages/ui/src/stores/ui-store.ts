@@ -1,14 +1,16 @@
 import { create } from 'zustand'
 import type { AnnotationDensity, PlanSymbolProfileId } from '../standards/plan-symbol-profile'
+import type { DimensionSubMode } from '../components/panels/DimensionToolbar'
 
 type ViewMode = '2d' | '3d' | 'split'
-type ToolType = 'select' | 'foundation' | 'parking' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section' | 'furniture' | 'plumbing' | 'electrical' | 'cabinet' | 'hvac' | 'fire_safety' | 'accessibility'
+type ToolType = 'select' | 'foundation' | 'parking' | 'wall' | 'door' | 'floor' | 'roof' | 'stair' | 'measure' | 'measure_path' | 'measure_angle' | 'measure_area' | 'window' | 'column' | 'beam' | 'room' | 'dimension' | 'text' | 'sketch' | 'section' | 'furniture' | 'plumbing' | 'electrical' | 'cabinet' | 'hvac' | 'fire_safety' | 'accessibility' | 'spot_elevation'
 type Theme = 'dark' | 'light'
 type RightTab = 'properties' | 'view' | 'layers' | 'chat'
 
 interface UIState {
   viewMode: ViewMode
   activeTool: ToolType
+  dimensionSubMode: DimensionSubMode
   showGrid: boolean
   snapEnabled: boolean
   selectedBodyId: string | null
@@ -20,6 +22,7 @@ interface UIState {
   showMepText: boolean
   setViewMode: (mode: ViewMode) => void
   setActiveTool: (tool: ToolType) => void
+  setDimensionSubMode: (mode: DimensionSubMode) => void
   toggleGrid: () => void
   toggleSnap: () => void
   selectBody: (id: string | null) => void
@@ -34,6 +37,7 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   viewMode: '2d',
   activeTool: 'select',
+  dimensionSubMode: 'aligned' as DimensionSubMode,
   showGrid: true,
   snapEnabled: true,
   selectedBodyId: null,
@@ -44,7 +48,8 @@ export const useUIStore = create<UIState>((set) => ({
   showFurnitureLabels: false,
   showMepText: false,
   setViewMode: (mode) => set({ viewMode: mode }),
-  setActiveTool: (tool) => set({ activeTool: tool }),
+  setActiveTool: (tool) => set({ activeTool: tool, ...(tool !== 'dimension' ? { dimensionSubMode: 'aligned' as DimensionSubMode } : {}) }),
+  setDimensionSubMode: (dimensionSubMode) => set({ dimensionSubMode }),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
   toggleSnap: () => set((s) => ({ snapEnabled: !s.snapEnabled })),
   selectBody: (id) => set({ selectedBodyId: id }),
