@@ -38,6 +38,7 @@ import {
   type SheetInfo,
 } from './title-block'
 import { downloadBlobAsFile } from '../utils/file-download'
+import { formatDimensionText } from '../utils/units'
 import {
   PDF_MONOCHROME_DEFAULT,
   type AnnotationDensity,
@@ -1158,15 +1159,17 @@ function drawScheduleTable(
   return y
 }
 
+/**
+ * Thin wrapper that maps the legacy 'imperial' | 'metric' string to the
+ * unified `formatDimensionText` from utils/units.ts.
+ */
 function formatDim(meters: number, units: string): string {
   if (units === 'imperial') {
-    const inches = meters * 39.3701
-    const ft = Math.floor(inches / 12)
-    const inchRem = (inches % 12).toFixed(0)
-    return `${ft}'-${inchRem}"`
+    return formatDimensionText(meters, 'ft', { fractional: true })
   }
-  if (meters < 1) return `${(meters * 1000).toFixed(0)}mm`
-  return `${meters.toFixed(2)}m`
+  // Metric: small values in mm, otherwise in m (matches previous behaviour)
+  if (meters < 1) return formatDimensionText(meters, 'mm', { precision: 0 })
+  return formatDimensionText(meters, 'm', { precision: 2 })
 }
 
 // ---------------------------------------------------------------------------

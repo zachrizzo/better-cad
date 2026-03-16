@@ -8,6 +8,7 @@ import { isBeamElement, isColumnElement, isDimensionElement, isDoorElement, isFl
 import type { FurnitureSymbolType, PlumbingSymbolType, ElectricalSymbolType } from '../../services/kernel-bridge'
 import { LENGTH_UNITS, metersToUnitValue, type LengthUnit, unitValueToMeters } from '../../utils/units'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
+import type { WallFace } from '../../services/wall-reference'
 import { LevelManager } from '../panels/LevelManager'
 import {
   isMeasurementSnapTool,
@@ -33,6 +34,12 @@ export function PropertyPanel() {
   const measurementSnapSettings = useSettingsStore((s) => s.measurementSnapSettings)
   const setMeasurementSnapMode = useSettingsStore((s) => s.setMeasurementSnapMode)
   const setLengthUnit = useSettingsStore((s) => s.setLengthUnit)
+  const dimensionPrecision = useSettingsStore((s) => s.dimensionPrecision)
+  const dimensionFractional = useSettingsStore((s) => s.dimensionFractional)
+  const setDimensionPrecision = useSettingsStore((s) => s.setDimensionPrecision)
+  const setDimensionFractional = useSettingsStore((s) => s.setDimensionFractional)
+  const wallReferenceMode = useSettingsStore((s) => s.wallReferenceMode)
+  const setWallReferenceMode = useSettingsStore((s) => s.setWallReferenceMode)
 
   const defaultWallHeight = useBimStore((s) => s.defaultWallHeight)
   const defaultWallThickness = useBimStore((s) => s.defaultWallThickness)
@@ -816,6 +823,51 @@ export function PropertyPanel() {
               )
             })}
           </div>
+
+          {/* Precision Settings */}
+          <div className="property-panel-title" style={{ marginTop: 14 }}>
+            Precision
+          </div>
+          <div className="property-row">
+            <label className="property-label">Decimal Places</label>
+            <input
+              type="number"
+              className="property-input"
+              min={0}
+              max={6}
+              value={dimensionPrecision}
+              onChange={(e) => setDimensionPrecision(parseInt(e.target.value) || 2)}
+            />
+          </div>
+          {(lengthUnit === 'in' || lengthUnit === 'ft') && (
+            <div className="property-row">
+              <label className="property-label">Fractional</label>
+              <input
+                type="checkbox"
+                checked={dimensionFractional}
+                onChange={(e) => setDimensionFractional(e.target.checked)}
+              />
+            </div>
+          )}
+
+          {/* Wall Reference Mode */}
+          <div className="property-panel-title" style={{ marginTop: 14 }}>
+            Wall Reference
+          </div>
+          <div className="property-row">
+            <label className="property-label">Face</label>
+            <select
+              className="property-input"
+              value={wallReferenceMode}
+              onChange={(e) => setWallReferenceMode(e.target.value as WallFace)}
+            >
+              <option value="centerline">Centerline</option>
+              <option value="stud_inner">Stud (Inner)</option>
+              <option value="stud_outer">Stud (Outer)</option>
+              <option value="finish_inner">Finish (Inner)</option>
+              <option value="finish_outer">Finish (Outer)</option>
+            </select>
+          </div>
         </>
       )}
 
@@ -1379,6 +1431,110 @@ export function PropertyPanel() {
                       ...selectedElement,
                       text_override: e.target.value || undefined,
                     }
+                    void patchSelectedElement(next)
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    const next = { ...selectedElement, text_override: undefined }
+                    void patchSelectedElement(next)
+                  }}
+                  title="Reset to auto"
+                >
+                  Reset
+                </button>
+              </div>
+
+              {/* Extension Gap */}
+              <div className="property-row">
+                <label className="property-label">Ext. Gap</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  step="0.01"
+                  value={selectedElement.extension_gap ?? ''}
+                  placeholder="Auto"
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                    const next = { ...selectedElement, extension_gap: val }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+
+              {/* Extension Overshoot */}
+              <div className="property-row">
+                <label className="property-label">Ext. Overshoot</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  step="0.01"
+                  value={selectedElement.extension_overshoot ?? ''}
+                  placeholder="Auto"
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                    const next = { ...selectedElement, extension_overshoot: val }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+
+              {/* Text Placement */}
+              <div className="property-row">
+                <label className="property-label">Text Position</label>
+                <select
+                  className="property-input"
+                  value={selectedElement.text_placement ?? 'above'}
+                  onChange={(e) => {
+                    const next = { ...selectedElement, text_placement: e.target.value }
+                    void patchSelectedElement(next)
+                  }}
+                >
+                  <option value="above">Above Line</option>
+                  <option value="inline">Inline</option>
+                </select>
+              </div>
+
+              {/* Reference Dimension */}
+              <div className="property-row">
+                <label className="property-label">Reference</label>
+                <input
+                  type="checkbox"
+                  checked={selectedElement.is_reference ?? false}
+                  onChange={(e) => {
+                    const next = { ...selectedElement, is_reference: e.target.checked }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+
+              {/* Tolerance */}
+              <div className="property-row">
+                <label className="property-label">Tol. +</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  step="0.001"
+                  value={(selectedElement as Record<string, unknown>).tolerance_plus ?? ''}
+                  placeholder="None"
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                    const next = { ...selectedElement, tolerance_plus: val }
+                    void patchSelectedElement(next)
+                  }}
+                />
+              </div>
+              <div className="property-row">
+                <label className="property-label">Tol. -</label>
+                <input
+                  type="number"
+                  className="property-input"
+                  step="0.001"
+                  value={(selectedElement as Record<string, unknown>).tolerance_minus ?? ''}
+                  placeholder="None"
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                    const next = { ...selectedElement, tolerance_minus: val }
                     void patchSelectedElement(next)
                   }}
                 />

@@ -35,6 +35,7 @@ export function MeasurePlane2D() {
     return lvl?.elevation ?? 0
   }, [levels, activeLevelId])
 
+  const resetCounter = useMeasurementStore((s) => s.resetCounter)
   const [pt1, setPt1] = useState<Point2 | null>(null)
   const [pt2, setPt2] = useState<Point2 | null>(null)
   const [cursorPos, setCursorPos] = useState<Point2 | null>(null)
@@ -57,6 +58,15 @@ export function MeasurePlane2D() {
       setToolReadout(null)
     }
   }, [activeTool, setMeasurementCursor, setToolReadout])
+
+  // Reset local state when an external reset is requested (e.g. Escape key)
+  useEffect(() => {
+    setPt1(null)
+    setPt2(null)
+    setCursorPos(null)
+    setSnapMarker(null)
+    setSnappedCandidate(null)
+  }, [resetCounter])
 
   const applySnap = useCallback((raw: Point2): Point2 => {
     const { point, snapped } = snapPlanCandidate(raw, snapCandidates, enabledSnapModes, SNAP_THRESHOLD)

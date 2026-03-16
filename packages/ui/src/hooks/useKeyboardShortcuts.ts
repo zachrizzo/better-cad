@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useUIStore } from '../stores/ui-store'
 import { useDocumentStore } from '../stores/document-store'
 import { useBimStore } from '../stores/bim-store'
+import { useMeasurementStore } from '../stores/measurement-store'
 import {
   useEntityStore,
   isWallElement,
@@ -303,9 +304,16 @@ export function useKeyboardShortcuts(callbacks?: ShortcutCallbacks) {
       }
 
       switch (e.key) {
-        case 'Escape':
-          selectTool('select')
+        case 'Escape': {
+          const currentTool = useUIStore.getState().activeTool
+          if (currentTool === 'measure' || currentTool.startsWith('measure')) {
+            // Reset the active measurement session without leaving the tool
+            useMeasurementStore.getState().requestReset()
+          } else {
+            selectTool('select')
+          }
           break
+        }
         case 'h':
         case 'H':
           if (!e.ctrlKey && !e.metaKey) {

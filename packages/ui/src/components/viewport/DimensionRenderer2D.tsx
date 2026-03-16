@@ -2,32 +2,21 @@ import { useMemo } from 'react'
 import { Line, Text } from '@react-three/drei'
 import type { DimensionElement, PrototypeElement } from '../../services/kernel-bridge'
 import { isDimensionElement } from '../../stores/entity-store'
+import { formatDimensionText } from '../../utils/units'
 
 // ── Dimension formatting ──────────────────────────────────────────────────
 
+/**
+ * Convenience wrapper that maps the legacy 'imperial' | 'metric' flag to the
+ * unified `formatDimensionText` from utils/units.ts.  Exported so any
+ * existing callers continue to work.
+ */
 export function formatDimension(meters: number, units: 'imperial' | 'metric'): string {
   if (units === 'imperial') {
-    const totalInches = meters * 39.3701
-    const feet = Math.floor(totalInches / 12)
-    const inches = totalInches % 12
-    // Round to nearest 1/16"
-    const sixteenths = Math.round(inches * 16) / 16
-    const wholeInches = Math.floor(sixteenths)
-    const frac = sixteenths - wholeInches
-    let inchStr = wholeInches.toString()
-    if (frac > 0) {
-      const num = Math.round(frac * 16)
-      const den = 16
-      const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
-      const g = gcd(num, den)
-      inchStr += ` ${num / g}/${den / g}`
-    }
-    if (feet > 0) return `${feet}'-${inchStr}"`
-    return `${inchStr}"`
+    return formatDimensionText(meters, 'ft', { fractional: true })
   }
-  // Metric: always show in mm
-  if (meters < 1) return `${Math.round(meters * 1000)}mm`
-  return `${(meters * 1000).toFixed(0)}mm`
+  // Metric: always show in mm (matches previous behaviour)
+  return formatDimensionText(meters, 'mm', { precision: 0 })
 }
 
 // ── Single dimension rendering ────────────────────────────────────────────

@@ -24,6 +24,10 @@ import { formatLength } from '../../utils/units'
 import { buildVisibleWallOutlineLines } from '../../utils/wall-outline'
 import { polygonCentroid } from '../../services/room-detection'
 import { MeasurePlane2D } from './MeasurePlane2D'
+import { PathMeasurePlane2D } from './PathMeasurePlane2D'
+import { AreaMeasurePlane2D } from './AreaMeasurePlane2D'
+import { AngleMeasurePlane2D } from './AngleMeasurePlane2D'
+import { SpotElevationPlane2D } from './SpotElevationPlane2D'
 import { DimensionPlane2D } from './DimensionPlane2D'
 import { resolveRoomName } from '../../services/room-utils'
 import { MepSymbols2D } from './MepSymbols2D'
@@ -652,6 +656,10 @@ export function Viewport2D({ background }: Viewport2DProps) {
       <Viewport2DInteractionLayer />
       <Viewport2DScreenshotSync />
       <MeasurePlane2D />
+      <PathMeasurePlane2D />
+      <AreaMeasurePlane2D />
+      <AngleMeasurePlane2D />
+      <SpotElevationPlane2D />
       <DimensionPlane2D />
     </Canvas>
   )
