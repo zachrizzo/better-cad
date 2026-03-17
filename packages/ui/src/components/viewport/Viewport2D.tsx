@@ -39,6 +39,7 @@ import { HvacSymbols2D } from './HvacSymbols2D'
 import { FireSafetySymbols2D } from './FireSafetySymbols2D'
 import { AccessibilitySymbols2D } from './AccessibilitySymbols2D'
 import { CabinetSymbols2D } from './CabinetSymbols2D'
+import { FloorPlane2D } from './FloorPlane2D'
 
 interface PlanLine {
   start: [number, number]
@@ -334,17 +335,23 @@ function PlanLines() {
           lineWidth={1.5}
         />
       ))}
-      {floorLoops.map((loop) => (
-        <Line
-          key={loop.id}
-          points={loop.points}
-          color={loop.typeId === 'parking_lot' ? '#64748b' : '#4ade80'}
-          lineWidth={1.6}
-          dashed={loop.typeId === 'parking_lot'}
-          dashSize={loop.typeId === 'parking_lot' ? 0.18 : undefined}
-          gapSize={loop.typeId === 'parking_lot' ? 0.1 : undefined}
-        />
-      ))}
+      {floorLoops.map((loop) => {
+        const isFoundation = loop.typeId === 'foundation'
+        const isParking = loop.typeId === 'parking_lot'
+        const color = isFoundation ? '#f59e0b' : isParking ? '#64748b' : '#4ade80'
+        const isDashed = isFoundation || isParking
+        return (
+          <Line
+            key={loop.id}
+            points={loop.points}
+            color={color}
+            lineWidth={isFoundation ? 2 : 1.6}
+            dashed={isDashed}
+            dashSize={isDashed ? 0.18 : undefined}
+            gapSize={isDashed ? 0.1 : undefined}
+          />
+        )
+      })}
       {stairPreview.edgeLines.map((line, i) => (
         <Line
           key={`stair-edge-${i}`}
@@ -661,6 +668,7 @@ export function Viewport2D({ background }: Viewport2DProps) {
       <AngleMeasurePlane2D />
       <SpotElevationPlane2D />
       <DimensionPlane2D />
+      <FloorPlane2D />
     </Canvas>
   )
 }
