@@ -1,33 +1,33 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
-import * as THREE from 'three'
-import { Line, Html } from '@react-three/drei'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import type * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
-import { useUIStore } from '../../stores/ui-store'
-import { useMeasurementStore } from '../../stores/measurement-store'
-import { useSettingsStore } from '../../stores/settings-store'
-import { snapPlanCandidate, usePlanSnapCandidates, type PlanSnapCandidate } from '../../hooks/usePlanSnapPoints'
-import { getEnabledMeasurementSnapModes, MEASUREMENT_SNAP_MODE_LABELS } from '../../utils/measurement-snap-settings'
-import { formatLength } from '../../utils/units'
-import { useLevelStore } from '../../stores/level-store'
+import { useUIStore } from '../stores/ui-store'
+import { useMeasurementStore } from '../stores/measurement-store'
+import { useSettingsStore } from '../stores/settings-store'
+import { snapPlanCandidate, usePlanSnapCandidates, type PlanSnapCandidate } from './usePlanSnapPoints'
+import { useActiveDrawingSurface } from './useActiveDrawingSurface'
+import { getEnabledMeasurementSnapModes } from '../utils/measurement-snap-settings'
+import { formatLength, type LengthUnit } from '../utils/units'
+import { extractPlanPoint, toWorldPosition, type ViewportMode } from '../utils/viewport-helpers'
 
 type Point2 = [number, number]
 
 const SNAP_THRESHOLD = 0.3
-const PLANE_Z = 0.1
 const ARC_RADIUS = 0.3
 const ARC_SEGMENTS = 30
 
 /**
- * Build arc points from angleStart to angleEnd at a given center and radius.
- * Returns points in XY plane at the given z elevation.
+ * Build arc points in world-space between two angles around a center.
  */
-function buildArcPoints2D(
+function buildArcPointsWorld(
   center: Point2,
   radius: number,
   angleStart: number,
   angleEnd: number,
   segments: number,
-  z: number,
+  mode: ViewportMode,
+  elevation: number,
+  zOffset: number,
 ): [number, number, number][] {
   let start = angleStart
   let end = angleEnd
@@ -46,23 +46,40 @@ function buildArcPoints2D(
   for (let i = 0; i <= segments; i++) {
     const t = i / segments
     const a = start + diff * t
-    pts.push([
+    const planPt: Point2 = [
       center[0] + radius * Math.cos(a),
       center[1] + radius * Math.sin(a),
-      z,
-    ])
+    ]
+    pts.push(toWorldPosition(planPt, mode, elevation, zOffset))
   }
   return pts
 }
 
+export interface AngleMeasureDrawingState {
+  isActive: boolean
+  ptA: Point2 | null
+  ptB: Point2 | null
+  ptC: Point2 | null
+  phase: 0 | 1 | 2 | 3
+  cursorPos: Point2 | null
+  snapMarker: Point2 | null
+  snappedCandidate: PlanSnapCandidate | null
+  angleDeg: number | null
+  arcPoints: [number, number, number][] | null
+  arcMidpoint: [number, number, number] | null
+  elevation: number
+  lengthUnit: LengthUnit
+  planeRef: React.RefObject<THREE.Mesh | null>
+  handlePointerMove: (e: ThreeEvent<PointerEvent>) => void
+  handleClick: (e: ThreeEvent<PointerEvent>) => void
+  handlePointerLeave: () => void
+}
+
 /**
- * 2D angle measure plane -- three-click workflow to measure angles in the plan view.
- * Click 1: first leg endpoint (A)
- * Click 2: vertex (B)
- * Click 3: second leg endpoint (C)
- * Displays the angle at B between legs BA and BC.
+ * Shared hook for the three-click angle measurement tool.
+ * Contains ALL logic -- the component is just a renderer.
  */
-export function AngleMeasurePlane2D() {
+export function useAngleMeasureDrawing(mode: ViewportMode): AngleMeasureDrawingState {
   const activeTool = useUIStore((s) => s.activeTool)
   const snapEnabled = useUIStore((s) => s.snapEnabled)
   const lengthUnit = useSettingsStore((s) => s.lengthUnit)
@@ -70,14 +87,9 @@ export function AngleMeasurePlane2D() {
   const setMeasurementCursor = useMeasurementStore((s) => s.setCursor)
   const setToolReadout = useMeasurementStore((s) => s.setToolReadout)
   const snapCandidates = usePlanSnapCandidates()
-  const activeLevelId = useLevelStore((s) => s.activeLevelId)
-  const levels = useLevelStore((s) => s.levels)
-  const activeLevelElevation = useMemo(() => {
-    const lvl = levels.find((l) => l.id === activeLevelId)
-    return lvl?.elevation ?? 0
-  }, [levels, activeLevelId])
-
+  const { activeSurfaceElevation } = useActiveDrawingSurface()
   const resetCounter = useMeasurementStore((s) => s.resetCounter)
+  const planeRef = useRef<THREE.Mesh>(null)
 
   const [ptA, setPtA] = useState<Point2 | null>(null)
   const [ptB, setPtB] = useState<Point2 | null>(null)
@@ -91,6 +103,8 @@ export function AngleMeasurePlane2D() {
     () => getEnabledMeasurementSnapModes(measurementSnapModeSettings, snapEnabled),
     [measurementSnapModeSettings, snapEnabled],
   )
+
+  const elevation = activeSurfaceElevation
 
   // Clear state when tool deactivates
   useEffect(() => {
@@ -139,8 +153,9 @@ export function AngleMeasurePlane2D() {
   const handleClick = useCallback((e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation()
     if (activeTool !== 'measure_angle') return
-    const raw: Point2 = [e.point.x, e.point.y]
-    const point = applySnap(raw)
+    const rawPoint = extractPlanPoint(e, mode)
+    const point = applySnap(rawPoint)
+    setMeasurementCursor([point[0], elevation, point[1]])
 
     if (phase === 0 || phase === 3) {
       // Start fresh
@@ -164,14 +179,14 @@ export function AngleMeasurePlane2D() {
         `Angle: ${angleDeg.toFixed(1)}\u00B0  |  Leg1: ${formatLength(legAB, lengthUnit)}  Leg2: ${formatLength(legBC, lengthUnit)}`,
       )
     }
-  }, [activeTool, applySnap, computeAngle, lengthUnit, phase, ptA, ptB, setToolReadout])
+  }, [activeTool, applySnap, computeAngle, elevation, lengthUnit, mode, phase, ptA, ptB, setMeasurementCursor, setToolReadout])
 
   const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
     if (activeTool !== 'measure_angle') return
-    const raw: Point2 = [e.point.x, e.point.y]
-    const point = applySnap(raw)
+    const rawPoint = extractPlanPoint(e, mode)
+    const point = applySnap(rawPoint)
     setCursorPos(point)
-    setMeasurementCursor([point[0], activeLevelElevation, point[1]])
+    setMeasurementCursor([point[0], elevation, point[1]])
 
     if (phase === 0) {
       setToolReadout('Angle: pick first leg endpoint')
@@ -185,7 +200,7 @@ export function AngleMeasurePlane2D() {
         `Angle: ${angleDeg.toFixed(1)}\u00B0  |  Leg1: ${formatLength(legAB, lengthUnit)}  Leg2: ${formatLength(legBC, lengthUnit)}`,
       )
     }
-  }, [activeLevelElevation, activeTool, applySnap, computeAngle, lengthUnit, phase, ptA, ptB, setMeasurementCursor, setToolReadout])
+  }, [activeTool, applySnap, computeAngle, elevation, lengthUnit, mode, phase, ptA, ptB, setMeasurementCursor, setToolReadout])
 
   const handlePointerLeave = useCallback(() => {
     setSnapMarker(null)
@@ -194,148 +209,46 @@ export function AngleMeasurePlane2D() {
     if (phase === 0) setToolReadout(null)
   }, [phase, setMeasurementCursor, setToolReadout])
 
-  if (activeTool !== 'measure_angle') return null
-
-  const z = PLANE_Z
-  const drawZ = z + 0.01
-
   // Compute angle for rendering
   const effectiveC = phase === 3 ? ptC : phase === 2 ? cursorPos : null
   const angleDeg =
     ptA && ptB && effectiveC ? computeAngle(ptA, ptB, effectiveC) : null
 
-  // Arc points for the angle indicator
-  const arcPoints = (() => {
+  // Arc points for the angle indicator (in world space)
+  const arcPoints = useMemo(() => {
     if (!ptA || !ptB || !effectiveC) return null
     const BA = [ptA[0] - ptB[0], ptA[1] - ptB[1]]
     const BC = [effectiveC[0] - ptB[0], effectiveC[1] - ptB[1]]
     const angleBA = Math.atan2(BA[1], BA[0])
     const angleBC = Math.atan2(BC[1], BC[0])
-    return buildArcPoints2D(ptB, ARC_RADIUS, angleBA, angleBC, ARC_SEGMENTS, drawZ)
-  })()
+    return buildArcPointsWorld(ptB, ARC_RADIUS, angleBA, angleBC, ARC_SEGMENTS, mode, elevation, 0.01)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ptA, ptB, effectiveC, mode, elevation])
 
   // Arc midpoint for label placement
-  const arcMidpoint = arcPoints && arcPoints.length > 0
-    ? arcPoints[Math.floor(arcPoints.length / 2)]
-    : null
+  const arcMidpoint = useMemo(() => {
+    if (!arcPoints || arcPoints.length === 0) return null
+    const mid = Math.floor(arcPoints.length / 2)
+    return arcPoints[mid]
+  }, [arcPoints])
 
-  return (
-    <>
-      {/* Invisible interaction plane */}
-      <mesh
-        position={[0, 0, z]}
-        onClick={handleClick}
-        onPointerMove={handlePointerMove}
-        onPointerLeave={handlePointerLeave}
-      >
-        <planeGeometry args={[200, 200]} />
-        <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
-      </mesh>
-
-      {/* Point A */}
-      {ptA && (
-        <mesh position={[ptA[0], ptA[1], drawZ]}>
-          <circleGeometry args={[0.08, 16]} />
-          <meshBasicMaterial color="#00ff88" />
-        </mesh>
-      )}
-
-      {/* Point B (vertex) */}
-      {ptB && (
-        <mesh position={[ptB[0], ptB[1], drawZ]}>
-          <circleGeometry args={[0.08, 16]} />
-          <meshBasicMaterial color="#00ff88" />
-        </mesh>
-      )}
-
-      {/* Point C */}
-      {ptC && (
-        <mesh position={[ptC[0], ptC[1], drawZ]}>
-          <circleGeometry args={[0.08, 16]} />
-          <meshBasicMaterial color="#00ff88" />
-        </mesh>
-      )}
-
-      {/* Solid line B -> A */}
-      {ptA && ptB && (
-        <Line
-          points={[[ptB[0], ptB[1], drawZ], [ptA[0], ptA[1], drawZ]]}
-          color="#00ff88"
-          lineWidth={2}
-        />
-      )}
-
-      {/* Solid line B -> C (when confirmed) */}
-      {ptB && ptC && (
-        <Line
-          points={[[ptB[0], ptB[1], drawZ], [ptC[0], ptC[1], drawZ]]}
-          color="#00ff88"
-          lineWidth={2}
-        />
-      )}
-
-      {/* Dashed preview line from last confirmed point to cursor */}
-      {phase === 1 && ptA && cursorPos && (
-        <Line
-          points={[[ptA[0], ptA[1], drawZ], [cursorPos[0], cursorPos[1], drawZ]]}
-          color="#00ff88"
-          lineWidth={1}
-          dashed
-          dashSize={0.2}
-          gapSize={0.1}
-        />
-      )}
-      {phase === 2 && ptB && cursorPos && (
-        <Line
-          points={[[ptB[0], ptB[1], drawZ], [cursorPos[0], cursorPos[1], drawZ]]}
-          color="#00ff88"
-          lineWidth={1}
-          dashed
-          dashSize={0.2}
-          gapSize={0.1}
-        />
-      )}
-
-      {/* Arc indicator at vertex */}
-      {arcPoints && arcPoints.length > 1 && (
-        <Line
-          points={arcPoints}
-          color="#00ff88"
-          lineWidth={2}
-        />
-      )}
-
-      {/* Angle label */}
-      {angleDeg !== null && arcMidpoint && (
-        <Html position={[arcMidpoint[0], arcMidpoint[1] + 0.15, drawZ + 0.01]} center>
-          <div className="measurement-badge">
-            <span>{angleDeg.toFixed(1)}&deg;</span>
-          </div>
-        </Html>
-      )}
-
-      {/* Cursor indicator */}
-      {cursorPos && (
-        <mesh position={[cursorPos[0], cursorPos[1], drawZ]}>
-          <circleGeometry args={[0.05, 10]} />
-          <meshBasicMaterial color={snapMarker ? '#00ff88' : '#22d3ee'} />
-        </mesh>
-      )}
-
-      {/* Snap ring */}
-      {snapMarker && (
-        <mesh position={[snapMarker[0], snapMarker[1], drawZ]}>
-          <ringGeometry args={[0.1, 0.14, 20]} />
-          <meshBasicMaterial color="#00ff88" side={THREE.DoubleSide} />
-        </mesh>
-      )}
-
-      {/* Snap type label */}
-      {snapMarker && snappedCandidate && (
-        <Html position={[snapMarker[0], snapMarker[1] + 0.2, drawZ + 0.01]} center>
-          <div className="snap-type-label">{MEASUREMENT_SNAP_MODE_LABELS[snappedCandidate.modes[0]]}</div>
-        </Html>
-      )}
-    </>
-  )
+  return {
+    isActive: activeTool === 'measure_angle',
+    ptA,
+    ptB,
+    ptC,
+    phase,
+    cursorPos,
+    snapMarker,
+    snappedCandidate,
+    angleDeg,
+    arcPoints,
+    arcMidpoint,
+    elevation,
+    lengthUnit,
+    planeRef,
+    handlePointerMove,
+    handleClick,
+    handlePointerLeave,
+  }
 }

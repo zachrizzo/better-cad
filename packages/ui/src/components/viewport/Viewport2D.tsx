@@ -24,12 +24,12 @@ import { intersectPointerWithPlan } from '../../utils/intersect-pointer-with-pla
 import { formatLength } from '../../utils/units'
 import { buildVisibleWallOutlineLines } from '../../utils/wall-outline'
 import { polygonCentroid } from '../../services/room-detection'
-import { MeasurePlane2D } from './MeasurePlane2D'
-import { PathMeasurePlane2D } from './PathMeasurePlane2D'
-import { AreaMeasurePlane2D } from './AreaMeasurePlane2D'
-import { AngleMeasurePlane2D } from './AngleMeasurePlane2D'
-import { SpotElevationPlane2D } from './SpotElevationPlane2D'
-import { DimensionPlane2D } from './DimensionPlane2D'
+import { MeasurePlane2D } from '../tools/MeasureTool'
+import { PathMeasurePlane2D } from '../tools/PathMeasureTool'
+import { AreaMeasurePlane2D } from '../tools/AreaMeasureTool'
+import { AngleMeasurePlane2D } from '../tools/AngleMeasureTool'
+import { SpotElevationPlane2D } from '../tools/SpotElevationTool'
+import { DimensionPlane2D } from '../tools/DimensionTool'
 import { resolveRoomName } from '../../services/room-utils'
 import { MepSymbols2D } from './MepSymbols2D'
 import { SwitchingDiagram2D } from './SwitchingDiagram2D'
@@ -40,7 +40,16 @@ import { HvacSymbols2D } from './HvacSymbols2D'
 import { FireSafetySymbols2D } from './FireSafetySymbols2D'
 import { AccessibilitySymbols2D } from './AccessibilitySymbols2D'
 import { CabinetSymbols2D } from './CabinetSymbols2D'
-import { FloorPlane2D } from './FloorPlane2D'
+import { SlabTool } from '../tools/SlabTool'
+import { WallPlane2D } from './WallPlane2D'
+import { DoorPlane2D } from './DoorPlane2D'
+import { WindowPlane2D } from './WindowPlane2D'
+import { ColumnPlane2D } from '../tools/ColumnTool'
+import { BeamPlane2D } from '../tools/BeamTool'
+import { StairPlane2D } from '../tools/StairTool'
+import { RoofPlane2D } from '../tools/RoofTool'
+import { SketchPlane2D } from '../tools/SketchTool'
+import { SectionPlane2D } from '../tools/SectionTool'
 
 interface PlanLine {
   start: [number, number]
@@ -683,7 +692,16 @@ export function Viewport2D({ background }: Viewport2DProps) {
       <AngleMeasurePlane2D />
       <SpotElevationPlane2D />
       <DimensionPlane2D />
-      <FloorPlane2D />
+      <SlabTool mode="2d" />
+      <WallPlane2D />
+      <DoorPlane2D />
+      <WindowPlane2D />
+      <ColumnPlane2D />
+      <BeamPlane2D />
+      <StairPlane2D />
+      <RoofPlane2D />
+      <SketchPlane2D />
+      <SectionPlane2D />
     </Canvas>
   )
 }

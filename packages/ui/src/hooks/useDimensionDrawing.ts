@@ -1,25 +1,45 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
-import * as THREE from 'three'
-import { Line, Text, Html } from '@react-three/drei'
+import type * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
-import { useUIStore } from '../../stores/ui-store'
-import { useKernel } from '../../hooks/useKernel'
-import { useMeasurementStore } from '../../stores/measurement-store'
-import { useSettingsStore } from '../../stores/settings-store'
-import { formatLength } from '../../utils/units'
-import { snapPlanCandidate, type PlanSnapCandidate, usePlanSnapCandidates } from '../../hooks/usePlanSnapPoints'
-import { isWallElement, isDimensionElement, useEntityStore } from '../../stores/entity-store'
-import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
-import { useLevelStore } from '../../stores/level-store'
-import type { DimensionElement, WallElement } from '../../services/kernel-bridge'
-import { getEnabledMeasurementSnapModes, MEASUREMENT_SNAP_MODE_LABELS } from '../../utils/measurement-snap-settings'
+import { useUIStore } from '../stores/ui-store'
+import { useKernel } from './useKernel'
+import { useMeasurementStore } from '../stores/measurement-store'
+import { useSettingsStore } from '../stores/settings-store'
+import { formatLength, type LengthUnit } from '../utils/units'
+import { snapPlanCandidate, type PlanSnapCandidate, usePlanSnapCandidates } from './usePlanSnapPoints'
+import { isWallElement, useEntityStore } from '../stores/entity-store'
+import { syncEntitiesAndRegenerateMeshes } from '../services/entity-regeneration'
+import { useLevelStore } from '../stores/level-store'
+import type { DimensionElement, WallElement } from '../services/kernel-bridge'
+import { getEnabledMeasurementSnapModes } from '../utils/measurement-snap-settings'
+import { extractPlanPoint, type ViewportMode } from '../utils/viewport-helpers'
 
 const SNAP_DISTANCE = 0.2
 const DEFAULT_OFFSET = 0.5
 
 type Point2 = [number, number]
 
-export function DimensionPlane() {
+export interface DimensionDrawingState {
+  isActive: boolean
+  p1: Point2 | null
+  cursorPoint: Point2 | null
+  snapMarker: Point2 | null
+  snappedCandidate: PlanSnapCandidate | null
+  elevation: number
+  lengthUnit: LengthUnit
+  planeRef: React.RefObject<THREE.Mesh | null>
+  handlePointerMove: (e: ThreeEvent<PointerEvent>) => void
+  handleClick: (e: ThreeEvent<PointerEvent>) => void
+  handleContextMenu: (e: ThreeEvent<PointerEvent>) => void
+  handlePointerLeave: () => void
+}
+
+/**
+ * Shared hook for dimension drawing.
+ * Contains ALL logic — the component is just a renderer.
+ * Works for both 2D and 3D viewports via the `mode` parameter.
+ */
+export function useDimensionDrawing(mode: ViewportMode): DimensionDrawingState {
   const activeTool = useUIStore((s) => s.activeTool)
   const snapEnabled = useUIStore((s) => s.snapEnabled)
   const { kernel, ready } = useKernel()
@@ -59,7 +79,7 @@ export function DimensionPlane() {
     [dimensionSnapModeSettings, snapEnabled],
   )
 
-  // Snap points: wall endpoints, door/window edges
+  // Snap candidates: wall endpoints (always included) + plan snap candidates
   const snapCandidates = useMemo<PlanSnapCandidate[]>(() => {
     const wallCandidates = wallElements.flatMap<PlanSnapCandidate>((wall: WallElement) => [
       { point: wall.start, modes: ['endpoint'] },
@@ -77,6 +97,7 @@ export function DimensionPlane() {
     }
   }, [enabledSnapModes, snapCandidates])
 
+  // Reset state when tool deactivated
   useEffect(() => {
     if (activeTool !== 'dimension') {
       setP1(null)
@@ -92,7 +113,7 @@ export function DimensionPlane() {
 
   const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
     if (activeTool !== 'dimension') return
-    const raw: Point2 = [e.point.x, e.point.z]
+    const raw = extractPlanPoint(e, mode)
     const { point, snapped } = snapToNearest(raw)
     setCursorPoint(point)
     setSnapMarker(snapped)
@@ -104,7 +125,7 @@ export function DimensionPlane() {
     } else {
       setToolReadout('Dimension: pick first point')
     }
-  }, [activeLevelElevation, activeTool, p1, snapToNearest, lengthUnit, setMeasurementCursor, setToolReadout])
+  }, [activeLevelElevation, activeTool, p1, snapToNearest, lengthUnit, mode, setMeasurementCursor, setToolReadout])
 
   const handlePointerLeave = useCallback(() => {
     setCursorPoint(null)
@@ -112,11 +133,11 @@ export function DimensionPlane() {
     setMeasurementCursor(null)
   }, [setMeasurementCursor])
 
-  const handleClick = (e: ThreeEvent<PointerEvent>) => {
+  const handleClick = useCallback((e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation()
     if (activeTool !== 'dimension') return
 
-    const raw: Point2 = [e.point.x, e.point.z]
+    const raw = extractPlanPoint(e, mode)
     const { point } = snapToNearest(raw)
 
     // --- Ordinate mode ---
@@ -175,7 +196,7 @@ export function DimensionPlane() {
     // --- Normal first-point pick for aligned/horizontal/vertical/chain ---
     if (!p1) {
       setP1(point)
-      setToolReadout(`Dimension: pick second point`)
+      setToolReadout('Dimension: pick second point')
       return
     }
 
@@ -216,16 +237,14 @@ export function DimensionPlane() {
 
     // After placing, update state based on mode
     if (dimensionSubMode === 'chain') {
-      // Continue the chain: next segment starts from current point
       setP1(effectiveP2)
       setCursorPoint(null)
-      setToolReadout(`Chain dim placed: ${formatLength(dist, lengthUnit)} — pick next point (right-click to end)`)
+      setToolReadout(`Chain dim placed: ${formatLength(dist, lengthUnit)} \u2014 pick next point (right-click to end)`)
     } else if (isBaseline) {
-      // Keep baselineOrigin, increment count, reset p1 for next pick
       setBaselineCount((c) => c + 1)
       setP1(baselineOrigin)
       setCursorPoint(null)
-      setToolReadout(`Baseline dim placed: ${formatLength(dimDist, lengthUnit)} — pick next point (right-click to end)`)
+      setToolReadout(`Baseline dim placed: ${formatLength(dimDist, lengthUnit)} \u2014 pick next point (right-click to end)`)
     } else {
       setP1(null)
       setCursorPoint(null)
@@ -241,7 +260,22 @@ export function DimensionPlane() {
         console.error('[BetterCAD] Failed to create dimension:', err)
       }
     })()
-  }
+  }, [
+    activeLevelId,
+    activeTool,
+    baselineCount,
+    baselineOrigin,
+    chainGroupId,
+    dimensionSubMode,
+    kernel,
+    lengthUnit,
+    mode,
+    ordinateDatum,
+    p1,
+    ready,
+    setToolReadout,
+    snapToNearest,
+  ])
 
   const handleContextMenu = useCallback((e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation()
@@ -255,171 +289,18 @@ export function DimensionPlane() {
     }
   }, [dimensionSubMode, setToolReadout])
 
-  if (activeTool !== 'dimension') return null
-
-  const planeY = activeLevelElevation
-
-  return (
-    <>
-      <mesh
-        ref={planeRef}
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, planeY, 0]}
-        onClick={handleClick}
-        onContextMenu={handleContextMenu}
-        onPointerMove={handlePointerMove}
-        onPointerLeave={handlePointerLeave}
-      >
-        <planeGeometry args={[200, 200]} />
-        <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
-      </mesh>
-
-      {cursorPoint && (
-        <mesh position={[cursorPoint[0], planeY + 0.05, cursorPoint[1]]}>
-          <sphereGeometry args={[0.06, 12, 12]} />
-          <meshBasicMaterial color={snapMarker ? '#00ff88' : '#ff6b6b'} />
-        </mesh>
-      )}
-
-      {p1 && (
-        <mesh position={[p1[0], planeY + 0.05, p1[1]]}>
-          <sphereGeometry args={[0.1, 16, 16]} />
-          <meshBasicMaterial color="#ff6b6b" />
-        </mesh>
-      )}
-
-      {p1 && cursorPoint && (
-        <Line
-          points={[
-            [p1[0], planeY + 0.05, p1[1]],
-            [cursorPoint[0], planeY + 0.05, cursorPoint[1]],
-          ]}
-          color="#ff6b6b"
-          lineWidth={1.5}
-          dashed
-          dashSize={0.2}
-          gapSize={0.1}
-        />
-      )}
-
-      {snapMarker && (
-        <mesh position={[snapMarker[0], planeY + 0.05, snapMarker[1]]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.1, 0.14, 20]} />
-          <meshBasicMaterial color="#00ff88" side={THREE.DoubleSide} />
-        </mesh>
-      )}
-
-      {/* Snap type label */}
-      {snapMarker && snappedCandidate && (
-        <Html position={[snapMarker[0], planeY + 0.2, snapMarker[1]]} center>
-          <div className="snap-type-label">{MEASUREMENT_SNAP_MODE_LABELS[snappedCandidate.modes[0]]}</div>
-        </Html>
-      )}
-    </>
-  )
-}
-
-/** Renders all persisted dimension elements in the 3D scene */
-export function DimensionOverlay3D() {
-  const elements = useEntityStore((s) => s.elements)
-  const lengthUnit = useSettingsStore((s) => s.lengthUnit)
-  const levels = useLevelStore((s) => s.levels)
-
-  const dimensions = useMemo(
-    () => Array.from(elements.values()).filter(isDimensionElement),
-    [elements],
-  )
-
-  const levelElevations = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const lvl of levels) map.set(lvl.id, lvl.elevation)
-    return map
-  }, [levels])
-
-  return (
-    <>
-      {dimensions.map((dim) => {
-        const elev = dim.meta.level_id ? (levelElevations.get(dim.meta.level_id) ?? 0) : 0
-        return <DimensionLine3D key={dim.meta.id} dim={dim} elevation={elev} lengthUnit={lengthUnit} />
-      })}
-    </>
-  )
-}
-
-function DimensionLine3D({ dim, elevation, lengthUnit }: {
-  dim: DimensionElement
-  elevation: number
-  lengthUnit: string
-}) {
-  const y = elevation + 0.02
-  const { p1, p2, offset } = dim
-
-  // Direction vector
-  const dx = p2[0] - p1[0]
-  const dz = p2[1] - p1[1]
-  const len = Math.hypot(dx, dz)
-  if (len < 1e-6) return null
-
-  // Perpendicular normal (in XZ plane, kernel XY -> scene XZ)
-  const nx = -dz / len
-  const nz = dx / len
-
-  // Offset points for dimension line
-  const off1: [number, number, number] = [p1[0] + nx * offset, y, p1[1] + nz * offset]
-  const off2: [number, number, number] = [p2[0] + nx * offset, y, p2[1] + nz * offset]
-
-  // Witness line endpoints
-  const w1Start: [number, number, number] = [p1[0], y, p1[1]]
-  const w1End: [number, number, number] = [p1[0] + nx * (offset + 0.1), y, p1[1] + nz * (offset + 0.1)]
-  const w2Start: [number, number, number] = [p2[0], y, p2[1]]
-  const w2End: [number, number, number] = [p2[0] + nx * (offset + 0.1), y, p2[1] + nz * (offset + 0.1)]
-
-  // Arrow tick size
-  const tickLen = 0.08
-  const tickDx = dx / len * tickLen
-  const tickDz = dz / len * tickLen
-
-  // Arrow ticks at each end of dimension line
-  const tick1a: [number, number, number] = [off1[0] + tickDx + nx * tickLen, y, off1[2] + tickDz + nz * tickLen]
-  const tick1b: [number, number, number] = [off1[0] + tickDx - nx * tickLen, y, off1[2] + tickDz - nz * tickLen]
-  const tick2a: [number, number, number] = [off2[0] - tickDx + nx * tickLen, y, off2[2] - tickDz + nz * tickLen]
-  const tick2b: [number, number, number] = [off2[0] - tickDx - nx * tickLen, y, off2[2] - tickDz - nz * tickLen]
-
-  const midpoint: [number, number, number] = [
-    (off1[0] + off2[0]) / 2,
-    y + 0.01,
-    (off1[2] + off2[2]) / 2,
-  ]
-
-  const displayText = dim.text_override || formatLength(len, lengthUnit as Parameters<typeof formatLength>[1])
-
-  // Calculate rotation for text to be aligned along dimension line in XZ plane
-  const angle = Math.atan2(dz, dx)
-
-  return (
-    <>
-      {/* Witness lines */}
-      <Line points={[w1Start, w1End]} color="#ff6b6b" lineWidth={0.8} />
-      <Line points={[w2Start, w2End]} color="#ff6b6b" lineWidth={0.8} />
-
-      {/* Dimension line */}
-      <Line points={[off1, off2]} color="#ff6b6b" lineWidth={1.2} />
-
-      {/* Arrow ticks */}
-      <Line points={[tick1a, off1, tick1b]} color="#ff6b6b" lineWidth={1} />
-      <Line points={[tick2a, off2, tick2b]} color="#ff6b6b" lineWidth={1} />
-
-      {/* Text label */}
-      <Text
-        position={midpoint}
-        rotation={[-Math.PI / 2, 0, -angle]}
-        fontSize={0.15}
-        color="#ff6b6b"
-        anchorX="center"
-        anchorY="bottom"
-      >
-        {displayText}
-      </Text>
-    </>
-  )
+  return {
+    isActive: activeTool === 'dimension',
+    p1,
+    cursorPoint,
+    snapMarker,
+    snappedCandidate,
+    elevation: activeLevelElevation,
+    lengthUnit,
+    planeRef,
+    handlePointerMove,
+    handleClick,
+    handleContextMenu,
+    handlePointerLeave,
+  }
 }

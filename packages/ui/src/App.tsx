@@ -12,7 +12,7 @@ import { CadMesh } from './components/viewport/CadMesh'
 import { WallPlane } from './components/viewport/WallPlane'
 import { DrawingPlaneGuide } from './components/viewport/DrawingPlaneGuide'
 import { DoorPlane } from './components/viewport/DoorPlane'
-import { FloorPlane } from './components/viewport/FloorPlane'
+import { SlabTool } from './components/tools/SlabTool'
 import { StairPlane } from './components/viewport/StairPlane'
 import { WindowPlane } from './components/viewport/WindowPlane'
 import { ColumnPlane } from './components/viewport/ColumnPlane'
@@ -23,7 +23,7 @@ import { SectionPlane } from './components/viewport/SectionPlane'
 import { CameraSync } from './components/viewport/CameraSync'
 import { SectionView, SectionCutLine } from './components/viewport/SectionView'
 import { ElevationCamera } from './components/viewport/ElevationCamera'
-import { DimensionPlane, DimensionOverlay3D } from './components/viewport/DimensionPlane'
+import { DimensionPlane, DimensionOverlay3D } from './components/tools/DimensionTool'
 import { TextAnnotationPlane, TextAnnotationOverlay3D } from './components/viewport/TextAnnotationPlane'
 import { FurniturePlane } from './components/viewport/FurniturePlane'
 import { CabinetPlane } from './components/viewport/CabinetPlane'
@@ -32,7 +32,7 @@ import { MeasurePlane } from './components/tools/MeasureTool'
 import { PathMeasurePlane } from './components/tools/PathMeasureTool'
 import { AreaMeasurePlane } from './components/tools/AreaMeasureTool'
 import { AngleMeasurePlane } from './components/tools/AngleMeasureTool'
-import { SpotElevationPlane, SpotElevationOverlay3D } from './components/viewport/SpotElevationPlane'
+import { SpotElevationPlane, SpotElevationOverlay3D } from './components/tools/SpotElevationTool'
 import { DimensionToolbar } from './components/panels/DimensionToolbar'
 import { useAssociativeDimensions } from './hooks/useAssociativeDimensions'
 import { SelectionGizmo } from './components/viewport/SelectionGizmo'
@@ -406,7 +406,7 @@ function Scene({ selectedBodyId, hoveredBodyId, onSelectBody, onHoverBody }: {
       <DrawingPlaneGuide />
       <WallPlane />
       <DoorPlane />
-      <FloorPlane />
+      <SlabTool mode="3d" />
       <StairPlane />
       <WindowPlane />
       <ColumnPlane />
