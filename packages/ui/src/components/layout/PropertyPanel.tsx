@@ -1515,7 +1515,7 @@ export function PropertyPanel() {
                   type="number"
                   className="property-input"
                   step="0.001"
-                  value={(selectedElement as Record<string, unknown>).tolerance_plus ?? ''}
+                  value={selectedElement.tolerance_plus ?? ''}
                   placeholder="None"
                   onChange={(e) => {
                     const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
@@ -1530,7 +1530,7 @@ export function PropertyPanel() {
                   type="number"
                   className="property-input"
                   step="0.001"
-                  value={(selectedElement as Record<string, unknown>).tolerance_minus ?? ''}
+                  value={selectedElement.tolerance_minus ?? ''}
                   placeholder="None"
                   onChange={(e) => {
                     const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
