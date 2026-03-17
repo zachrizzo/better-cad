@@ -7,6 +7,7 @@ import {
   isColumnElement,
   isDimensionElement,
   isFloorElement,
+  isFoundationElement,
   isRoofElement,
   isRoomElement,
   isStairElement,
@@ -14,7 +15,7 @@ import {
   isWallElement,
   useEntityStore,
 } from '../../stores/entity-store'
-import type { BeamElement, ColumnElement, DimensionElement, FloorElement, PrototypeElement, RoofElement, RoomElement, StairElement, TextAnnotationElement, WallElement } from '../../services/kernel-bridge'
+import type { BeamElement, ColumnElement, DimensionElement, FloorElement, FoundationElement, PrototypeElement, RoofElement, RoomElement, StairElement, TextAnnotationElement, WallElement } from '../../services/kernel-bridge'
 import { useLevelStore } from '../../stores/level-store'
 import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
@@ -87,6 +88,11 @@ function PlanLines() {
 
   const floors = useMemo(
     () => Array.from(elements.values()).filter((e): e is FloorElement => isFloorElement(e) && isOnActiveLevel(e, activeLevelId)),
+    [elements, activeLevelId],
+  )
+
+  const foundationEls = useMemo(
+    () => Array.from(elements.values()).filter((e): e is FoundationElement => isFoundationElement(e) && isOnActiveLevel(e, activeLevelId)),
     [elements, activeLevelId],
   )
 
@@ -176,7 +182,7 @@ function PlanLines() {
   }, [walls])
 
   const floorLoops = useMemo(() => {
-    return floors
+    const fromFloors = floors
       .map((floor: FloorElement) => {
         if (floor.boundary.length < 3) return null
         const pts = floor.boundary.map((pt) => [pt[0], pt[1], 0] as [number, number, number])
@@ -184,7 +190,16 @@ function PlanLines() {
         return { id: floor.meta.id, points: pts, typeId: floor.meta.type_id ?? null }
       })
       .filter((loop): loop is { id: string; points: [number, number, number][]; typeId: string | null } => loop !== null)
-  }, [floors])
+    const fromFoundations = foundationEls
+      .map((f: FoundationElement) => {
+        if (f.boundary.length < 3) return null
+        const pts = f.boundary.map((pt) => [pt[0], pt[1], 0] as [number, number, number])
+        pts.push([f.boundary[0][0], f.boundary[0][1], 0])
+        return { id: f.meta.id, points: pts, typeId: 'foundation' as string | null }
+      })
+      .filter((loop): loop is { id: string; points: [number, number, number][]; typeId: string | null } => loop !== null)
+    return [...fromFloors, ...fromFoundations]
+  }, [floors, foundationEls])
 
   const stairPreview = useMemo(() => {
     const edgeLines: PlanLine[] = []

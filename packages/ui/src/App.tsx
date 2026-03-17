@@ -56,6 +56,7 @@ import {
   isColumnElement,
   isDoorElement,
   isFloorElement,
+  isFoundationElement,
   isRoofElement,
   isRoomElement,
   isStairElement,
@@ -812,7 +813,7 @@ export default function App() {
     [entityElements],
   )
   const foundations = useMemo(
-    () => Array.from(entityElements.values()).filter((el) => isFloorElement(el) && el.meta.type_id === 'foundation'),
+    () => Array.from(entityElements.values()).filter(isFoundationElement),
     [entityElements],
   )
   const stairs = useMemo(

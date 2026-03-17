@@ -10,8 +10,8 @@ import { useSettingsStore } from '../../stores/settings-store'
 import { useLevelStore } from '../../stores/level-store'
 import { useActiveDrawingSurface } from '../../hooks/useActiveDrawingSurface'
 import { formatLength } from '../../utils/units'
-import type { FloorElement, WallElement } from '../../services/kernel-bridge'
-import { isFloorElement, isWallElement, useEntityStore } from '../../stores/entity-store'
+import type { FoundationElement, WallElement } from '../../services/kernel-bridge'
+import { isFoundationElement, isWallElement, useEntityStore } from '../../stores/entity-store'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { autoJoinNearbyWalls } from '../../services/wall-cleanup'
 import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
@@ -161,7 +161,7 @@ function isPointInPolygon(point: Point2, boundary: Point2[]): boolean {
   return inside
 }
 
-function isPointOnOrInsideFoundations(point: Point2, foundations: FloorElement[]): boolean {
+function isPointOnOrInsideFoundations(point: Point2, foundations: { boundary: [number, number][] }[]): boolean {
   for (const foundation of foundations) {
     const boundary = foundation.boundary as Point2[]
     if (boundary.length < 3) continue
@@ -170,7 +170,7 @@ function isPointOnOrInsideFoundations(point: Point2, foundations: FloorElement[]
   return false
 }
 
-function wallSegmentRespectsFoundations(start: Point2, end: Point2, foundations: FloorElement[]): boolean {
+function wallSegmentRespectsFoundations(start: Point2, end: Point2, foundations: { boundary: [number, number][] }[]): boolean {
   if (foundations.length === 0) return false
   if (!isPointOnOrInsideFoundations(start, foundations) || !isPointOnOrInsideFoundations(end, foundations)) {
     return false
@@ -207,7 +207,7 @@ function isPointNearWallInterior(point: Point2, walls: WallElement[]): boolean {
   return false
 }
 
-function getFoundationSnap(point: Point2, foundations: FloorElement[]): SnapResult | null {
+function getFoundationSnap(point: Point2, foundations: { boundary: [number, number][] }[]): SnapResult | null {
   let nearestCorner: Point2 | null = null
   let nearestCornerDist = Infinity
 
@@ -277,9 +277,8 @@ export function WallPlane() {
   )
   const foundationElements = useMemo(
     () => Array.from(elements.values()).filter(
-      (el): el is FloorElement => (
-        isFloorElement(el)
-        && el.meta.type_id === 'foundation'
+      (el): el is FoundationElement => (
+        isFoundationElement(el)
         && (!el.meta.level_id || el.meta.level_id === activeLevelId)
       ),
     ),

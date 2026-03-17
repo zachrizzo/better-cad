@@ -8,8 +8,8 @@ import { useMeasurementStore } from '../../stores/measurement-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { snapPlanPoint, usePlanSnapPoints } from '../../hooks/usePlanSnapPoints'
 import { formatLength } from '../../utils/units'
-import type { FloorElement } from '../../services/kernel-bridge'
-import { isFloorElement, useEntityStore } from '../../stores/entity-store'
+import type { FloorElement, FoundationElement } from '../../services/kernel-bridge'
+import { isFloorElement, isFoundationElement, useEntityStore } from '../../stores/entity-store'
 import { useKernel } from '../../hooks/useKernel'
 import { syncEntitiesAndRegenerateMeshes } from '../../services/entity-regeneration'
 import { useLevelStore } from '../../stores/level-store'
@@ -54,14 +54,13 @@ export function FloorPlane2D() {
   const snapPoints = usePlanSnapPoints()
 
   const floorElements = useMemo(() => Array.from(elements.values()).filter(isFloorElement), [elements])
+  const foundationElements = useMemo(() => Array.from(elements.values()).filter(isFoundationElement), [elements])
+  const allSlabElements = useMemo(() => [...floorElements, ...foundationElements], [floorElements, foundationElements])
   const slabsOnActiveLevel = useMemo(
-    () => floorElements.filter((floor) => !floor.meta.level_id || floor.meta.level_id === activeLevelId),
-    [activeLevelId, floorElements],
+    () => allSlabElements.filter((slab) => !slab.meta.level_id || slab.meta.level_id === activeLevelId),
+    [activeLevelId, allSlabElements],
   )
-  const foundationCount = useMemo(
-    () => floorElements.filter((floor) => floor.meta.type_id === 'foundation').length,
-    [floorElements],
-  )
+  const foundationCount = foundationElements.length
   const parkingCount = useMemo(
     () => floorElements.filter((floor) => floor.meta.type_id === 'parking_lot').length,
     [floorElements],
@@ -153,17 +152,28 @@ export function FloorPlane2D() {
       return
     }
 
-    const floorElement: FloorElement = {
-      kind: 'floor',
-      meta: {
-        id: `${slabPrefix}-${crypto.randomUUID()}`,
-        name: `${slabLabel} ${slabCount + 1}`,
-        level_id: activeLevelId,
-        type_id: isFoundationTool ? 'foundation' : isParkingTool ? 'parking_lot' : undefined,
-      },
-      boundary: rect.boundary,
-      thickness: defaultFloorThickness,
-    }
+    const slabElement: FloorElement | FoundationElement = isFoundationTool
+      ? {
+        kind: 'foundation',
+        meta: {
+          id: `${slabPrefix}-${crypto.randomUUID()}`,
+          name: `${slabLabel} ${slabCount + 1}`,
+          level_id: activeLevelId,
+        },
+        boundary: rect.boundary,
+        thickness: defaultFloorThickness,
+      }
+      : {
+        kind: 'floor',
+        meta: {
+          id: `${slabPrefix}-${crypto.randomUUID()}`,
+          name: `${slabLabel} ${slabCount + 1}`,
+          level_id: activeLevelId,
+          type_id: isParkingTool ? 'parking_lot' : undefined,
+        },
+        boundary: rect.boundary,
+        thickness: defaultFloorThickness,
+      }
 
     setStartCorner(null)
     setPreviewCorner(null)
@@ -178,7 +188,7 @@ export function FloorPlane2D() {
 
     void (async () => {
       try {
-        await kernel.createElement(floorElement)
+        await kernel.createElement(slabElement)
         await syncEntitiesAndRegenerateMeshes(kernel)
       } catch (err) {
         console.error('[BetterCAD] Failed to create slab entity:', err)
