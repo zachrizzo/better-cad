@@ -62,6 +62,8 @@ mod tests {
             end: [6.0, 0.0],
             height: 3.0,
             thickness: 0.2,
+            arc: None,
+            arc_segments: 24,
         }
     }
 

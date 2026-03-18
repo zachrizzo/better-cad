@@ -228,11 +228,152 @@ pub fn roof_mesh(roof: &RoofElement) -> Result<TessellatedMesh, KernelError> {
             "roof boundary needs >= 3 points".into(),
         ));
     }
+
+    match roof.roof_type {
+        RoofType::BarrelVault => barrel_vault_mesh(roof),
+        RoofType::Dome => dome_mesh(roof),
+        RoofType::Conical => conical_mesh(roof),
+        _ => {
+            let points: Vec<(f64, f64)> = roof.boundary.iter().map(|p| (p[0], p[1])).collect();
+            let thickness = roof.thickness.max(MIN_ROOF_THICKNESS);
+            let solid = extrude_sketch_points(&points, thickness)?;
+            let mut mesh = tessellate(&solid)?;
+            apply_pitched_profile(&mut mesh, roof, thickness);
+            recompute_vertex_normals(&mut mesh);
+            Ok(mesh)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Curved roof variants
+// ---------------------------------------------------------------------------
+
+/// Barrel vault: flat slab with top surface displaced into a semicircular profile
+/// perpendicular to the ridge direction.
+fn barrel_vault_mesh(roof: &RoofElement) -> Result<TessellatedMesh, KernelError> {
     let points: Vec<(f64, f64)> = roof.boundary.iter().map(|p| (p[0], p[1])).collect();
     let thickness = roof.thickness.max(MIN_ROOF_THICKNESS);
     let solid = extrude_sketch_points(&points, thickness)?;
     let mut mesh = tessellate(&solid)?;
-    apply_pitched_profile(&mut mesh, roof, thickness);
+
+    // Subdivide top face for smoother barrel profile.
+    subdivide_top_triangles(&mut mesh, thickness);
+    subdivide_top_triangles(&mut mesh, thickness);
+
+    let ridge_angle = normalize_angle_degrees(roof.ridge_angle_degrees).to_radians();
+    let slope_dir_x = ridge_angle.sin();
+    let slope_dir_y = -ridge_angle.cos();
+
+    let mut min_along = f64::INFINITY;
+    let mut max_along = f64::NEG_INFINITY;
+    for point in &roof.boundary {
+        let along = point[0] * slope_dir_x + point[1] * slope_dir_y;
+        min_along = min_along.min(along);
+        max_along = max_along.max(along);
+    }
+    let span = (max_along - min_along).max(EPS);
+    let vault_radius = span * 0.5;
+
+    for vertex in mesh.positions.chunks_exact_mut(3) {
+        let z = vertex[2] as f64;
+        let top_factor = clamp(z / thickness.max(EPS), 0.0, 1.0);
+        if top_factor < 0.01 {
+            continue;
+        }
+        let along = vertex[0] as f64 * slope_dir_x + vertex[1] as f64 * slope_dir_y;
+        let t = clamp((along - min_along) / span, 0.0, 1.0);
+        // Semicircular profile: height = R * sin(pi * t)
+        let arc_height = vault_radius * (std::f64::consts::PI * t).sin();
+        vertex[2] = (z + arc_height * top_factor) as f32;
+    }
+
+    recompute_vertex_normals(&mut mesh);
+    Ok(mesh)
+}
+
+/// Dome: hemisphere-like profile over the boundary footprint.
+fn dome_mesh(roof: &RoofElement) -> Result<TessellatedMesh, KernelError> {
+    let points: Vec<(f64, f64)> = roof.boundary.iter().map(|p| (p[0], p[1])).collect();
+    let thickness = roof.thickness.max(MIN_ROOF_THICKNESS);
+    let solid = extrude_sketch_points(&points, thickness)?;
+    let mut mesh = tessellate(&solid)?;
+
+    // Multiple subdivisions for smooth dome.
+    for _ in 0..3 {
+        subdivide_top_triangles(&mut mesh, thickness);
+    }
+
+    // Compute centroid and max extent for dome profile.
+    let n = roof.boundary.len() as f64;
+    let cx: f64 = roof.boundary.iter().map(|p| p[0]).sum::<f64>() / n;
+    let cy: f64 = roof.boundary.iter().map(|p| p[1]).sum::<f64>() / n;
+    let max_dist = roof
+        .boundary
+        .iter()
+        .map(|p| ((p[0] - cx).powi(2) + (p[1] - cy).powi(2)).sqrt())
+        .fold(0.0_f64, f64::max)
+        .max(EPS);
+
+    let dome_height = max_dist * 0.5; // hemisphere with height = radius/2
+
+    for vertex in mesh.positions.chunks_exact_mut(3) {
+        let z = vertex[2] as f64;
+        let top_factor = clamp(z / thickness.max(EPS), 0.0, 1.0);
+        if top_factor < 0.01 {
+            continue;
+        }
+        let dx = vertex[0] as f64 - cx;
+        let dy = vertex[1] as f64 - cy;
+        let dist = (dx * dx + dy * dy).sqrt();
+        let r = clamp(dist / max_dist, 0.0, 1.0);
+        // Spherical profile: height = H * cos(pi/2 * r)
+        let arc_height = dome_height * (std::f64::consts::FRAC_PI_2 * r).cos();
+        vertex[2] = (z + arc_height * top_factor) as f32;
+    }
+
+    recompute_vertex_normals(&mut mesh);
+    Ok(mesh)
+}
+
+/// Conical roof: linear rise from boundary edges to apex at centroid.
+fn conical_mesh(roof: &RoofElement) -> Result<TessellatedMesh, KernelError> {
+    let points: Vec<(f64, f64)> = roof.boundary.iter().map(|p| (p[0], p[1])).collect();
+    let thickness = roof.thickness.max(MIN_ROOF_THICKNESS);
+    let solid = extrude_sketch_points(&points, thickness)?;
+    let mut mesh = tessellate(&solid)?;
+
+    subdivide_top_triangles(&mut mesh, thickness);
+    subdivide_top_triangles(&mut mesh, thickness);
+
+    let n = roof.boundary.len() as f64;
+    let cx: f64 = roof.boundary.iter().map(|p| p[0]).sum::<f64>() / n;
+    let cy: f64 = roof.boundary.iter().map(|p| p[1]).sum::<f64>() / n;
+    let max_dist = roof
+        .boundary
+        .iter()
+        .map(|p| ((p[0] - cx).powi(2) + (p[1] - cy).powi(2)).sqrt())
+        .fold(0.0_f64, f64::max)
+        .max(EPS);
+
+    let pitch = clamp(roof.pitch_degrees, 1.0, MAX_ROOF_PITCH_DEGREES);
+    let cone_height = pitch.to_radians().tan() * max_dist;
+
+    for vertex in mesh.positions.chunks_exact_mut(3) {
+        let z = vertex[2] as f64;
+        let top_factor = clamp(z / thickness.max(EPS), 0.0, 1.0);
+        if top_factor < 0.01 {
+            continue;
+        }
+        let dx = vertex[0] as f64 - cx;
+        let dy = vertex[1] as f64 - cy;
+        let dist = (dx * dx + dy * dy).sqrt();
+        let r = clamp(dist / max_dist, 0.0, 1.0);
+        // Linear rise from edge (r=1) to apex (r=0).
+        let rise = cone_height * (1.0 - r);
+        vertex[2] = (z + rise * top_factor) as f32;
+    }
+
     recompute_vertex_normals(&mut mesh);
     Ok(mesh)
 }

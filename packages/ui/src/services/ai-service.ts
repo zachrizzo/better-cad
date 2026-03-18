@@ -88,7 +88,7 @@ Use connect_switch_to_fixture to draw switching diagram lines from a switch to t
 
 const PLAN_MODE_ADDENDUM = `
 
-You are in PLAN MODE. Before calling any building tools (create_wall, create_floor, create_door, create_window, create_stair, create_roof, create_column, create_room, add_room, create_room_bundle, create_beam, create_foundation, create_level, create_dimension, create_text_annotation, place_electrical, place_plumbing, place_furniture, place_site_element, place_cabinet, place_hvac, place_fire_safety, place_accessibility), output a structured text plan that includes:
+You are in PLAN MODE. Before calling any building tools (create_wall, create_curved_wall, create_floor, create_door, create_window, create_stair, create_roof, create_column, create_circular_column, create_room, add_room, create_room_bundle, create_beam, create_foundation, create_level, create_dimension, create_text_annotation, place_electrical, place_plumbing, place_furniture, place_site_element, place_cabinet, place_hvac, place_fire_safety, place_accessibility), output a structured text plan that includes:
 1) Summary
 2) TODO Task List (Markdown checklist using one item per line in this exact format: - [ ] Task)
 3) Geometry details (element types, approximate coordinates, dimensions)
@@ -389,6 +389,37 @@ const BIM_TOOLS_BASE: Anthropic.Tool[] = [
         level_id: { type: 'string', description: 'ID of the level this beam belongs to' },
       },
       required: ['start', 'end', 'level_id'],
+    },
+  },
+  {
+    name: 'create_curved_wall',
+    description: 'Create a curved (arc) wall defined by center, radius, and sweep angles. The wall follows a circular arc. Requires level_id.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        center: POINT2_SCHEMA,
+        radius: { type: 'number', description: 'Arc radius in meters' },
+        start_angle: { type: 'number', description: 'Start angle in degrees (0 = east, 90 = north)' },
+        end_angle: { type: 'number', description: 'End angle in degrees' },
+        height: { type: 'number', description: 'Wall height in meters (default: 3.0)' },
+        thickness: { type: 'number', description: 'Wall thickness in meters (default: 0.2)' },
+        level_id: { type: 'string', description: 'ID of the level this wall belongs to' },
+      },
+      required: ['center', 'radius', 'start_angle', 'end_angle', 'level_id'],
+    },
+  },
+  {
+    name: 'create_circular_column',
+    description: 'Create a round (circular) column. Requires level_id.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        center: POINT2_SCHEMA,
+        diameter: { type: 'number', description: 'Column diameter in meters' },
+        height: { type: 'number', description: 'Column height in meters (default: 3.0)' },
+        level_id: { type: 'string', description: 'ID of the level this column belongs to' },
+      },
+      required: ['center', 'diameter', 'level_id'],
     },
   },
   {
@@ -2098,6 +2129,71 @@ async function executeTool(name: string, input: ToolInput, kernel: KernelBackend
       return JSON.stringify({ success: true, id, message: 'Floor created' })
     }
 
+    case 'create_curved_wall': {
+      const center = parsePoint2(input.center, 'center')
+      const radius = parseOptionalFiniteNumber(input.radius, 5.0, 'radius')
+      const startAngleDeg = parseOptionalFiniteNumber(input.start_angle, 0, 'start_angle')
+      const endAngleDeg = parseOptionalFiniteNumber(input.end_angle, 90, 'end_angle')
+      const height = parseOptionalFiniteNumber(input.height, 3.0, 'height')
+      const thickness = parseOptionalFiniteNumber(input.thickness, 0.2, 'thickness')
+      const levelId = await resolveLevelId(input, kernel)
+
+      if (radius <= 0) throw new Error('Invalid curved wall: radius must be positive')
+      if (Math.abs(endAngleDeg - startAngleDeg) < 0.1) throw new Error('Invalid curved wall: sweep angle too small')
+
+      const startAngle = (startAngleDeg * Math.PI) / 180
+      const endAngle = (endAngleDeg * Math.PI) / 180
+
+      const start: [number, number] = [
+        center[0] + radius * Math.cos(startAngle),
+        center[1] + radius * Math.sin(startAngle),
+      ]
+      const end: [number, number] = [
+        center[0] + radius * Math.cos(endAngle),
+        center[1] + radius * Math.sin(endAngle),
+      ]
+
+      const wallId = `wall-${crypto.randomUUID()}`
+      const id = await kernel.createElement({
+        kind: 'wall',
+        meta: { id: wallId, name: 'Curved Wall', level_id: levelId },
+        start,
+        end,
+        height,
+        thickness,
+        arc: { center, radius, start_angle: startAngle, end_angle: endAngle },
+        arc_segments: 24,
+      })
+      await syncEntitiesAndRegenerateMeshes(kernel)
+      return JSON.stringify({
+        success: true,
+        id,
+        message: `Curved wall created: R=${radius}m, ${startAngleDeg}° to ${endAngleDeg}°`,
+      })
+    }
+
+    case 'create_circular_column': {
+      const center = parsePoint2(input.center, 'center')
+      const diameter = parseOptionalFiniteNumber(input.diameter, 0.4, 'diameter')
+      const height = parseOptionalFiniteNumber(input.height, 3.0, 'height')
+      const levelId = await resolveLevelId(input, kernel)
+
+      if (diameter <= 0) throw new Error('Invalid circular column: diameter must be positive')
+
+      const id = await kernel.createElement({
+        kind: 'column',
+        meta: { id: crypto.randomUUID(), name: 'Round Column', level_id: levelId },
+        center,
+        width: diameter,
+        depth: diameter,
+        height,
+        diameter,
+        column_segments: 24,
+      })
+      await syncEntitiesAndRegenerateMeshes(kernel)
+      return JSON.stringify({ success: true, id, message: `Circular column (d=${diameter}m) created at [${center}]` })
+    }
+
     case 'create_column': {
       const center = parsePoint2(input.center, 'center')
       const width = parseOptionalFiniteNumber(input.width, 0.3, 'width')
@@ -3644,53 +3740,11 @@ async function executeTool(name: string, input: ToolInput, kernel: KernelBackend
   }
 }
 
-// ── AI transport selection ─────────────────────────────────────────────────
-
-const DEFAULT_PROXY_WS_URL = 'ws://localhost:3001'
-
-function getAnthropicApiKey(): string | null {
-  const token = import.meta.env.VITE_ANTHROPIC_API_KEY?.trim()
-  return token ? token : null
-}
-
-function getConfiguredProxyUrl(): string | null {
-  const url = import.meta.env.VITE_AI_PROXY_WS?.trim()
-  return url ? url : null
-}
-
-function getPreferredProxyUrl(): string | null {
-  const configuredProxyUrl = getConfiguredProxyUrl()
-  if (configuredProxyUrl) return configuredProxyUrl
-
-  // Default to the local proxy when no direct browser key is configured.
-  if (!getAnthropicApiKey()) return DEFAULT_PROXY_WS_URL
-  return null
-}
-
-function buildAiSetupError(attemptedProxyUrl?: string): Error {
-  const lines = [
-    'AI is not configured for BetterCAD.',
-    '',
-    'Use one of these setup options:',
-    '1. Recommended: local proxy',
-    '   - In a new terminal: `cd packages/ui/proxy && npm install && npm start`',
-    `   - Optional config file: \`packages/ui/.env\` with \`VITE_AI_PROXY_WS=${attemptedProxyUrl ?? DEFAULT_PROXY_WS_URL}\``,
-    '2. Direct Anthropic API from the browser',
-    '   - In `packages/ui/.env` set `VITE_ANTHROPIC_API_KEY=...`',
-  ]
-
-  if (attemptedProxyUrl) {
-    lines.push('', `Attempted proxy URL: ${attemptedProxyUrl}`)
-  }
-
-  return new Error(lines.join('\n'))
-}
-
 // ── Direct Anthropic API (requires VITE_ANTHROPIC_API_KEY) ─────────────────
 
 function getClient(): Anthropic {
-  const token = getAnthropicApiKey()
-  if (!token) throw buildAiSetupError()
+  const token = import.meta.env.VITE_ANTHROPIC_API_KEY
+  if (!token) throw new Error('VITE_ANTHROPIC_API_KEY not set in .env')
   return new Anthropic({ apiKey: token, dangerouslyAllowBrowser: true })
 }
 
@@ -3806,8 +3860,8 @@ async function* streamBimChatDirect(
 let _proxyWs: WebSocket | null = null
 
 async function getProxyWs(): Promise<WebSocket> {
-  const url = getPreferredProxyUrl()
-  if (!url) throw buildAiSetupError()
+  const url = import.meta.env.VITE_AI_PROXY_WS
+  if (!url) throw new Error('VITE_AI_PROXY_WS not set in .env')
 
   if (_proxyWs && _proxyWs.readyState === WebSocket.OPEN) return _proxyWs
 
@@ -3817,7 +3871,10 @@ async function getProxyWs(): Promise<WebSocket> {
     _proxyWs!.onopen = () => resolve()
     _proxyWs!.onerror = () =>
       reject(
-        buildAiSetupError(url),
+        new Error(
+          `Cannot connect to AI proxy at ${url}\n` +
+            'Run:  cd packages/ui/proxy && npm install && npm start',
+        ),
       )
   })
 
@@ -3982,7 +4039,7 @@ export async function* streamBimChat(
   planMode: boolean,
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
-  if (getPreferredProxyUrl()) {
+  if (import.meta.env.VITE_AI_PROXY_WS) {
     yield* streamBimChatViaProxy(apiMessages, elements, kernel, planMode, signal)
   } else {
     yield* streamBimChatDirect(apiMessages, elements, kernel, planMode, signal)

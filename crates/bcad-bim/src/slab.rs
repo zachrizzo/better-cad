@@ -220,6 +220,7 @@ mod tests {
             meta: ElementMeta::new("Floor Test"),
             boundary,
             thickness: 0.2,
+            boundary_segments: Vec::new(),
         }
     }
 

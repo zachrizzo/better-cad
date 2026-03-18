@@ -1,4 +1,4 @@
-import type { WallElement } from '../services/kernel-bridge'
+import type { WallElement, ArcDef } from '../services/kernel-bridge'
 
 type Point2 = [number, number]
 
@@ -20,7 +20,80 @@ function cross(ax: number, ay: number, bx: number, by: number): number {
   return ax * by - ay * bx
 }
 
+/** Tessellate a circular arc into a polyline of `segments+1` points. */
+export function arcToPoints2D(
+  cx: number,
+  cy: number,
+  radius: number,
+  startAngle: number,
+  endAngle: number,
+  segments: number,
+): Point2[] {
+  const pts: Point2[] = []
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments
+    const a = startAngle + t * (endAngle - startAngle)
+    pts.push([cx + radius * Math.cos(a), cy + radius * Math.sin(a)])
+  }
+  return pts
+}
+
+function buildCurvedFootprintEdges(wall: WallElement, arc: ArcDef): OutlineLine[] {
+  const halfT = wall.thickness / 2
+  const segs = wall.arc_segments ?? 24
+
+  // Inner and outer arcs offset from the centerline arc.
+  const innerRadius = arc.radius - halfT
+  const outerRadius = arc.radius + halfT
+
+  const outerPts = arcToPoints2D(arc.center[0], arc.center[1], outerRadius, arc.start_angle, arc.end_angle, segs)
+  const innerPts = arcToPoints2D(arc.center[0], arc.center[1], innerRadius, arc.start_angle, arc.end_angle, segs)
+
+  const edges: OutlineLine[] = []
+  // Outer arc segments
+  for (let i = 0; i < outerPts.length - 1; i++) {
+    edges.push({ start: outerPts[i], end: outerPts[i + 1] })
+  }
+  // Inner arc segments
+  for (let i = 0; i < innerPts.length - 1; i++) {
+    edges.push({ start: innerPts[i], end: innerPts[i + 1] })
+  }
+  // End caps
+  edges.push({ start: outerPts[0], end: innerPts[0] })
+  edges.push({ start: outerPts[outerPts.length - 1], end: innerPts[innerPts.length - 1] })
+
+  return edges
+}
+
 function buildFootprint(wall: WallElement): Footprint | null {
+  // For curved walls, we still create a bounding Footprint for clipping,
+  // but the actual edges come from the tessellated arcs.
+  if (wall.arc) {
+    const edges = buildCurvedFootprintEdges(wall, wall.arc)
+    if (edges.length === 0) return null
+
+    // Use a bounding box as the "corners" for the convex clipping test.
+    // This is an approximation — curved walls won't participate in the
+    // convex-polygon clipping of neighboring walls, but their edges are
+    // correctly generated.
+    const allPts = edges.flatMap((e) => [e.start, e.end])
+    const minX = Math.min(...allPts.map((p) => p[0]))
+    const minY = Math.min(...allPts.map((p) => p[1]))
+    const maxX = Math.max(...allPts.map((p) => p[0]))
+    const maxY = Math.max(...allPts.map((p) => p[1]))
+
+    return {
+      id: wall.meta.id,
+      corners: [
+        [minX, minY],
+        [maxX, minY],
+        [maxX, maxY],
+        [minX, maxY],
+      ],
+      edges,
+    }
+  }
+
   const dx = wall.end[0] - wall.start[0]
   const dy = wall.end[1] - wall.start[1]
   const len = Math.hypot(dx, dy)

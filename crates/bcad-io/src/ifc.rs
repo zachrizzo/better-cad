@@ -107,6 +107,8 @@ pub fn import_ifc(data: &[u8]) -> Result<IfcImportResult, crate::IoError> {
                     end: [end_x, end_y],
                     height,
                     thickness,
+                    arc: None,
+                    arc_segments: 24,
                 });
                 let idx = elements.len();
                 ifc_to_element_idx.insert(eid, idx);
@@ -149,6 +151,7 @@ pub fn import_ifc(data: &[u8]) -> Result<IfcImportResult, crate::IoError> {
                             [0.0, 4.0],
                         ],
                         thickness: 0.3,
+                        boundary_segments: Vec::new(),
                     });
                     let idx = elements.len();
                     ifc_to_element_idx.insert(eid, idx);
@@ -210,6 +213,8 @@ pub fn import_ifc(data: &[u8]) -> Result<IfcImportResult, crate::IoError> {
                     width: 0.3,
                     depth: 0.3,
                     height: 3.0,
+                    diameter: None,
+                    column_segments: 24,
                 });
                 let idx = elements.len();
                 ifc_to_element_idx.insert(eid, idx);
@@ -228,6 +233,8 @@ pub fn import_ifc(data: &[u8]) -> Result<IfcImportResult, crate::IoError> {
                     end: [x + 3.0, y, z],
                     width: 0.2,
                     depth: 0.4,
+                    arc: None,
+                    arc_segments: 24,
                 });
                 let idx = elements.len();
                 ifc_to_element_idx.insert(eid, idx);
@@ -331,6 +338,7 @@ pub fn import_ifc(data: &[u8]) -> Result<IfcImportResult, crate::IoError> {
                         [4.0, 3.0],
                         [0.0, 3.0],
                     ],
+                    boundary_segments: Vec::new(),
                 });
                 let idx = elements.len();
                 ifc_to_element_idx.insert(eid, idx);

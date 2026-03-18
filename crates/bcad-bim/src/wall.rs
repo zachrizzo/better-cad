@@ -213,6 +213,184 @@ fn wall_piece_mesh(
     Ok(mesh)
 }
 
+// ---------------------------------------------------------------------------
+// Curved wall mesh generation
+// ---------------------------------------------------------------------------
+
+/// Parameters for a curved (arc) wall segment.
+#[derive(Debug, Clone)]
+pub struct CurvedWallParams {
+    pub start: [f64; 2],
+    pub end: [f64; 2],
+    pub height: f64,
+    pub thickness: f64,
+    pub arc: bcad_domain::ArcDef,
+    pub segments: u32,
+}
+
+/// Build a mesh for a curved wall, optionally with door/window openings.
+///
+/// The wall centerline follows a circular arc.  The mesh is composed of
+/// `segments` straight wall prisms whose footprints approximate inner/outer
+/// arcs offset from the centerline by ±thickness/2.
+pub fn curved_wall_mesh_with_openings(
+    wall: &CurvedWallParams,
+    openings: &[OpeningSpec],
+) -> Result<TessellatedMesh, bcad_kernel::error::KernelError> {
+    let segs = wall.segments.max(3);
+    let half_t = wall.thickness * 0.5;
+
+    // Tessellate the centerline arc.
+    let centerline = bcad_kernel::geometry::arc_to_points(
+        (wall.arc.center[0], wall.arc.center[1]),
+        wall.arc.radius,
+        wall.arc.start_angle,
+        wall.arc.end_angle,
+        segs,
+    );
+
+    if centerline.len() < 2 {
+        return Err(bcad_kernel::error::KernelError::TopologyError(
+            "curved wall arc produced fewer than 2 points".into(),
+        ));
+    }
+
+    // Compute total arc length (used to map opening positions).
+    let mut cumulative_len: Vec<f64> = Vec::with_capacity(centerline.len());
+    cumulative_len.push(0.0);
+    for i in 1..centerline.len() {
+        let dx = centerline[i].0 - centerline[i - 1].0;
+        let dy = centerline[i].1 - centerline[i - 1].1;
+        cumulative_len.push(cumulative_len[i - 1] + (dx * dx + dy * dy).sqrt());
+    }
+    let total_len = *cumulative_len.last().unwrap();
+    if total_len < 1e-10 {
+        return Err(bcad_kernel::error::KernelError::TopologyError(
+            "curved wall has zero arc length".into(),
+        ));
+    }
+
+    // Pre-compute opening intervals projected onto arc length.
+    let mut intervals: Vec<OpeningInterval> = openings
+        .iter()
+        .filter_map(|opening| {
+            if opening.width <= 0.0 || opening.height <= 0.0 {
+                return None;
+            }
+            let center = opening.position_along_wall.clamp(0.0, 1.0) * total_len;
+            let half = opening.width * 0.5;
+            let start = (center - half).max(0.0);
+            let end = (center + half).min(total_len);
+            if end - start <= 1e-8 {
+                return None;
+            }
+            let sill = opening.sill_height.max(0.0).min(wall.height);
+            let top = (sill + opening.height).max(sill).min(wall.height);
+            Some(OpeningInterval { start, end, sill, top })
+        })
+        .collect();
+    intervals.sort_by(|a, b| a.start.total_cmp(&b.start));
+
+    // Build wall piece meshes for each segment of the arc.
+    let mut piece_meshes: Vec<TessellatedMesh> = Vec::new();
+
+    for i in 0..centerline.len() - 1 {
+        let seg_start_len = cumulative_len[i];
+        let seg_end_len = cumulative_len[i + 1];
+
+        // For each arc segment, compute the local outward normal (radial direction).
+        let (cx, cy) = (wall.arc.center[0], wall.arc.center[1]);
+
+        let (s0x, s0y) = centerline[i];
+        let (s1x, s1y) = centerline[i + 1];
+
+        // Outward normals (from center outward) at each endpoint.
+        let r0 = ((s0x - cx).powi(2) + (s0y - cy).powi(2)).sqrt().max(1e-10);
+        let n0x = (s0x - cx) / r0;
+        let n0y = (s0y - cy) / r0;
+
+        let r1 = ((s1x - cx).powi(2) + (s1y - cy).powi(2)).sqrt().max(1e-10);
+        let n1x = (s1x - cx) / r1;
+        let n1y = (s1y - cy) / r1;
+
+        // Check if this segment is fully inside an opening gap (no wall needed).
+        let mut is_full_gap = false;
+        let mut sub_pieces: Vec<(f64, f64, f64, f64)> = Vec::new(); // (z_base, height) ranges
+
+        // Determine which height ranges have wall material in this segment.
+        let overlapping: Vec<&OpeningInterval> = intervals
+            .iter()
+            .filter(|iv| iv.start < seg_end_len - 1e-8 && iv.end > seg_start_len + 1e-8)
+            .collect();
+
+        if overlapping.is_empty() {
+            // Full-height wall segment.
+            sub_pieces.push((0.0, wall.height, 0.0, 0.0));
+        } else {
+            // Check how much of this segment is within each opening.
+            // For simplicity, treat the segment as fully affected if any opening
+            // overlaps the majority of its length.
+            let mut has_full_opening = false;
+            for iv in &overlapping {
+                let overlap_start = iv.start.max(seg_start_len);
+                let overlap_end = iv.end.min(seg_end_len);
+                let seg_len = seg_end_len - seg_start_len;
+                if overlap_end - overlap_start > seg_len * 0.5 {
+                    has_full_opening = true;
+                    // Below opening
+                    if iv.sill > 1e-8 {
+                        sub_pieces.push((0.0, iv.sill, 0.0, 0.0));
+                    }
+                    // Above opening
+                    if wall.height - iv.top > 1e-8 {
+                        sub_pieces.push((iv.top, wall.height - iv.top, 0.0, 0.0));
+                    }
+                    break;
+                }
+            }
+            if !has_full_opening {
+                sub_pieces.push((0.0, wall.height, 0.0, 0.0));
+            }
+            is_full_gap = sub_pieces.is_empty();
+        }
+
+        if is_full_gap {
+            continue;
+        }
+
+        for &(z_base, piece_height, _, _) in &sub_pieces {
+            if piece_height < 1e-8 {
+                continue;
+            }
+
+            // Build 4-corner footprint: start-outer, start-inner, end-inner, end-outer (CCW)
+            let points = vec![
+                (s0x + n0x * half_t, s0y + n0y * half_t),
+                (s0x - n0x * half_t, s0y - n0y * half_t),
+                (s1x - n1x * half_t, s1y - n1y * half_t),
+                (s1x + n1x * half_t, s1y + n1y * half_t),
+            ];
+
+            let solid = bcad_kernel::geometry::extrude_sketch_points(&points, piece_height)?;
+            let mut mesh = bcad_kernel::tessellation::tessellate(&solid)?;
+            if z_base.abs() > 1e-9 {
+                for vertex in mesh.positions.chunks_exact_mut(3) {
+                    vertex[2] += z_base as f32;
+                }
+            }
+            piece_meshes.push(mesh);
+        }
+    }
+
+    if piece_meshes.is_empty() {
+        return Err(bcad_kernel::error::KernelError::TopologyError(
+            "curved wall produced no geometry".into(),
+        ));
+    }
+
+    Ok(combine_meshes(&piece_meshes))
+}
+
 fn combine_meshes(meshes: &[TessellatedMesh]) -> TessellatedMesh {
     let mut positions = Vec::new();
     let mut normals = Vec::new();

@@ -23,6 +23,19 @@ export interface ElementMeta {
   layer?: string
 }
 
+/** Exact circular arc parameters (angles in radians). */
+export interface ArcDef {
+  center: [number, number]
+  radius: number
+  start_angle: number
+  end_angle: number
+}
+
+/** A single segment in a mixed straight/curved boundary. */
+export type BoundarySegment =
+  | { seg_type: 'line'; end: [number, number] }
+  | { seg_type: 'arc'; end: [number, number]; arc: ArcDef }
+
 export interface WallElement {
   kind: 'wall'
   meta: ElementMeta
@@ -30,6 +43,8 @@ export interface WallElement {
   end: [number, number]
   height: number
   thickness: number
+  arc?: ArcDef | null
+  arc_segments?: number
 }
 
 export type DoorType = 'single_swing' | 'double_swing' | 'sliding' | 'pocket' | 'bifold' | 'garage'
@@ -63,6 +78,7 @@ export interface FloorElement {
   meta: ElementMeta
   boundary: [number, number][]
   thickness: number
+  boundary_segments?: BoundarySegment[]
 }
 
 export interface RoofElement {
@@ -72,7 +88,7 @@ export interface RoofElement {
   thickness: number
   elevation: number
   auto_elevation: boolean
-  roof_type: 'flat' | 'shed' | 'gable' | 'hip'
+  roof_type: 'flat' | 'shed' | 'gable' | 'hip' | 'barrel_vault' | 'dome' | 'conical'
   pitch_degrees: number
   ridge_angle_degrees: number
 }
@@ -104,6 +120,8 @@ export interface ColumnElement {
   width: number
   depth: number
   height: number
+  diameter?: number | null
+  column_segments?: number
 }
 
 export interface BeamElement {
@@ -113,6 +131,8 @@ export interface BeamElement {
   end: [number, number, number]
   width: number
   depth: number
+  arc?: ArcDef | null
+  arc_segments?: number
 }
 
 export interface RoomElement {
@@ -121,6 +141,7 @@ export interface RoomElement {
   boundary: [number, number][]
   name: string
   color?: string
+  boundary_segments?: BoundarySegment[]
 }
 
 export interface DimensionElement {
@@ -130,33 +151,6 @@ export interface DimensionElement {
   p2: [number, number]
   offset: number
   text_override?: string
-  // Style & display
-  dimension_mode?: 'aligned' | 'horizontal' | 'vertical' | 'chain' | 'baseline' | 'ordinate'
-  style_id?: string
-  terminator?: string
-  text_placement?: 'above' | 'inline'
-  extension_gap?: number
-  extension_overshoot?: number
-  is_reference?: boolean
-  tolerance_plus?: number
-  tolerance_minus?: number
-  // Grouping
-  chain_group_id?: string
-  baseline_origin?: [number, number]
-  ordinate_axis?: 'x' | 'y'
-  ordinate_datum?: [number, number]
-  // Associative anchors (for BIM-61)
-  anchor1?: { element_id: string; anchor: string; face?: string }
-  anchor2?: { element_id: string; anchor: string; face?: string }
-}
-
-export interface SpotElevationElement {
-  kind: 'spot_elevation'
-  meta: ElementMeta
-  position: [number, number]
-  elevation: number
-  reference_level_id?: string
-  symbol_style: 'circle' | 'triangle' | 'hexagon'
 }
 
 export interface TextAnnotationElement {
@@ -323,7 +317,6 @@ export type PrototypeElement =
   | FireSafetyElement
   | AccessibilityElement
   | CabinetElement
-  | SpotElevationElement
   | GenericElement
 
 export interface RegeneratedMesh extends TessellatedMesh {

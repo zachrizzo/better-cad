@@ -345,6 +345,8 @@ mod tests {
             end,
             height: 3.0,
             thickness: 0.2,
+            arc: None,
+            arc_segments: 24,
         })
     }
 

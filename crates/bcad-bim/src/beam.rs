@@ -49,6 +49,8 @@ mod tests {
             end: [5.0, 0.0, 3.0],
             width: 0.2,
             depth: 0.4,
+            arc: None,
+            arc_segments: 24,
         }
     }
 
@@ -77,6 +79,8 @@ mod tests {
             end: [1.0, 1.0, 3.0],
             width: 0.2,
             depth: 0.4,
+            arc: None,
+            arc_segments: 24,
         };
         assert!(beam_mesh(&beam).is_err());
     }

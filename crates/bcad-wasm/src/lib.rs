@@ -64,19 +64,34 @@ fn wall_mesh(
     wall: &WallElement,
     openings_by_wall: &HashMap<String, Vec<bcad_bim::wall::OpeningSpec>>,
 ) -> Result<TessellatedMesh, JsError> {
-    let wall_params = bcad_bim::wall::WallParams {
-        start: wall.start,
-        end: wall.end,
-        height: wall.height,
-        thickness: wall.thickness,
-    };
     let openings = openings_by_wall
         .get(&wall.meta.id)
         .cloned()
         .unwrap_or_default();
 
-    bcad_bim::wall::wall_mesh_with_openings(&wall_params, &openings)
-        .map_err(|e| JsError::new(&e.to_string()))
+    if let Some(ref arc) = wall.arc {
+        // Curved wall path
+        let params = bcad_bim::wall::CurvedWallParams {
+            start: wall.start,
+            end: wall.end,
+            height: wall.height,
+            thickness: wall.thickness,
+            arc: arc.clone(),
+            segments: wall.arc_segments,
+        };
+        bcad_bim::wall::curved_wall_mesh_with_openings(&params, &openings)
+            .map_err(|e| JsError::new(&e.to_string()))
+    } else {
+        // Straight wall path (existing behavior)
+        let wall_params = bcad_bim::wall::WallParams {
+            start: wall.start,
+            end: wall.end,
+            height: wall.height,
+            thickness: wall.thickness,
+        };
+        bcad_bim::wall::wall_mesh_with_openings(&wall_params, &openings)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
 }
 
 fn floor_mesh(floor: &FloorElement, stair_openings: &[Vec<[f64; 2]>]) -> Result<TessellatedMesh, JsError> {

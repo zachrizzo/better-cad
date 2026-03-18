@@ -128,6 +128,95 @@ pub fn boolean_cut(_target: Solid, _tool: Solid) -> Result<Solid, crate::error::
     ))
 }
 
+// ---------------------------------------------------------------------------
+// Arc / curve tessellation helpers
+// ---------------------------------------------------------------------------
+
+/// Tessellate a circular arc into a sequence of 2D points.
+///
+/// Returns `segments + 1` points evenly spaced from `start_angle` to
+/// `end_angle` (both in radians).  The sweep direction is determined by the
+/// sign of `end_angle - start_angle`.
+pub fn arc_to_points(
+    center: (f64, f64),
+    radius: f64,
+    start_angle: f64,
+    end_angle: f64,
+    segments: u32,
+) -> Vec<(f64, f64)> {
+    let segments = segments.max(1);
+    let mut pts = Vec::with_capacity(segments as usize + 1);
+    for i in 0..=segments {
+        let t = i as f64 / segments as f64;
+        let angle = start_angle + t * (end_angle - start_angle);
+        pts.push((
+            center.0 + radius * angle.cos(),
+            center.1 + radius * angle.sin(),
+        ));
+    }
+    pts
+}
+
+/// Description of a single boundary segment for mixed straight/curved polygons.
+///
+/// This is a kernel-level type that mirrors `bcad_domain::BoundarySegment`
+/// without introducing a dependency on the domain crate.
+pub enum CurveSegment {
+    /// Straight line to `end`.
+    Line { end: (f64, f64) },
+    /// Circular arc to `end` with given center, radius, and angle range (radians).
+    Arc {
+        end: (f64, f64),
+        center: (f64, f64),
+        radius: f64,
+        start_angle: f64,
+        end_angle: f64,
+    },
+}
+
+/// Build a closed polygon from a mixed line/arc boundary description.
+///
+/// `start` is the first point of the boundary.  Each `CurveSegment`
+/// appends its endpoint(s) to the polygon.  Arc segments are tessellated
+/// with `arc_segments` subdivisions.
+///
+/// The returned polygon is suitable for use with `extrude_sketch_points()`.
+pub fn tessellate_boundary_segments(
+    start: (f64, f64),
+    segments: &[CurveSegment],
+    arc_segments: u32,
+) -> Vec<(f64, f64)> {
+    let mut pts: Vec<(f64, f64)> = vec![start];
+
+    for seg in segments {
+        match seg {
+            CurveSegment::Line { end } => {
+                pts.push(*end);
+            }
+            CurveSegment::Arc {
+                end,
+                center,
+                radius,
+                start_angle,
+                end_angle,
+            } => {
+                let arc_pts = arc_to_points(*center, *radius, *start_angle, *end_angle, arc_segments);
+                // Skip the first point of the arc (it should coincide with the
+                // current last point of `pts`).
+                for &p in arc_pts.iter().skip(1) {
+                    pts.push(p);
+                }
+                // Ensure we end exactly at the declared endpoint.
+                if let Some(last) = pts.last_mut() {
+                    *last = *end;
+                }
+            }
+        }
+    }
+
+    pts
+}
+
 /// Creates a B-Rep box solid with the given dimensions.
 ///
 /// The box is axis-aligned with one corner at the origin:

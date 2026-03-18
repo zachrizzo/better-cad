@@ -178,6 +178,28 @@ pub struct GridElement {
     pub end: [f64; 2],
 }
 
+/// Exact arc parameters for curved geometry.
+/// Angles are in radians, measured counter-clockwise from the positive X axis.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ArcDef {
+    pub center: [f64; 2],
+    pub radius: f64,
+    pub start_angle: f64,
+    pub end_angle: f64,
+}
+
+/// A single segment in a mixed straight/curved boundary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "seg_type", rename_all = "snake_case")]
+pub enum BoundarySegment {
+    Line { end: [f64; 2] },
+    Arc { end: [f64; 2], arc: ArcDef },
+}
+
+fn default_arc_segments() -> u32 {
+    24
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WallElement {
     pub meta: ElementMeta,
@@ -185,6 +207,13 @@ pub struct WallElement {
     pub end: [f64; 2],
     pub height: f64,
     pub thickness: f64,
+    /// When `Some`, the wall centerline follows an arc from `start` to `end`.
+    /// When `None`, the wall is a straight line segment (backward compatible).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc: Option<ArcDef>,
+    /// Number of tessellation segments for curved walls (default 24).
+    #[serde(default = "default_arc_segments")]
+    pub arc_segments: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,6 +221,10 @@ pub struct FloorElement {
     pub meta: ElementMeta,
     pub boundary: Vec<[f64; 2]>,
     pub thickness: f64,
+    /// Mixed straight/curved boundary. When non-empty, overrides `boundary` for
+    /// mesh generation, 2D rendering, and export.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundary_segments: Vec<BoundarySegment>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,6 +234,9 @@ pub enum RoofType {
     Shed,
     Gable,
     Hip,
+    BarrelVault,
+    Dome,
+    Conical,
 }
 
 impl Default for RoofType {
@@ -242,12 +278,23 @@ pub struct FoundationElement {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+fn default_column_segments() -> u32 {
+    24
+}
+
 pub struct ColumnElement {
     pub meta: ElementMeta,
     pub center: [f64; 2],
     pub width: f64,
     pub depth: f64,
     pub height: f64,
+    /// When `Some`, the column has a circular cross-section with this diameter.
+    /// `width` and `depth` are ignored when `diameter` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diameter: Option<f64>,
+    /// Number of tessellation segments for circular columns (default 24).
+    #[serde(default = "default_column_segments")]
+    pub column_segments: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,6 +304,12 @@ pub struct BeamElement {
     pub end: [f64; 3],
     pub width: f64,
     pub depth: f64,
+    /// When `Some`, the beam follows an arc path (center/radius in XY plane).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc: Option<ArcDef>,
+    /// Number of tessellation segments for curved beams (default 24).
+    #[serde(default = "default_arc_segments")]
+    pub arc_segments: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -340,6 +393,9 @@ fn default_stair_side_wall_thickness() -> f64 {
 pub struct RoomElement {
     pub meta: ElementMeta,
     pub boundary: Vec<[f64; 2]>,
+    /// Mixed straight/curved boundary. When non-empty, overrides `boundary`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundary_segments: Vec<BoundarySegment>,
 }
 
 fn default_view_scale() -> f64 {

@@ -688,6 +688,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             )),
                             boundary,
                             thickness: 0.3,
+                            boundary_segments: Vec::new(),
                         };
                         elements.push(Element::Floor(floor));
                     }
@@ -700,6 +701,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                                 elements.len() + 1
                             )),
                             boundary,
+                            boundary_segments: Vec::new(),
                         };
                         elements.push(Element::Room(room));
                     }
@@ -716,6 +718,8 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             width: max_x - min_x,
                             depth: max_y - min_y,
                             height: 3.0,
+                            diameter: None,
+                            column_segments: 24,
                         };
                         elements.push(Element::Column(col));
                     }
@@ -781,6 +785,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             )),
                             boundary,
                             thickness: 0.3,
+                            boundary_segments: Vec::new(),
                         };
                         elements.push(Element::Floor(floor));
                     }
@@ -794,6 +799,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                                 elements.len() + 1
                             )),
                             boundary,
+                            boundary_segments: Vec::new(),
                         };
                         elements.push(Element::Room(room));
                     }
@@ -811,6 +817,8 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             end: [line.p2.x, line.p2.y, line.p2.z],
                             width: 0.2,
                             depth: 0.4,
+                            arc: None,
+                            arc_segments: 24,
                         };
                         elements.push(Element::Beam(beam));
                     }
@@ -830,6 +838,8 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             end: [line.p2.x, line.p2.y],
                             height: 3.0,
                             thickness: 0.2,
+                            arc: None,
+                            arc_segments: 24,
                         };
                         elements.push(Element::Wall(wall));
                     }
@@ -900,6 +910,8 @@ fn reconstruct_wall_from_polyline(
         end: [mid_end_x, mid_end_y],
         height,
         thickness,
+        arc: None,
+        arc_segments: 24,
     })
 }
 

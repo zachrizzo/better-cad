@@ -35,6 +35,8 @@ mod tests {
             width: 0.4,
             depth: 0.4,
             height: 3.0,
+            diameter: None,
+            column_segments: 24,
         }
     }
 
