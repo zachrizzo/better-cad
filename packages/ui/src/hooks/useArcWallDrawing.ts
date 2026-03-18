@@ -84,7 +84,7 @@ function buildArcDef(start: Point2, mid: Point2, end: Point2): ArcDef | null {
 }
 
 export function useArcWallDrawing(mode: ViewportMode) {
-  const kernel = useKernel()
+  const { kernel } = useKernel()
   const snapCandidates = usePlanSnapPoints()
 
   const [startPt, setStartPt] = useState<Point2 | null>(null)
@@ -103,7 +103,7 @@ export function useArcWallDrawing(mode: ViewportMode) {
       }
 
       const raw = extractPlanPoint(e, mode)
-      const pt = snapPlanPoint(raw, snapCandidates.points, 0.35) ?? raw
+      const pt = snapPlanPoint(raw, snapCandidates, true, 0.35).point
 
       if (!startPt) {
         setStartPt(pt)
@@ -135,6 +135,7 @@ export function useArcWallDrawing(mode: ViewportMode) {
         arc_segments: 24,
       }
 
+      if (!kernel) return
       kernel.createElement(element as any).then(() => {
         syncEntitiesAndRegenerateMeshes(kernel)
       })
@@ -150,7 +151,7 @@ export function useArcWallDrawing(mode: ViewportMode) {
   const onPointerMove = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
       const raw = extractPlanPoint(e, mode)
-      const pt = snapPlanPoint(raw, snapCandidates.points, 0.35) ?? raw
+      const pt = snapPlanPoint(raw, snapCandidates, true, 0.35).point
       setPreviewPt(pt)
 
       // Update cursor readout
