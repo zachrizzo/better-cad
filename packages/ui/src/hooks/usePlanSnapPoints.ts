@@ -78,11 +78,11 @@ function collectElementSnapPoints(
     if (isWallElement(element)) {
       addSnapCandidate(bucket, element.start[0], element.start[1], 'endpoint')
       addSnapCandidate(bucket, element.end[0], element.end[1], 'endpoint')
+      addSnapCandidate(bucket, (element.start[0] + element.end[0]) / 2, (element.start[1] + element.end[1]) / 2, 'midpoint')
       // Curved wall: add arc center and quadrant snap points
       if (element.arc) {
         const { center, radius, start_angle, end_angle } = element.arc
         addSnapCandidate(bucket, center[0], center[1], 'center')
-        // Quadrant points (0, 90, 180, 270 degrees) that fall within the arc sweep
         for (const qa of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2]) {
           const minA = Math.min(start_angle, end_angle)
           const maxA = Math.max(start_angle, end_angle)
@@ -94,14 +94,19 @@ function collectElementSnapPoints(
       continue
     }
     if (isFloorElement(element) || isRoofElement(element) || isRoomElement(element)) {
-      for (const [x, z] of element.boundary) {
+      const boundary = element.boundary
+      for (let i = 0; i < boundary.length; i++) {
+        const [x, z] = boundary[i]
         addSnapCandidate(bucket, x, z, 'endpoint')
+        const next = boundary[(i + 1) % boundary.length]
+        addSnapCandidate(bucket, (x + next[0]) / 2, (z + next[1]) / 2, 'midpoint')
       }
       continue
     }
     if (isStairElement(element)) {
       addSnapCandidate(bucket, element.start[0], element.start[1], 'endpoint')
       addSnapCandidate(bucket, element.end[0], element.end[1], 'endpoint')
+      addSnapCandidate(bucket, (element.start[0] + element.end[0]) / 2, (element.start[1] + element.end[1]) / 2, 'midpoint')
       continue
     }
     if (isColumnElement(element)) {
@@ -112,16 +117,51 @@ function collectElementSnapPoints(
       // Beam XY in kernel maps to XZ in scene placement tools.
       addSnapCandidate(bucket, element.start[0], element.start[1], 'endpoint')
       addSnapCandidate(bucket, element.end[0], element.end[1], 'endpoint')
+      addSnapCandidate(bucket, (element.start[0] + element.end[0]) / 2, (element.start[1] + element.end[1]) / 2, 'midpoint')
       continue
     }
     if (isDimensionElement(element)) {
       addSnapCandidate(bucket, element.p1[0], element.p1[1], 'endpoint')
       addSnapCandidate(bucket, element.p2[0], element.p2[1], 'endpoint')
+      addSnapCandidate(bucket, (element.p1[0] + element.p2[0]) / 2, (element.p1[1] + element.p2[1]) / 2, 'midpoint')
       continue
     }
     if (isTextAnnotationElement(element)) {
       addSnapCandidate(bucket, element.position[0], element.position[1], 'nearest')
       continue
+    }
+  }
+}
+
+function segmentIntersection(
+  a1: Point2, a2: Point2,
+  b1: Point2, b2: Point2,
+): Point2 | null {
+  const d1x = a2[0] - a1[0], d1y = a2[1] - a1[1]
+  const d2x = b2[0] - b1[0], d2y = b2[1] - b1[1]
+  const cross = d1x * d2y - d1y * d2x
+  if (Math.abs(cross) < 1e-10) return null // parallel
+  const t = ((b1[0] - a1[0]) * d2y - (b1[1] - a1[1]) * d2x) / cross
+  const u = ((b1[0] - a1[0]) * d1y - (b1[1] - a1[1]) * d1x) / cross
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null // outside segments
+  return [a1[0] + t * d1x, a1[1] + t * d1y]
+}
+
+function collectWallIntersections(
+  elements: Iterable<PrototypeElement>,
+  bucket: Map<string, MutablePlanSnapCandidate>,
+  hiddenLevelIds: Set<string>,
+) {
+  const walls: Array<{ start: Point2; end: Point2 }> = []
+  for (const element of elements) {
+    if (!isWallElement(element)) continue
+    if (element.meta.level_id && hiddenLevelIds.has(element.meta.level_id)) continue
+    walls.push({ start: element.start, end: element.end })
+  }
+  for (let i = 0; i < walls.length; i++) {
+    for (let j = i + 1; j < walls.length; j++) {
+      const pt = segmentIntersection(walls[i].start, walls[i].end, walls[j].start, walls[j].end)
+      if (pt) addSnapCandidate(bucket, pt[0], pt[1], 'intersection')
     }
   }
 }
@@ -231,6 +271,7 @@ export function usePlanSnapCandidates(): PlanSnapCandidate[] {
 
     const bucket = new Map<string, MutablePlanSnapCandidate>()
     collectElementSnapPoints(elements.values(), bucket, hiddenLevelIds)
+    collectWallIntersections(elements.values(), bucket, hiddenLevelIds)
 
     const visibleMeshes: Array<Pick<CadMeshData, 'positions' | 'indices'>> = []
     for (const [meshId, mesh] of cadMeshes.entries()) {

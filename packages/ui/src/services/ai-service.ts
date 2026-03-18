@@ -2137,39 +2137,22 @@ async function executeTool(name: string, input: ToolInput, kernel: KernelBackend
       const height = parseOptionalFiniteNumber(input.height, 3.0, 'height')
       const thickness = parseOptionalFiniteNumber(input.thickness, 0.2, 'thickness')
       const levelId = await resolveLevelId(input, kernel)
-
       if (radius <= 0) throw new Error('Invalid curved wall: radius must be positive')
       if (Math.abs(endAngleDeg - startAngleDeg) < 0.1) throw new Error('Invalid curved wall: sweep angle too small')
-
       const startAngle = (startAngleDeg * Math.PI) / 180
       const endAngle = (endAngleDeg * Math.PI) / 180
-
-      const start: [number, number] = [
-        center[0] + radius * Math.cos(startAngle),
-        center[1] + radius * Math.sin(startAngle),
-      ]
-      const end: [number, number] = [
-        center[0] + radius * Math.cos(endAngle),
-        center[1] + radius * Math.sin(endAngle),
-      ]
-
+      const start: [number, number] = [center[0] + radius * Math.cos(startAngle), center[1] + radius * Math.sin(startAngle)]
+      const end: [number, number] = [center[0] + radius * Math.cos(endAngle), center[1] + radius * Math.sin(endAngle)]
       const wallId = `wall-${crypto.randomUUID()}`
       const id = await kernel.createElement({
         kind: 'wall',
         meta: { id: wallId, name: 'Curved Wall', level_id: levelId },
-        start,
-        end,
-        height,
-        thickness,
+        start, end, height, thickness,
         arc: { center, radius, start_angle: startAngle, end_angle: endAngle },
         arc_segments: 24,
-      })
+      } as any)
       await syncEntitiesAndRegenerateMeshes(kernel)
-      return JSON.stringify({
-        success: true,
-        id,
-        message: `Curved wall created: R=${radius}m, ${startAngleDeg}° to ${endAngleDeg}°`,
-      })
+      return JSON.stringify({ success: true, id, message: `Curved wall created: R=${radius}m, ${startAngleDeg}° to ${endAngleDeg}°` })
     }
 
     case 'create_circular_column': {
@@ -2177,19 +2160,13 @@ async function executeTool(name: string, input: ToolInput, kernel: KernelBackend
       const diameter = parseOptionalFiniteNumber(input.diameter, 0.4, 'diameter')
       const height = parseOptionalFiniteNumber(input.height, 3.0, 'height')
       const levelId = await resolveLevelId(input, kernel)
-
       if (diameter <= 0) throw new Error('Invalid circular column: diameter must be positive')
-
       const id = await kernel.createElement({
         kind: 'column',
         meta: { id: crypto.randomUUID(), name: 'Round Column', level_id: levelId },
-        center,
-        width: diameter,
-        depth: diameter,
-        height,
-        diameter,
-        column_segments: 24,
-      })
+        center, width: diameter, depth: diameter, height,
+        diameter, column_segments: 24,
+      } as any)
       await syncEntitiesAndRegenerateMeshes(kernel)
       return JSON.stringify({ success: true, id, message: `Circular column (d=${diameter}m) created at [${center}]` })
     }
@@ -3740,11 +3717,53 @@ async function executeTool(name: string, input: ToolInput, kernel: KernelBackend
   }
 }
 
+// ── AI transport selection ─────────────────────────────────────────────────
+
+const DEFAULT_PROXY_WS_URL = 'ws://localhost:3001'
+
+function getAnthropicApiKey(): string | null {
+  const token = import.meta.env.VITE_ANTHROPIC_API_KEY?.trim()
+  return token ? token : null
+}
+
+function getConfiguredProxyUrl(): string | null {
+  const url = import.meta.env.VITE_AI_PROXY_WS?.trim()
+  return url ? url : null
+}
+
+function getPreferredProxyUrl(): string | null {
+  const configuredProxyUrl = getConfiguredProxyUrl()
+  if (configuredProxyUrl) return configuredProxyUrl
+
+  // Default to the local proxy when no direct browser key is configured.
+  if (!getAnthropicApiKey()) return DEFAULT_PROXY_WS_URL
+  return null
+}
+
+function buildAiSetupError(attemptedProxyUrl?: string): Error {
+  const lines = [
+    'AI is not configured for BetterCAD.',
+    '',
+    'Use one of these setup options:',
+    '1. Recommended: local proxy',
+    '   - In a new terminal: `cd packages/ui/proxy && npm install && npm start`',
+    `   - Optional config file: \`packages/ui/.env\` with \`VITE_AI_PROXY_WS=${attemptedProxyUrl ?? DEFAULT_PROXY_WS_URL}\``,
+    '2. Direct Anthropic API from the browser',
+    '   - In `packages/ui/.env` set `VITE_ANTHROPIC_API_KEY=...`',
+  ]
+
+  if (attemptedProxyUrl) {
+    lines.push('', `Attempted proxy URL: ${attemptedProxyUrl}`)
+  }
+
+  return new Error(lines.join('\n'))
+}
+
 // ── Direct Anthropic API (requires VITE_ANTHROPIC_API_KEY) ─────────────────
 
 function getClient(): Anthropic {
-  const token = import.meta.env.VITE_ANTHROPIC_API_KEY
-  if (!token) throw new Error('VITE_ANTHROPIC_API_KEY not set in .env')
+  const token = getAnthropicApiKey()
+  if (!token) throw buildAiSetupError()
   return new Anthropic({ apiKey: token, dangerouslyAllowBrowser: true })
 }
 
@@ -3860,8 +3879,8 @@ async function* streamBimChatDirect(
 let _proxyWs: WebSocket | null = null
 
 async function getProxyWs(): Promise<WebSocket> {
-  const url = import.meta.env.VITE_AI_PROXY_WS
-  if (!url) throw new Error('VITE_AI_PROXY_WS not set in .env')
+  const url = getPreferredProxyUrl()
+  if (!url) throw buildAiSetupError()
 
   if (_proxyWs && _proxyWs.readyState === WebSocket.OPEN) return _proxyWs
 
@@ -3871,10 +3890,7 @@ async function getProxyWs(): Promise<WebSocket> {
     _proxyWs!.onopen = () => resolve()
     _proxyWs!.onerror = () =>
       reject(
-        new Error(
-          `Cannot connect to AI proxy at ${url}\n` +
-            'Run:  cd packages/ui/proxy && npm install && npm start',
-        ),
+        buildAiSetupError(url),
       )
   })
 
@@ -4039,7 +4055,7 @@ export async function* streamBimChat(
   planMode: boolean,
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
-  if (import.meta.env.VITE_AI_PROXY_WS) {
+  if (getPreferredProxyUrl()) {
     yield* streamBimChatViaProxy(apiMessages, elements, kernel, planMode, signal)
   } else {
     yield* streamBimChatDirect(apiMessages, elements, kernel, planMode, signal)
