@@ -1862,6 +1862,9 @@ impl IfcWriter {
             RoofType::Shed => ".SHED_ROOF.",
             RoofType::Gable => ".GABLE_ROOF.",
             RoofType::Hip => ".HIP_ROOF.",
+            RoofType::BarrelVault => ".BARREL_ROOF.",
+            RoofType::Dome => ".DOME_ROOF.",
+            RoofType::Conical => ".PAVILION_ROOF.",
         };
 
         let profile = self.write_arbitrary_profile(&roof.boundary);
@@ -2162,6 +2165,8 @@ mod tests {
             end: [5.0, 0.0],
             height: 3.0,
             thickness: 0.2,
+            arc: None,
+            arc_segments: 24,
         })];
 
         let bytes = export_ifc(&elements).unwrap();
@@ -2181,11 +2186,14 @@ mod tests {
                 end: [5.0, 0.0],
                 height: 3.0,
                 thickness: 0.2,
+                arc: None,
+                arc_segments: 24,
             }),
             Element::Floor(FloorElement {
                 meta: ElementMeta::new("Floor 1"),
                 boundary: vec![[0.0, 0.0], [5.0, 0.0], [5.0, 4.0], [0.0, 4.0]],
                 thickness: 0.3,
+                boundary_segments: Vec::new(),
             }),
             Element::Column(ColumnElement {
                 meta: ElementMeta::new("Col 1"),
@@ -2193,6 +2201,8 @@ mod tests {
                 width: 0.3,
                 depth: 0.3,
                 height: 3.0,
+                diameter: None,
+                column_segments: 24,
             }),
         ];
 
@@ -2215,6 +2225,8 @@ mod tests {
             end: [5.0, 0.0],
             height: 3.0,
             thickness: 0.2,
+            arc: None,
+            arc_segments: 24,
         };
 
         let elements = vec![
@@ -2255,6 +2267,7 @@ mod tests {
             Element::Room(RoomElement {
                 meta: ElementMeta::new("Living Room"),
                 boundary: vec![[0.0, 0.0], [5.0, 0.0], [5.0, 4.0], [0.0, 4.0]],
+                boundary_segments: Vec::new(),
             }),
         ];
 
@@ -2320,6 +2333,8 @@ mod tests {
             end: [5.0, 0.0],
             height: 3.0,
             thickness: 0.2,
+            arc: None,
+            arc_segments: 24,
         });
         let wall2 = Element::Wall(WallElement {
             meta: {
@@ -2331,6 +2346,8 @@ mod tests {
             end: [5.0, 0.0],
             height: 3.0,
             thickness: 0.2,
+            arc: None,
+            arc_segments: 24,
         });
 
         let elements = vec![level1, level2, wall1, wall2];
@@ -2435,6 +2452,8 @@ END-ISO-10303-21;
                 end: [5.0, 0.0],
                 height: 3.0,
                 thickness: 0.2,
+                arc: None,
+                arc_segments: 24,
             }),
         ];
 

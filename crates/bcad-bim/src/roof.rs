@@ -147,6 +147,9 @@ fn apply_pitched_profile(mesh: &mut TessellatedMesh, roof: &RoofElement, thickne
                 let edge_factor = clamp(t.min(1.0 - t).min(u).min(1.0 - u) / 0.5, 0.0, 1.0);
                 edge_factor * hip_rise
             }
+            // BarrelVault, Dome, and Conical are handled by dedicated mesh
+            // functions and never reach this code path.
+            RoofType::BarrelVault | RoofType::Dome | RoofType::Conical => 0.0,
         };
 
         // Keep underside level and only lift toward the top skin.

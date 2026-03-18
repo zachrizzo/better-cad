@@ -277,11 +277,11 @@ pub struct FoundationElement {
     pub thickness: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
 fn default_column_segments() -> u32 {
     24
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnElement {
     pub meta: ElementMeta,
     pub center: [f64; 2],
@@ -1390,6 +1390,8 @@ mod tests {
             end: [4.0, 0.0],
             height: 3.0,
             thickness: 0.2,
+            arc: None,
+            arc_segments: 24,
         });
         let id = wall.id().to_string();
         state.create_element(wall).unwrap();
@@ -1412,6 +1414,8 @@ mod tests {
             end: [5.0, 0.0],
             height: 3.0,
             thickness: 0.2,
+            arc: None,
+            arc_segments: 24,
         });
         state.update_element(&id, wall_update).unwrap();
         state.delete_element(&id).unwrap();
@@ -1504,6 +1508,8 @@ mod tests {
                 end: [5.0, 0.0],
                 height: 3.0,
                 thickness: 0.2,
+                arc: None,
+                arc_segments: 24,
             }))
             .unwrap();
 
