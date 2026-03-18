@@ -9,9 +9,9 @@
  * ArcDef (center, radius, start_angle, end_angle) stored on the WallElement.
  */
 
-import { useRef, useState, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
-import { useUIStore } from '../stores/ui-store'
+import { useBimStore } from '../stores/bim-store'
 import { useKernel } from './useKernel'
 import { useMeasurementStore } from '../stores/measurement-store'
 import { useSettingsStore } from '../stores/settings-store'
@@ -120,8 +120,8 @@ export function useArcWallDrawing(mode: ViewportMode) {
       const arcDef = buildArcDef(startPt, midPt, pt)
       if (!arcDef) return
 
-      const wallHeight = useSettingsStore.getState().defaultWallHeight ?? 3.0
-      const wallThickness = useSettingsStore.getState().defaultWallThickness ?? 0.2
+      const wallHeight = useBimStore.getState().defaultWallHeight ?? 3.0
+      const wallThickness = useBimStore.getState().defaultWallThickness ?? 0.2
       const activeLevelId = useLevelStore.getState().activeLevelId
 
       const element = {
@@ -135,7 +135,7 @@ export function useArcWallDrawing(mode: ViewportMode) {
         arc_segments: 24,
       }
 
-      kernel.createElement(JSON.stringify(element)).then(() => {
+      kernel.createElement(element as any).then(() => {
         syncEntitiesAndRegenerateMeshes(kernel)
       })
 
