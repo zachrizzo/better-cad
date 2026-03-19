@@ -167,7 +167,7 @@ export function useArcWallDrawing(mode: ViewportMode) {
         useMeasurementStore.getState().setToolReadout(`${formatLength(dist, lengthUnit)}`)
       }
 
-      useMeasurementStore.getState().setCursorPosition(pt)
+      // Cursor position is managed by the viewport, not set here
     },
     [startPt, midPt, mode, snapCandidates],
   )
