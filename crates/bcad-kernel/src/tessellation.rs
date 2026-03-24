@@ -119,7 +119,10 @@ mod tests {
         let mesh = tessellate(&solid).unwrap();
         let vertex_count = (mesh.positions.len() / 3) as u32;
         for &idx in &mesh.indices {
-            assert!(idx < vertex_count, "index {idx} out of range (vertex_count={vertex_count})");
+            assert!(
+                idx < vertex_count,
+                "index {idx} out of range (vertex_count={vertex_count})"
+            );
         }
     }
 
@@ -129,6 +132,9 @@ mod tests {
         let mesh = tessellate(&solid).unwrap();
         let tri_count = mesh.indices.len() / 3;
         // A box has 6 faces, each tessellated into at least 2 triangles
-        assert!(tri_count >= 12, "expected at least 12 triangles, got {tri_count}");
+        assert!(
+            tri_count >= 12,
+            "expected at least 12 triangles, got {tri_count}"
+        );
     }
 }

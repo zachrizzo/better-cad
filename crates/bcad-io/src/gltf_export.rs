@@ -17,9 +17,7 @@ pub struct GltfElementInfo {
 ///
 /// Each tuple pairs a tessellated mesh with its PBR material. The result
 /// is a self-contained GLB byte vector with embedded binary buffer.
-pub fn export_gltf(
-    meshes: &[(&TessellatedMesh, &PbrMaterial)],
-) -> Result<Vec<u8>, crate::IoError> {
+pub fn export_gltf(meshes: &[(&TessellatedMesh, &PbrMaterial)]) -> Result<Vec<u8>, crate::IoError> {
     // Delegate to the extras-aware version with no extras
     let no_extras: Vec<Option<&GltfElementInfo>> = vec![None; meshes.len()];
     export_gltf_inner(meshes, &no_extras)
@@ -182,7 +180,7 @@ fn export_gltf_inner(
     let node_indices: Vec<usize> = (0..nodes.len()).collect();
 
     // Pad binary buffer to 4-byte alignment
-    while bin_data.len() % 4 != 0 {
+    while !bin_data.len().is_multiple_of(4) {
         bin_data.push(0);
     }
 
@@ -198,19 +196,21 @@ fn export_gltf_inner(
         "buffers": [{ "byteLength": bin_data.len() }]
     });
 
-    let json_bytes = serde_json::to_vec(&gltf_json)
-        .map_err(|e| crate::IoError::FormatError(e.to_string()))?;
+    let json_bytes =
+        serde_json::to_vec(&gltf_json).map_err(|e| crate::IoError::FormatError(e.to_string()))?;
 
     // Pad JSON chunk to 4-byte alignment with spaces
     let mut json_chunk = json_bytes;
-    while json_chunk.len() % 4 != 0 {
+    while !json_chunk.len().is_multiple_of(4) {
         json_chunk.push(b' ');
     }
 
     // Build GLB: 12-byte header + JSON chunk (8-byte header + data) + BIN chunk (8-byte header + data)
     let total_len = 12 + 8 + json_chunk.len() + 8 + bin_data.len();
     if total_len > u32::MAX as usize {
-        return Err(crate::IoError::FormatError("GLB exceeds 4 GiB limit".into()));
+        return Err(crate::IoError::FormatError(
+            "GLB exceeds 4 GiB limit".into(),
+        ));
     }
     let mut glb = Vec::with_capacity(total_len);
 
@@ -284,19 +284,16 @@ mod tests {
             element_name: "Wall 1".to_string(),
         };
 
-        let glb = export_gltf_with_extras(
-            &[(&mesh, &mat)],
-            &[Some(info)],
-        )
-        .expect("export with extras should succeed");
+        let glb = export_gltf_with_extras(&[(&mesh, &mat)], &[Some(info)])
+            .expect("export with extras should succeed");
 
         // Verify it's a valid GLB
         assert_eq!(&glb[0..4], b"glTF");
 
         // Extract JSON chunk and verify extras are present
         let json_len = u32::from_le_bytes([glb[12], glb[13], glb[14], glb[15]]) as usize;
-        let json_str = std::str::from_utf8(&glb[20..20 + json_len])
-            .expect("JSON chunk should be valid UTF-8");
+        let json_str =
+            std::str::from_utf8(&glb[20..20 + json_len]).expect("JSON chunk should be valid UTF-8");
         let json_val: serde_json::Value =
             serde_json::from_str(json_str.trim()).expect("JSON should be parseable");
         let node = &json_val["nodes"][0];

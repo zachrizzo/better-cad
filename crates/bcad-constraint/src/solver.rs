@@ -34,7 +34,7 @@ pub fn solve(sketch: &mut Sketch) -> SolverResult {
     let n_residuals: usize = sketch
         .constraints
         .iter()
-        .map(|c| equations::residual_count(c))
+        .map(equations::residual_count)
         .sum();
 
     if n_params == 0 || n_residuals == 0 {
@@ -70,7 +70,7 @@ pub fn solve(sketch: &mut Sketch) -> SolverResult {
         let mut row_offset = 0usize;
         for c in &constraints_clone {
             let triplets =
-                equations::jacobian_contributions(c, sketch, &param_map, n_params, row_offset);
+                equations::jacobian_contributions(c, sketch, &param_map, row_offset);
             for (r, c_idx, val) in triplets {
                 jac[(r, c_idx)] = val;
             }
@@ -86,23 +86,20 @@ pub fn solve(sketch: &mut Sketch) -> SolverResult {
 
         let decomp = jtj.lu();
         let neg_jtr = -jtr;
-        let delta = decomp.solve(&neg_jtr);
-
-        let delta = match delta {
-            Some(d) => d,
-            None => {
-                // Singular matrix - solver cannot proceed
-                return SolverResult {
-                    converged: false,
-                    iterations: iteration,
-                    residual_norm: norm,
-                };
-            }
+        let Some(delta) = decomp.solve(&neg_jtr) else {
+            // Singular matrix - solver cannot proceed
+            return SolverResult {
+                converged: false,
+                iterations: iteration,
+                residual_norm: norm,
+            };
         };
 
         // e. Update parameters
         for (&pid, &col_base) in &param_map {
-            let Some(p) = sketch.get_point_mut(pid) else { continue; };
+            let Some(p) = sketch.get_point_mut(pid) else {
+                continue;
+            };
             p.x += delta[col_base];
             p.y += delta[col_base + 1];
         }
@@ -154,40 +151,16 @@ mod tests {
         assert!(result.converged, "solver did not converge");
 
         let pt1 = sketch.get_point(p1).unwrap();
-        assert!(
-            (pt1.x - 2.0).abs() < 1e-6,
-            "p1.x = {}, expected 2.0",
-            pt1.x
-        );
-        assert!(
-            (pt1.y - 0.0).abs() < 1e-6,
-            "p1.y = {}, expected 0.0",
-            pt1.y
-        );
+        assert!((pt1.x - 2.0).abs() < 1e-6, "p1.x = {}, expected 2.0", pt1.x);
+        assert!((pt1.y - 0.0).abs() < 1e-6, "p1.y = {}, expected 0.0", pt1.y);
 
         let pt2 = sketch.get_point(p2).unwrap();
-        assert!(
-            (pt2.x - 2.0).abs() < 1e-6,
-            "p2.x = {}, expected 2.0",
-            pt2.x
-        );
-        assert!(
-            (pt2.y - 1.0).abs() < 1e-6,
-            "p2.y = {}, expected 1.0",
-            pt2.y
-        );
+        assert!((pt2.x - 2.0).abs() < 1e-6, "p2.x = {}, expected 2.0", pt2.x);
+        assert!((pt2.y - 1.0).abs() < 1e-6, "p2.y = {}, expected 1.0", pt2.y);
 
         let pt3 = sketch.get_point(p3).unwrap();
-        assert!(
-            (pt3.x - 0.0).abs() < 1e-6,
-            "p3.x = {}, expected 0.0",
-            pt3.x
-        );
-        assert!(
-            (pt3.y - 1.0).abs() < 1e-6,
-            "p3.y = {}, expected 1.0",
-            pt3.y
-        );
+        assert!((pt3.x - 0.0).abs() < 1e-6, "p3.x = {}, expected 0.0", pt3.x);
+        assert!((pt3.y - 1.0).abs() < 1e-6, "p3.y = {}, expected 1.0", pt3.y);
     }
 
     #[test]

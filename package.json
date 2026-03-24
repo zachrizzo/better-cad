@@ -1,14 +1,12 @@
 {
   "name": "better-cad",
   "private": true,
-  "version": "0.0.1",
-  "description": "Free, cross-platform CAD tool for architects",
+  "version": "0.1.0",
+  "description": "Free, cross-platform CAD tool for architects — native Rust + wgpu + egui",
   "scripts": {
-    "dev": "pnpm --filter @bettercad/ui dev",
-    "tauri:dev": "bash scripts/tauri-dev.sh",
-    "build": "pnpm --filter @bettercad/ui build",
-    "build:wasm": "bash scripts/build-wasm.sh",
-    "check": "pnpm --filter @bettercad/ui typecheck",
-    "test": "pnpm --filter @bettercad/ui test"
+    "proxy": "cd proxy && npm start",
+    "build": "cargo build -p bcad-app --release",
+    "dev": "node proxy/bettercad-ai-proxy.mjs & cargo run -p bcad-app",
+    "test": "cargo test --workspace"
   }
 }

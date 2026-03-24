@@ -16,17 +16,14 @@ use truck_topology::compress::CompressedSolid;
 /// using truck-stepio's `CompleteStepDisplay`.
 pub fn export_step(solids: &[Solid]) -> Result<Vec<u8>, crate::IoError> {
     if solids.is_empty() {
-        return Err(crate::IoError::FormatError(
-            "no solids to export".into(),
-        ));
+        return Err(crate::IoError::FormatError("no solids to export".into()));
     }
 
     let compressed: Vec<CompressedSolid<Point3, Curve, Surface>> =
         solids.iter().map(|s| s.compress()).collect();
 
     // Use StepModels to combine multiple solids into one STEP file
-    let models: out::StepModels<'_, Point3, Curve, Surface> =
-        compressed.iter().collect();
+    let models: out::StepModels<'_, Point3, Curve, Surface> = compressed.iter().collect();
 
     let step_string = out::CompleteStepDisplay::new(
         models,

@@ -89,36 +89,15 @@ pub struct BackendCapabilities {
 }
 
 pub fn default_backend_capabilities() -> BackendCapabilities {
-    let mut formats = BTreeMap::new();
-    formats.insert(
-        "step".to_string(),
-        FormatCapability {
-            import: true,
-            export: true,
-        },
-    );
-    formats.insert(
-        "dxf".to_string(),
-        FormatCapability {
-            import: true,
-            export: true,
-        },
-    );
-    formats.insert(
-        "ifc".to_string(),
-        FormatCapability {
-            import: true,
-            export: true,
-        },
-    );
-    formats.insert(
-        "gltf".to_string(),
-        FormatCapability {
-            import: false,
-            export: true,
-        },
-    );
-    BackendCapabilities { formats }
+    let cap = |import, export| FormatCapability { import, export };
+    BackendCapabilities {
+        formats: BTreeMap::from([
+            ("step".to_string(), cap(true, true)),
+            ("dxf".to_string(), cap(true, true)),
+            ("ifc".to_string(), cap(true, true)),
+            ("gltf".to_string(), cap(false, true)),
+        ]),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +136,24 @@ impl ElementMeta {
             classification: None,
             layer: None,
         }
+    }
+
+    /// Builder: set the level ID.
+    pub fn with_level(mut self, level_id: impl Into<LevelRef>) -> Self {
+        self.level_id = Some(level_id.into());
+        self
+    }
+
+    /// Builder: set the host ID (e.g. door/window hosted on a wall).
+    pub fn with_host(mut self, host_id: impl Into<HostRef>) -> Self {
+        self.host_id = Some(host_id.into());
+        self
+    }
+
+    /// Builder: set the family type ID.
+    pub fn with_type(mut self, type_id: impl Into<TypeRef>) -> Self {
+        self.type_id = Some(type_id.into());
+        self
     }
 }
 
@@ -216,6 +213,47 @@ pub struct WallElement {
     pub arc_segments: u32,
 }
 
+/// Pre-computed wall direction, normal, and center point at a given position.
+pub struct WallGeometry {
+    /// Unit vector along the wall direction (start to end).
+    pub axis_u: [f64; 2],
+    /// Unit normal perpendicular to the wall direction.
+    pub axis_v: [f64; 2],
+    /// Wall centerline length.
+    pub length: f64,
+}
+
+impl WallElement {
+    /// Compute the wall's direction vectors and centerline length.
+    ///
+    /// Returns `None` if the wall has zero (or near-zero) length.
+    pub fn geometry(&self) -> Option<WallGeometry> {
+        let dx = self.end[0] - self.start[0];
+        let dy = self.end[1] - self.start[1];
+        let length = (dx * dx + dy * dy).sqrt();
+        if length < 1e-8 {
+            return None;
+        }
+        let ux = dx / length;
+        let uy = dy / length;
+        Some(WallGeometry {
+            axis_u: [ux, uy],
+            axis_v: [-uy, ux],
+            length,
+        })
+    }
+
+    /// Compute the world-space XY position at a fractional offset along the wall.
+    ///
+    /// `t` is in [0, 1], where 0 is `self.start` and 1 is `self.end`.
+    pub fn point_along(&self, t: f64) -> [f64; 2] {
+        [
+            self.start[0] + (self.end[0] - self.start[0]) * t,
+            self.start[1] + (self.end[1] - self.start[1]) * t,
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FloorElement {
     pub meta: ElementMeta,
@@ -227,9 +265,10 @@ pub struct FloorElement {
     pub boundary_segments: Vec<BoundarySegment>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RoofType {
+    #[default]
     Flat,
     Shed,
     Gable,
@@ -237,12 +276,6 @@ pub enum RoofType {
     BarrelVault,
     Dome,
     Conical,
-}
-
-impl Default for RoofType {
-    fn default() -> Self {
-        Self::Flat
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -312,17 +345,63 @@ pub struct BeamElement {
     pub arc_segments: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DoorSwing {
-    Left,
-    Right,
+    #[serde(alias = "left")]
+    OutLeft,
+    #[serde(alias = "right")]
+    #[default]
+    OutRight,
+    InLeft,
+    InRight,
 }
 
-impl Default for DoorSwing {
-    fn default() -> Self {
-        Self::Right
+impl DoorSwing {
+    pub fn hinge_on_start(self) -> bool {
+        matches!(self, Self::OutLeft | Self::InLeft)
     }
+
+    pub fn opens_towards_positive_normal(self) -> bool {
+        matches!(self, Self::OutLeft | Self::OutRight)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DoorHardwareType {
+    None,
+    Knob,
+    #[default]
+    Lever,
+    PullBar,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DoorStyle {
+    #[default]
+    Flush,
+    Panel,
+    Double,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowHardwareType {
+    None,
+    #[default]
+    Latch,
+    Crank,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowStyle {
+    #[default]
+    Picture,
+    Casement,
+    DoubleHung,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -335,6 +414,10 @@ pub struct DoorElement {
     pub sill_height: f64,
     #[serde(default)]
     pub swing: DoorSwing,
+    #[serde(default)]
+    pub hardware_type: DoorHardwareType,
+    #[serde(default)]
+    pub style: DoorStyle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -345,19 +428,18 @@ pub struct WindowElement {
     pub width: f64,
     pub height: f64,
     pub sill_height: f64,
+    #[serde(default)]
+    pub hardware_type: WindowHardwareType,
+    #[serde(default)]
+    pub style: WindowStyle,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StairType {
+    #[default]
     Straight,
     Spiral,
-}
-
-impl Default for StairType {
-    fn default() -> Self {
-        Self::Straight
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -538,7 +620,7 @@ pub enum TagType {
     Beam,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HatchPattern {
     Concrete,
@@ -549,13 +631,8 @@ pub enum HatchPattern {
     Steel,
     Gravel,
     Glass,
+    #[default]
     None,
-}
-
-impl Default for HatchPattern {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -649,12 +726,22 @@ pub struct CabinetElement {
     pub drawer_count: u32,
 }
 
-fn default_cabinet_width() -> f64 { 0.61 }
-fn default_cabinet_depth() -> f64 { 0.61 }
-fn default_cabinet_height() -> f64 { 0.91 }
+fn default_cabinet_width() -> f64 {
+    0.61
+}
+fn default_cabinet_depth() -> f64 {
+    0.61
+}
+fn default_cabinet_height() -> f64 {
+    0.91
+}
 
-fn default_furniture_width() -> f64 { 0.6 }
-fn default_furniture_depth() -> f64 { 0.6 }
+fn default_furniture_width() -> f64 {
+    0.6
+}
+fn default_furniture_depth() -> f64 {
+    0.6
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SiteDetailElement {
@@ -678,7 +765,9 @@ pub struct LeaderAnnotationElement {
     pub arrow_type: String,
 }
 
-fn default_arrow_type() -> String { "closed".to_string() }
+fn default_arrow_type() -> String {
+    "closed".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeynoteElement {
@@ -698,7 +787,9 @@ pub struct TagElement {
     pub auto_text: bool,
 }
 
-fn default_auto_text() -> bool { true }
+fn default_auto_text() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -734,73 +825,57 @@ pub enum Element {
     Cabinet(CabinetElement),
 }
 
+/// Dispatch through every `Element` variant, binding the inner struct to `$e`.
+///
+/// Every element type carries a `.meta` field, so this macro eliminates the
+/// need to list all 28 variants by hand in accessor methods.
+macro_rules! for_each_element {
+    ($self:expr, $e:ident => $body:expr) => {
+        match $self {
+            Element::Site($e) => $body,
+            Element::Level($e) => $body,
+            Element::Grid($e) => $body,
+            Element::Wall($e) => $body,
+            Element::Floor($e) => $body,
+            Element::Roof($e) => $body,
+            Element::Foundation($e) => $body,
+            Element::Column($e) => $body,
+            Element::Beam($e) => $body,
+            Element::Door($e) => $body,
+            Element::Window($e) => $body,
+            Element::Stair($e) => $body,
+            Element::Room($e) => $body,
+            Element::View($e) => $body,
+            Element::Sheet($e) => $body,
+            Element::Material($e) => $body,
+            Element::FamilyType($e) => $body,
+            Element::Generic($e) => $body,
+            Element::Electrical($e) => $body,
+            Element::Plumbing($e) => $body,
+            Element::Furniture($e) => $body,
+            Element::SiteDetail($e) => $body,
+            Element::LeaderAnnotation($e) => $body,
+            Element::Keynote($e) => $body,
+            Element::Tag($e) => $body,
+            Element::Hvac($e) => $body,
+            Element::FireSafety($e) => $body,
+            Element::Accessibility($e) => $body,
+            Element::Cabinet($e) => $body,
+        }
+    };
+}
+
 impl Element {
     pub fn id(&self) -> &str {
-        match self {
-            Element::Site(e) => &e.meta.id,
-            Element::Level(e) => &e.meta.id,
-            Element::Grid(e) => &e.meta.id,
-            Element::Wall(e) => &e.meta.id,
-            Element::Floor(e) => &e.meta.id,
-            Element::Roof(e) => &e.meta.id,
-            Element::Foundation(e) => &e.meta.id,
-            Element::Column(e) => &e.meta.id,
-            Element::Beam(e) => &e.meta.id,
-            Element::Door(e) => &e.meta.id,
-            Element::Window(e) => &e.meta.id,
-            Element::Stair(e) => &e.meta.id,
-            Element::Room(e) => &e.meta.id,
-            Element::View(e) => &e.meta.id,
-            Element::Sheet(e) => &e.meta.id,
-            Element::Material(e) => &e.meta.id,
-            Element::FamilyType(e) => &e.meta.id,
-            Element::Generic(e) => &e.meta.id,
-            Element::Electrical(e) => &e.meta.id,
-            Element::Plumbing(e) => &e.meta.id,
-            Element::Furniture(e) => &e.meta.id,
-            Element::SiteDetail(e) => &e.meta.id,
-            Element::LeaderAnnotation(e) => &e.meta.id,
-            Element::Keynote(e) => &e.meta.id,
-            Element::Tag(e) => &e.meta.id,
-            Element::Hvac(e) => &e.meta.id,
-            Element::FireSafety(e) => &e.meta.id,
-            Element::Accessibility(e) => &e.meta.id,
-            Element::Cabinet(e) => &e.meta.id,
-        }
+        &self.meta().id
     }
 
     pub fn meta(&self) -> &ElementMeta {
-        match self {
-            Element::Site(e) => &e.meta,
-            Element::Level(e) => &e.meta,
-            Element::Grid(e) => &e.meta,
-            Element::Wall(e) => &e.meta,
-            Element::Floor(e) => &e.meta,
-            Element::Roof(e) => &e.meta,
-            Element::Foundation(e) => &e.meta,
-            Element::Column(e) => &e.meta,
-            Element::Beam(e) => &e.meta,
-            Element::Door(e) => &e.meta,
-            Element::Window(e) => &e.meta,
-            Element::Stair(e) => &e.meta,
-            Element::Room(e) => &e.meta,
-            Element::View(e) => &e.meta,
-            Element::Sheet(e) => &e.meta,
-            Element::Material(e) => &e.meta,
-            Element::FamilyType(e) => &e.meta,
-            Element::Generic(e) => &e.meta,
-            Element::Electrical(e) => &e.meta,
-            Element::Plumbing(e) => &e.meta,
-            Element::Furniture(e) => &e.meta,
-            Element::SiteDetail(e) => &e.meta,
-            Element::LeaderAnnotation(e) => &e.meta,
-            Element::Keynote(e) => &e.meta,
-            Element::Tag(e) => &e.meta,
-            Element::Hvac(e) => &e.meta,
-            Element::FireSafety(e) => &e.meta,
-            Element::Accessibility(e) => &e.meta,
-            Element::Cabinet(e) => &e.meta,
-        }
+        for_each_element!(self, e => &e.meta)
+    }
+
+    pub fn meta_mut(&mut self) -> &mut ElementMeta {
+        for_each_element!(self, e => &mut e.meta)
     }
 
     pub fn kind_name(&self) -> &'static str {
@@ -958,7 +1033,9 @@ impl PrototypeState {
         if matches!(target, Element::Wall(_)) {
             for element in &self.project.elements {
                 match element {
-                    Element::Door(door) if door.wall_id == id => delete_ids.push(door.meta.id.clone()),
+                    Element::Door(door) if door.wall_id == id => {
+                        delete_ids.push(door.meta.id.clone())
+                    }
                     Element::Window(window) if window.wall_id == id => {
                         delete_ids.push(window.meta.id.clone())
                     }
@@ -972,40 +1049,22 @@ impl PrototypeState {
                 continue;
             }
             let meta = element.meta();
-            if meta.level_id.as_ref().map(|r| r.as_ref()) == Some(id) {
-                return Err(DomainError::DeleteBlocked(format!(
-                    "level {} is still referenced by element {}",
-                    id,
-                    element.id()
-                )));
-            }
-            if meta.type_id.as_ref().map(|r| r.as_ref()) == Some(id) {
-                return Err(DomainError::DeleteBlocked(format!(
-                    "type {} is still referenced by element {}",
-                    id,
-                    element.id()
-                )));
-            }
-            if meta.parent_id.as_ref().map(|r| r.as_ref()) == Some(id) {
-                return Err(DomainError::DeleteBlocked(format!(
-                    "parent {} is still referenced by element {}",
-                    id,
-                    element.id()
-                )));
-            }
-            if meta.material_id.as_ref().map(|r| r.as_ref()) == Some(id) {
-                return Err(DomainError::DeleteBlocked(format!(
-                    "material {} is still referenced by element {}",
-                    id,
-                    element.id()
-                )));
-            }
-            if meta.host_id.as_ref().map(|r| r.as_ref()) == Some(id) {
-                return Err(DomainError::DeleteBlocked(format!(
-                    "host {} is still referenced by element {}",
-                    id,
-                    element.id()
-                )));
+            let ref_fields: &[(&str, Option<&str>)] = &[
+                ("level", meta.level_id.as_deref()),
+                ("type", meta.type_id.as_deref()),
+                ("parent", meta.parent_id.as_deref()),
+                ("material", meta.material_id.as_deref()),
+                ("host", meta.host_id.as_deref()),
+            ];
+            for &(role, ref_value) in ref_fields {
+                if ref_value == Some(id) {
+                    return Err(DomainError::DeleteBlocked(format!(
+                        "{} {} is still referenced by element {}",
+                        role,
+                        id,
+                        element.id()
+                    )));
+                }
             }
         }
 
@@ -1023,7 +1082,9 @@ impl PrototypeState {
         let mut ordered: Vec<&Element> = self.project.elements.iter().collect();
         ordered.sort_by_key(|element| match element {
             Element::Level(_) => 0,
-            Element::Site(_) | Element::Grid(_) | Element::Material(_) | Element::FamilyType(_) => 1,
+            Element::Site(_) | Element::Grid(_) | Element::Material(_) | Element::FamilyType(_) => {
+                1
+            }
             Element::Wall(_)
             | Element::Foundation(_)
             | Element::Floor(_)
@@ -1033,8 +1094,14 @@ impl PrototypeState {
             | Element::Roof(_)
             | Element::Room(_) => 2,
             Element::Door(_) | Element::Window(_) => 3,
-            Element::Electrical(_) | Element::Plumbing(_) | Element::Furniture(_) | Element::SiteDetail(_)
-            | Element::Hvac(_) | Element::FireSafety(_) | Element::Accessibility(_) | Element::Cabinet(_) => 3,
+            Element::Electrical(_)
+            | Element::Plumbing(_)
+            | Element::Furniture(_)
+            | Element::SiteDetail(_)
+            | Element::Hvac(_)
+            | Element::FireSafety(_)
+            | Element::Accessibility(_)
+            | Element::Cabinet(_) => 3,
             Element::View(_) | Element::Sheet(_) | Element::Generic(_) => 4,
             Element::LeaderAnnotation(_) | Element::Keynote(_) | Element::Tag(_) => 5,
         });
@@ -1042,10 +1109,17 @@ impl PrototypeState {
     }
 
     fn find_element(&self, id: &str) -> Option<&Element> {
-        self.project.elements.iter().find(|element| element.id() == id)
+        self.project
+            .elements
+            .iter()
+            .find(|element| element.id() == id)
     }
 
-    fn validate_common_refs(&self, meta: &ElementMeta, element_kind: &str) -> Result<(), DomainError> {
+    fn validate_common_refs(
+        &self,
+        meta: &ElementMeta,
+        element_kind: &str,
+    ) -> Result<(), DomainError> {
         if meta.id.trim().is_empty() {
             return Err(DomainError::ValidationError(format!(
                 "{} id must be non-empty",
@@ -1059,84 +1133,38 @@ impl PrototypeState {
             )));
         }
 
-        if let Some(level_ref) = &meta.level_id {
-            let Some(level) = self.find_element(level_ref.as_ref()) else {
-                return Err(DomainError::ValidationError(format!(
-                    "{} references missing level {}",
-                    element_kind, level_ref
-                )));
-            };
-            if !matches!(level, Element::Level(_)) {
-                return Err(DomainError::ValidationError(format!(
-                    "{} references non-level {} as level",
-                    element_kind, level_ref
-                )));
-            }
-            if level.id() == meta.id {
-                return Err(DomainError::ValidationError(format!(
-                    "{} cannot reference itself as level",
-                    element_kind
-                )));
-            }
-        }
+        // Validate each optional reference field: check existence, self-reference,
+        // and (where applicable) that the target is the correct element kind.
+        type RefCheck<'a> = (&'a str, Option<&'a str>, Option<fn(&Element) -> bool>);
+        let ref_checks: &[RefCheck<'_>] = &[
+            ("level", meta.level_id.as_deref(), Some(|e: &Element| matches!(e, Element::Level(_)))),
+            ("host", meta.host_id.as_deref(), None),
+            ("type", meta.type_id.as_deref(), Some(|e: &Element| matches!(e, Element::FamilyType(_)))),
+            ("parent", meta.parent_id.as_deref(), None),
+            ("material", meta.material_id.as_deref(), Some(|e: &Element| matches!(e, Element::Material(_)))),
+        ];
 
-        if let Some(host_ref) = &meta.host_id {
-            let Some(host) = self.find_element(host_ref.as_ref()) else {
+        for &(role, ref_value, type_check) in ref_checks {
+            let Some(ref_id) = ref_value else { continue };
+            let Some(target) = self.find_element(ref_id) else {
                 return Err(DomainError::ValidationError(format!(
-                    "{} references missing host {}",
-                    element_kind, host_ref
+                    "{} references missing {} {}",
+                    element_kind, role, ref_id
                 )));
             };
-            if host.id() == meta.id {
+            if target.id() == meta.id {
                 return Err(DomainError::ValidationError(format!(
-                    "{} cannot reference itself as host",
-                    element_kind
+                    "{} cannot reference itself as {}",
+                    element_kind, role
                 )));
             }
-        }
-
-        if let Some(type_ref) = &meta.type_id {
-            let Some(type_element) = self.find_element(type_ref.as_ref()) else {
-                return Err(DomainError::ValidationError(format!(
-                    "{} references missing type {}",
-                    element_kind, type_ref
-                )));
-            };
-            if !matches!(type_element, Element::FamilyType(_)) {
-                return Err(DomainError::ValidationError(format!(
-                    "{} type reference {} must point to a family_type",
-                    element_kind, type_ref
-                )));
-            }
-        }
-
-        if let Some(parent_ref) = &meta.parent_id {
-            let Some(parent) = self.find_element(parent_ref.as_ref()) else {
-                return Err(DomainError::ValidationError(format!(
-                    "{} references missing parent {}",
-                    element_kind, parent_ref
-                )));
-            };
-            if parent.id() == meta.id {
-                return Err(DomainError::ValidationError(format!(
-                    "{} cannot reference itself as parent",
-                    element_kind
-                )));
-            }
-        }
-
-        if let Some(material_ref) = &meta.material_id {
-            let Some(material) = self.find_element(material_ref.as_ref()) else {
-                return Err(DomainError::ValidationError(format!(
-                    "{} references missing material {}",
-                    element_kind, material_ref
-                )));
-            };
-            if !matches!(material, Element::Material(_)) {
-                return Err(DomainError::ValidationError(format!(
-                    "{} material reference {} must point to a material",
-                    element_kind, material_ref
-                )));
+            if let Some(check) = type_check {
+                if !check(target) {
+                    return Err(DomainError::ValidationError(format!(
+                        "{} {} reference {} must point to a {}",
+                        element_kind, role, ref_id, role
+                    )));
+                }
             }
         }
 
@@ -1150,6 +1178,69 @@ impl PrototypeState {
         if element.meta().level_id.is_none() {
             return Err(DomainError::ValidationError(format!(
                 "{} requires level_id",
+                kind
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validate a wall-hosted opening (door or window).
+    ///
+    /// Shared logic for both door and window validation: checks dimensions,
+    /// position, host reference, and wall bounds.
+    #[allow(clippy::too_many_arguments)]
+    fn validate_wall_hosted_opening(
+        &self,
+        kind: &str,
+        meta: &ElementMeta,
+        wall_id: &str,
+        width: f64,
+        height: f64,
+        sill_height: f64,
+        position_along_wall: f64,
+    ) -> Result<(), DomainError> {
+        if width <= 0.0 || height <= 0.0 || sill_height < 0.0 {
+            return Err(DomainError::ValidationError(format!(
+                "{} width/height must be > 0 and sill height must be >= 0",
+                kind
+            )));
+        }
+        if !(0.0..=1.0).contains(&position_along_wall) {
+            return Err(DomainError::ValidationError(format!(
+                "{} position_along_wall must be in [0, 1]",
+                kind
+            )));
+        }
+        let Some(host_id) = &meta.host_id else {
+            return Err(DomainError::ValidationError(format!(
+                "{} requires meta.host_id",
+                kind
+            )));
+        };
+        if host_id.as_ref() != wall_id {
+            return Err(DomainError::ValidationError(format!(
+                "{} host_id must match wall_id",
+                kind
+            )));
+        }
+        let Some(Element::Wall(wall)) = self.find_element(wall_id) else {
+            return Err(DomainError::ValidationError(format!(
+                "{} references missing wall {}",
+                kind, wall_id
+            )));
+        };
+        let wall_len = (wall.end[0] - wall.start[0]).hypot(wall.end[1] - wall.start[1]);
+        if wall_len < 1e-6 {
+            return Err(DomainError::ValidationError(format!(
+                "{} host wall has zero length",
+                kind
+            )));
+        }
+        let center = position_along_wall * wall_len;
+        let half = width * 0.5;
+        if half > wall_len || center < half || center > wall_len - half {
+            return Err(DomainError::ValidationError(format!(
+                "{} opening exceeds host wall bounds",
                 kind
             )));
         }
@@ -1239,86 +1330,26 @@ impl PrototypeState {
                 }
             }
             Element::Door(door) => {
-                if door.width <= 0.0 || door.height <= 0.0 || door.sill_height < 0.0 {
-                    return Err(DomainError::ValidationError(
-                        "door width/height must be > 0 and sill height must be >= 0".to_string(),
-                    ));
-                }
-                if !(0.0..=1.0).contains(&door.position_along_wall) {
-                    return Err(DomainError::ValidationError(
-                        "door position_along_wall must be in [0, 1]".to_string(),
-                    ));
-                }
-                let Some(host_id) = &door.meta.host_id else {
-                    return Err(DomainError::ValidationError(
-                        "door requires meta.host_id".to_string(),
-                    ));
-                };
-                if host_id.as_ref() != door.wall_id {
-                    return Err(DomainError::ValidationError(
-                        "door host_id must match wall_id".to_string(),
-                    ));
-                }
-                let Some(Element::Wall(wall)) = self.find_element(&door.wall_id) else {
-                    return Err(DomainError::ValidationError(format!(
-                        "door references missing wall {}",
-                        door.wall_id
-                    )));
-                };
-                let wall_len = (wall.end[0] - wall.start[0]).hypot(wall.end[1] - wall.start[1]);
-                if wall_len < 1e-6 {
-                    return Err(DomainError::ValidationError(
-                        "door host wall has zero length".to_string(),
-                    ));
-                }
-                let center = door.position_along_wall * wall_len;
-                let half = door.width * 0.5;
-                if half > wall_len || center < half || center > wall_len - half {
-                    return Err(DomainError::ValidationError(
-                        "door opening exceeds host wall bounds".to_string(),
-                    ));
-                }
+                self.validate_wall_hosted_opening(
+                    "door",
+                    &door.meta,
+                    &door.wall_id,
+                    door.width,
+                    door.height,
+                    door.sill_height,
+                    door.position_along_wall,
+                )?;
             }
             Element::Window(window) => {
-                if window.width <= 0.0 || window.height <= 0.0 || window.sill_height < 0.0 {
-                    return Err(DomainError::ValidationError(
-                        "window width/height must be > 0 and sill height must be >= 0".to_string(),
-                    ));
-                }
-                if !(0.0..=1.0).contains(&window.position_along_wall) {
-                    return Err(DomainError::ValidationError(
-                        "window position_along_wall must be in [0, 1]".to_string(),
-                    ));
-                }
-                let Some(host_id) = &window.meta.host_id else {
-                    return Err(DomainError::ValidationError(
-                        "window requires meta.host_id".to_string(),
-                    ));
-                };
-                if host_id.as_ref() != window.wall_id {
-                    return Err(DomainError::ValidationError(
-                        "window host_id must match wall_id".to_string(),
-                    ));
-                }
-                let Some(Element::Wall(wall)) = self.find_element(&window.wall_id) else {
-                    return Err(DomainError::ValidationError(format!(
-                        "window references missing wall {}",
-                        window.wall_id
-                    )));
-                };
-                let wall_len = (wall.end[0] - wall.start[0]).hypot(wall.end[1] - wall.start[1]);
-                if wall_len < 1e-6 {
-                    return Err(DomainError::ValidationError(
-                        "window host wall has zero length".to_string(),
-                    ));
-                }
-                let center = window.position_along_wall * wall_len;
-                let half = window.width * 0.5;
-                if half > wall_len || center < half || center > wall_len - half {
-                    return Err(DomainError::ValidationError(
-                        "window opening exceeds host wall bounds".to_string(),
-                    ));
-                }
+                self.validate_wall_hosted_opening(
+                    "window",
+                    &window.meta,
+                    &window.wall_id,
+                    window.width,
+                    window.height,
+                    window.sill_height,
+                    window.position_along_wall,
+                )?;
             }
             Element::Stair(stair) => {
                 if stair.width <= 0.0 || stair.risers == 0 || stair.total_height <= 0.0 {
@@ -1345,6 +1376,64 @@ impl PrototypeState {
 
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Polygon geometry utilities
+// ---------------------------------------------------------------------------
+
+/// Compute the area of a 2D polygon using the shoelace formula.
+///
+/// Returns the absolute (unsigned) area. Works for both CW and CCW winding.
+pub fn polygon_area(boundary: &[[f64; 2]]) -> f64 {
+    polygon_signed_area(boundary).abs()
+}
+
+/// Compute the signed area of a 2D polygon using the shoelace formula.
+///
+/// Positive for CCW winding, negative for CW.
+pub fn polygon_signed_area(boundary: &[[f64; 2]]) -> f64 {
+    let n = boundary.len();
+    if n < 3 {
+        return 0.0;
+    }
+    let mut sum = 0.0;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        sum += boundary[i][0] * boundary[j][1] - boundary[j][0] * boundary[i][1];
+    }
+    sum / 2.0
+}
+
+/// Compute the perimeter of a 2D polygon.
+pub fn polygon_perimeter(boundary: &[[f64; 2]]) -> f64 {
+    let n = boundary.len();
+    if n < 2 {
+        return 0.0;
+    }
+    let mut sum = 0.0;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let dx = boundary[j][0] - boundary[i][0];
+        let dy = boundary[j][1] - boundary[i][1];
+        sum += (dx * dx + dy * dy).sqrt();
+    }
+    sum
+}
+
+/// Compute the centroid (average of vertices) of a 2D polygon.
+pub fn polygon_centroid(boundary: &[[f64; 2]]) -> [f64; 2] {
+    if boundary.is_empty() {
+        return [0.0, 0.0];
+    }
+    let n = boundary.len() as f64;
+    let mut cx = 0.0;
+    let mut cy = 0.0;
+    for &[x, y] in boundary {
+        cx += x;
+        cy += y;
+    }
+    [cx / n, cy / n]
 }
 
 #[cfg(test)]
@@ -1462,6 +1551,8 @@ mod tests {
             width: 1.2,
             height: 1.1,
             sill_height: 0.9,
+            hardware_type: WindowHardwareType::Latch,
+            style: WindowStyle::Picture,
         });
 
         assert!(state.create_element(window).is_err());
@@ -1533,7 +1624,9 @@ mod tests {
                 width: 0.9,
                 height: 2.1,
                 sill_height: 0.0,
-                swing: DoorSwing::Right,
+                swing: DoorSwing::OutRight,
+                hardware_type: DoorHardwareType::Lever,
+                style: DoorStyle::Flush,
             }))
             .unwrap();
 
@@ -1554,5 +1647,59 @@ mod tests {
         assert!(caps.formats.get("ifc").map(|c| c.export).unwrap_or(false));
         assert!(!caps.formats.get("gltf").map(|c| c.import).unwrap_or(true));
         assert!(caps.formats.get("gltf").map(|c| c.export).unwrap_or(false));
+    }
+
+    #[test]
+    fn door_swing_deserializes_legacy_left_right_values() {
+        let legacy_left: DoorSwing = serde_json::from_str("\"left\"").unwrap();
+        let legacy_right: DoorSwing = serde_json::from_str("\"right\"").unwrap();
+
+        assert_eq!(legacy_left, DoorSwing::OutLeft);
+        assert_eq!(legacy_right, DoorSwing::OutRight);
+    }
+
+    #[test]
+    fn polygon_area_rectangle() {
+        let pts = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]];
+        assert!((polygon_area(&pts) - 12.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn polygon_area_cw_winding() {
+        let pts = vec![[0.0, 0.0], [0.0, 3.0], [4.0, 3.0], [4.0, 0.0]];
+        assert!((polygon_area(&pts) - 12.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn polygon_signed_area_ccw_is_positive() {
+        let pts = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]];
+        assert!(polygon_signed_area(&pts) > 0.0);
+    }
+
+    #[test]
+    fn polygon_area_degenerate() {
+        assert!((polygon_area(&[]) - 0.0).abs() < 1e-9);
+        assert!((polygon_area(&[[0.0, 0.0], [1.0, 0.0]]) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn polygon_perimeter_square() {
+        let pts = vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]];
+        assert!((polygon_perimeter(&pts) - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn polygon_centroid_rectangle() {
+        let pts = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 2.0], [0.0, 2.0]];
+        let c = polygon_centroid(&pts);
+        assert!((c[0] - 2.0).abs() < 1e-9);
+        assert!((c[1] - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn polygon_centroid_empty() {
+        let c = polygon_centroid(&[]);
+        assert!((c[0]).abs() < 1e-9);
+        assert!((c[1]).abs() < 1e-9);
     }
 }

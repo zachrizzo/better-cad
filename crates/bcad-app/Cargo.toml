@@ -1,0 +1,59 @@
+[package]
+name = "bcad-app"
+version = "0.1.0"
+edition = "2021"
+description = "BetterCAD desktop application — wires all native Rust crates together"
+
+[[bin]]
+name = "bettercad"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+bcad-state = { path = "../bcad-state" }
+bcad-render = { path = "../bcad-render" }
+bcad-snap = { path = "../bcad-snap" }
+bcad-2d = { path = "../bcad-2d" }
+bcad-tools = { path = "../bcad-tools" }
+bcad-ui = { path = "../bcad-ui" }
+bcad-domain = { path = "../bcad-domain" }
+bcad-kernel = { path = "../bcad-kernel" }
+bcad-bim = { path = "../bcad-bim" }
+bcad-io = { path = "../bcad-io" }
+
+# Windowing + GPU
+winit = "0.30"
+wgpu = "24"
+pollster = "0.4"
+
+# egui integration (no eframe — we manage our own wgpu surface)
+egui = "0.31"
+egui-wgpu = "0.31"
+egui-winit = "0.31"
+
+# Native file dialogs
+rfd = "0.15"
+
+# Async runtime (for file dialogs and GPU init)
+tokio = { version = "1", features = ["rt", "macros"] }
+
+# Math
+glam = "0.29"
+bytemuck = { version = "1", features = ["derive"] }
+
+# Logging
+log = { workspace = true }
+env_logger = "0.11"
+
+# Serialization (for project save/load)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP client for AI service (blocking + streaming)
+reqwest = { version = "0.12", features = ["blocking"] }
+
+# UUID generation
+uuid = { workspace = true }
+
+# .env file support (reads ANTHROPIC_API_KEY from .env)
+dotenvy = "0.15"

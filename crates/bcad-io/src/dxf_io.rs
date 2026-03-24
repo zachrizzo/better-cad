@@ -4,8 +4,8 @@
 //! Uses AIA-standard layer naming (A-WALL, A-DOOR, A-WIND, etc.).
 
 use bcad_domain::{
-    BeamElement, ColumnElement, Element, ElementMeta, ElectricalElement, FloorElement,
-    FoundationElement, FurnitureElement, PlumbingElement, RoomElement, RoofElement, RoofType,
+    BeamElement, ColumnElement, ElectricalElement, Element, ElementMeta, FloorElement,
+    FoundationElement, FurnitureElement, PlumbingElement, RoofElement, RoofType, RoomElement,
     SiteDetailElement, StairElement, StairType, WallElement,
 };
 use std::io::Cursor;
@@ -19,37 +19,37 @@ use std::io::Cursor;
 /// Color mapping:
 ///   1=Red, 2=Yellow, 3=Green, 4=Cyan, 5=Blue, 6=Magenta, 7=White/Black
 const STANDARD_LAYERS: &[(&str, i16)] = &[
-    ("A-WALL", 7),   // white (walls)
-    ("A-DOOR", 3),   // green
-    ("A-WIND", 5),   // blue
-    ("A-FLOR", 8),   // grey
-    ("A-ROOF", 30),  // orange
-    ("A-STRS", 8),   // grey
-    ("A-CLNG", 9),   // light grey
-    ("A-COLS", 7),   // white
-    ("A-BEAM", 4),   // cyan
-    ("A-FNDN", 44),  // brown
-    ("E-POWR", 1),   // red
-    ("E-LITE", 2),   // yellow
-    ("P-FIXT", 5),   // blue
-    ("S-GRID", 6),   // magenta
-    ("F-FURN", 3),   // green
-    ("L-SITE", 80),  // dark green
-    ("G-ANNO", 7),   // white
-    ("G-DIMS", 7),   // white
-    ("G-TAGS", 7),   // white
+    ("A-WALL", 7),  // white (walls)
+    ("A-DOOR", 3),  // green
+    ("A-WIND", 5),  // blue
+    ("A-FLOR", 8),  // grey
+    ("A-ROOF", 30), // orange
+    ("A-STRS", 8),  // grey
+    ("A-CLNG", 9),  // light grey
+    ("A-COLS", 7),  // white
+    ("A-BEAM", 4),  // cyan
+    ("A-FNDN", 44), // brown
+    ("E-POWR", 1),  // red
+    ("E-LITE", 2),  // yellow
+    ("P-FIXT", 5),  // blue
+    ("S-GRID", 6),  // magenta
+    ("F-FURN", 3),  // green
+    ("L-SITE", 80), // dark green
+    ("G-ANNO", 7),  // white
+    ("G-DIMS", 7),  // white
+    ("G-TAGS", 7),  // white
 ];
 
 /// Ensure standard layers exist in the drawing.
 fn ensure_standard_layers(drawing: &mut dxf::Drawing) {
     for &(name, color_number) in STANDARD_LAYERS {
-        let already = drawing
-            .layers()
-            .any(|l| l.name.eq_ignore_ascii_case(name));
+        let already = drawing.layers().any(|l| l.name.eq_ignore_ascii_case(name));
         if !already {
-            let mut layer = dxf::tables::Layer::default();
-            layer.name = name.to_string();
-            layer.color = dxf::Color::from_index(color_number as u8);
+            let layer = dxf::tables::Layer {
+                name: name.to_string(),
+                color: dxf::Color::from_index(color_number as u8),
+                ..Default::default()
+            };
             drawing.add_layer(layer);
         }
     }
@@ -126,7 +126,12 @@ pub fn export_dxf(elements: &[Element]) -> Result<Vec<u8>, Box<dyn std::error::E
             }
             Element::Window(window) => {
                 if let Some(wall) = walls_by_id.get(window.wall_id.as_str()) {
-                    add_window_entities(&mut drawing, wall, window.position_along_wall, window.width);
+                    add_window_entities(
+                        &mut drawing,
+                        wall,
+                        window.position_along_wall,
+                        window.width,
+                    );
                 }
             }
             Element::Electrical(elec) => {
@@ -161,14 +166,11 @@ fn add_wall_polyline(drawing: &mut dxf::Drawing, wall: &WallElement) {
     use dxf::entities::{Entity, EntityType, LwPolyline};
     use dxf::LwPolylineVertex;
 
-    let dx = wall.end[0] - wall.start[0];
-    let dy = wall.end[1] - wall.start[1];
-    let len = (dx * dx + dy * dy).sqrt();
-    if len < 1e-12 {
+    let Some(geom) = wall.geometry() else {
         return;
-    }
-    let nx = -dy / len * wall.thickness * 0.5;
-    let ny = dx / len * wall.thickness * 0.5;
+    };
+    let nx = geom.axis_v[0] * wall.thickness * 0.5;
+    let ny = geom.axis_v[1] * wall.thickness * 0.5;
 
     let vertices = vec![
         LwPolylineVertex {
@@ -368,20 +370,17 @@ fn add_door_entities(
     use dxf::entities::{Entity, EntityType, Line};
     use dxf::Point;
 
-    let dx = wall.end[0] - wall.start[0];
-    let dy = wall.end[1] - wall.start[1];
-    let wall_len = (dx * dx + dy * dy).sqrt();
-    if wall_len < 1e-12 {
+    let Some(geom) = wall.geometry() else {
         return;
-    }
-    let ux = dx / wall_len;
-    let uy = dy / wall_len;
+    };
+    let ux = geom.axis_u[0];
+    let uy = geom.axis_u[1];
+    let nx = geom.axis_v[0] * wall.thickness * 0.5;
+    let ny = geom.axis_v[1] * wall.thickness * 0.5;
 
-    let nx = -uy * wall.thickness * 0.5;
-    let ny = ux * wall.thickness * 0.5;
-
-    let start_dist = position_along_wall - width * 0.5;
-    let end_dist = position_along_wall + width * 0.5;
+    let center_along = position_along_wall * geom.length;
+    let start_dist = center_along - width * 0.5;
+    let end_dist = center_along + width * 0.5;
 
     for dist in [start_dist, end_dist] {
         let cx = wall.start[0] + ux * dist;
@@ -408,8 +407,7 @@ fn add_door_entities(
 
     for i in 0..arc_segments {
         let a1 = base_angle + std::f64::consts::FRAC_PI_2 * (i as f64 / arc_segments as f64);
-        let a2 =
-            base_angle + std::f64::consts::FRAC_PI_2 * ((i + 1) as f64 / arc_segments as f64);
+        let a2 = base_angle + std::f64::consts::FRAC_PI_2 * ((i + 1) as f64 / arc_segments as f64);
         let x1 = cx + radius * a1.cos();
         let y1 = cy + radius * a1.sin();
         let x2 = cx + radius * a2.cos();
@@ -428,19 +426,15 @@ fn add_window_entities(
     position_along_wall: f64,
     width: f64,
 ) {
-    let dx = wall.end[0] - wall.start[0];
-    let dy = wall.end[1] - wall.start[1];
-    let wall_len = (dx * dx + dy * dy).sqrt();
-    if wall_len < 1e-12 {
+    let Some(geom) = wall.geometry() else {
         return;
-    }
-    let ux = dx / wall_len;
-    let uy = dy / wall_len;
+    };
+    let ux = geom.axis_u[0];
+    let uy = geom.axis_u[1];
+    let nx = geom.axis_v[0] * wall.thickness * 0.5;
+    let ny = geom.axis_v[1] * wall.thickness * 0.5;
 
-    let nx = -uy * wall.thickness * 0.5;
-    let ny = ux * wall.thickness * 0.5;
-
-    let center_dist = position_along_wall;
+    let center_dist = position_along_wall * geom.length;
     let cx = wall.start[0] + ux * center_dist;
     let cy = wall.start[1] + uy * center_dist;
     let hw = width * 0.5;
@@ -470,8 +464,8 @@ fn add_electrical_symbol(drawing: &mut dxf::Drawing, elec: &ElectricalElement) {
 
     // Determine layer: lighting vs power
     let layer = match elec.symbol_type.as_str() {
-        "light_fixture" | "ceiling_fan" | "recessed_light" | "wall_sconce"
-        | "pendant_light" | "track_light" | "outdoor_light" => "E-LITE",
+        "light_fixture" | "ceiling_fan" | "recessed_light" | "wall_sconce" | "pendant_light"
+        | "track_light" | "outdoor_light" => "E-LITE",
         _ => "E-POWR",
     };
 
@@ -669,6 +663,8 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                 }
 
                 let is_closed = poly.is_closed();
+                let boundary: Vec<[f64; 2]> =
+                    poly.vertices.iter().map(|v| [v.x, v.y]).collect();
 
                 match layer.as_str() {
                     "WALLS" | "A-WALL" if is_closed && poly.vertices.len() >= 4 => {
@@ -679,9 +675,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                         }
                     }
                     "FLOORS" | "A-FLOR" if is_closed => {
-                        let boundary: Vec<[f64; 2]> =
-                            poly.vertices.iter().map(|v| [v.x, v.y]).collect();
-                        let floor = FloorElement {
+                        elements.push(Element::Floor(FloorElement {
                             meta: ElementMeta::new(format!(
                                 "Imported Floor {}",
                                 elements.len() + 1
@@ -689,27 +683,18 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             boundary,
                             thickness: 0.3,
                             boundary_segments: Vec::new(),
-                        };
-                        elements.push(Element::Floor(floor));
+                        }));
                     }
                     "ROOMS" => {
-                        let boundary: Vec<[f64; 2]> =
-                            poly.vertices.iter().map(|v| [v.x, v.y]).collect();
-                        let room = RoomElement {
-                            meta: ElementMeta::new(format!(
-                                "Imported Room {}",
-                                elements.len() + 1
-                            )),
+                        elements.push(Element::Room(RoomElement {
+                            meta: ElementMeta::new(format!("Imported Room {}", elements.len() + 1)),
                             boundary,
                             boundary_segments: Vec::new(),
-                        };
-                        elements.push(Element::Room(room));
+                        }));
                     }
                     "COLUMNS" | "A-COLS" if is_closed && poly.vertices.len() >= 4 => {
-                        let boundary: Vec<[f64; 2]> =
-                            poly.vertices.iter().map(|v| [v.x, v.y]).collect();
                         let (min_x, max_x, min_y, max_y) = bounding_box(&boundary);
-                        let col = ColumnElement {
+                        elements.push(Element::Column(ColumnElement {
                             meta: ElementMeta::new(format!(
                                 "Imported Column {}",
                                 elements.len() + 1
@@ -720,30 +705,21 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             height: 3.0,
                             diameter: None,
                             column_segments: 24,
-                        };
-                        elements.push(Element::Column(col));
+                        }));
                     }
                     "FOUNDATIONS" | "A-FNDN" if is_closed => {
-                        let boundary: Vec<[f64; 2]> =
-                            poly.vertices.iter().map(|v| [v.x, v.y]).collect();
-                        let foundation = FoundationElement {
+                        elements.push(Element::Foundation(FoundationElement {
                             meta: ElementMeta::new(format!(
                                 "Imported Foundation {}",
                                 elements.len() + 1
                             )),
                             boundary,
                             thickness: 0.5,
-                        };
-                        elements.push(Element::Foundation(foundation));
+                        }));
                     }
                     "ROOFS" | "A-ROOF" if is_closed => {
-                        let boundary: Vec<[f64; 2]> =
-                            poly.vertices.iter().map(|v| [v.x, v.y]).collect();
-                        let roof = RoofElement {
-                            meta: ElementMeta::new(format!(
-                                "Imported Roof {}",
-                                elements.len() + 1
-                            )),
+                        elements.push(Element::Roof(RoofElement {
+                            meta: ElementMeta::new(format!("Imported Roof {}", elements.len() + 1)),
                             boundary,
                             thickness: 0.3,
                             elevation: 3.0,
@@ -751,14 +727,11 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             roof_type: RoofType::Flat,
                             pitch_degrees: 30.0,
                             ridge_angle_degrees: 0.0,
-                        };
-                        elements.push(Element::Roof(roof));
+                        }));
                     }
                     "STAIRS" | "A-STRS" if is_closed && poly.vertices.len() >= 4 => {
-                        let boundary: Vec<[f64; 2]> =
-                            poly.vertices.iter().map(|v| [v.x, v.y]).collect();
                         let (min_x, max_x, min_y, max_y) = bounding_box(&boundary);
-                        let stair = StairElement {
+                        elements.push(Element::Stair(StairElement {
                             meta: ElementMeta::new(format!(
                                 "Imported Stair {}",
                                 elements.len() + 1
@@ -771,14 +744,10 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             stair_type: StairType::Straight,
                             spiral_turns: 1.0,
                             side_wall_thickness: 0.12,
-                        };
-                        elements.push(Element::Stair(stair));
+                        }));
                     }
                     _ if is_closed => {
-                        // Fallback: closed polyline -> floor
-                        let boundary: Vec<[f64; 2]> =
-                            poly.vertices.iter().map(|v| [v.x, v.y]).collect();
-                        let floor = FloorElement {
+                        elements.push(Element::Floor(FloorElement {
                             meta: ElementMeta::new(format!(
                                 "Imported Floor {}",
                                 elements.len() + 1
@@ -786,22 +755,14 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                             boundary,
                             thickness: 0.3,
                             boundary_segments: Vec::new(),
-                        };
-                        elements.push(Element::Floor(floor));
+                        }));
                     }
                     _ => {
-                        // Open polyline on unknown layer: treat as room boundary
-                        let boundary: Vec<[f64; 2]> =
-                            poly.vertices.iter().map(|v| [v.x, v.y]).collect();
-                        let room = RoomElement {
-                            meta: ElementMeta::new(format!(
-                                "Imported Room {}",
-                                elements.len() + 1
-                            )),
+                        elements.push(Element::Room(RoomElement {
+                            meta: ElementMeta::new(format!("Imported Room {}", elements.len() + 1)),
                             boundary,
                             boundary_segments: Vec::new(),
-                        };
-                        elements.push(Element::Room(room));
+                        }));
                     }
                 }
             }
@@ -809,10 +770,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                 match layer.as_str() {
                     "BEAMS" | "A-BEAM" => {
                         let beam = BeamElement {
-                            meta: ElementMeta::new(format!(
-                                "Imported Beam {}",
-                                elements.len() + 1
-                            )),
+                            meta: ElementMeta::new(format!("Imported Beam {}", elements.len() + 1)),
                             start: [line.p1.x, line.p1.y, line.p1.z],
                             end: [line.p2.x, line.p2.y, line.p2.z],
                             width: 0.2,
@@ -822,18 +780,15 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                         };
                         elements.push(Element::Beam(beam));
                     }
-                    "A-DOOR" | "A-WIND" | "A-STRS" | "E-POWR" | "E-LITE" | "P-FIXT"
-                    | "F-FURN" | "L-SITE" | "G-DIMS" | "G-ANNO" | "G-TAGS" => {
+                    "A-DOOR" | "A-WIND" | "A-STRS" | "E-POWR" | "E-LITE" | "P-FIXT" | "F-FURN"
+                    | "L-SITE" | "G-DIMS" | "G-ANNO" | "G-TAGS" => {
                         // Skip supplementary entities (door swings, window lines, etc.)
                         // These are reconstructed from the primary elements.
                     }
                     _ => {
                         // Fallback: LINE -> wall
                         let wall = WallElement {
-                            meta: ElementMeta::new(format!(
-                                "Imported Wall {}",
-                                elements.len() + 1
-                            )),
+                            meta: ElementMeta::new(format!("Imported Wall {}", elements.len() + 1)),
                             start: [line.p1.x, line.p1.y],
                             end: [line.p2.x, line.p2.y],
                             height: 3.0,

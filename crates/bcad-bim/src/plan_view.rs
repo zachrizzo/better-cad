@@ -3,8 +3,9 @@
 //! Projects walls, openings, and slabs onto a horizontal cutting
 //! plane to produce a standard architectural floor plan.
 
+use crate::offset_along;
 use crate::wall::WallParams;
-use bcad_domain::{DoorSwing, Element};
+use bcad_domain::Element;
 use serde::{Deserialize, Serialize};
 
 /// A 2D line segment in the plan view.
@@ -55,6 +56,56 @@ pub struct PlanViewData {
     pub room_labels: Vec<PlanRoomLabel>,
 }
 
+/// Append plan-view lines and a hatch for a single wall segment.
+///
+/// Produces 4 lines (inner edge, outer edge, two end caps) and 1 hatch quad.
+fn append_wall_plan_geometry(
+    wall_lines: &mut Vec<PlanLine>,
+    wall_hatches: &mut Vec<PlanHatch>,
+    start: [f64; 2],
+    end: [f64; 2],
+    thickness: f64,
+    element_id: String,
+) {
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-10 {
+        return;
+    }
+    let nx = -dy / len * thickness / 2.0;
+    let ny = dx / len * thickness / 2.0;
+
+    // Inner and outer wall lines
+    wall_lines.push(PlanLine {
+        start: [start[0] + nx, start[1] + ny],
+        end: [end[0] + nx, end[1] + ny],
+    });
+    wall_lines.push(PlanLine {
+        start: [start[0] - nx, start[1] - ny],
+        end: [end[0] - nx, end[1] - ny],
+    });
+    // End caps
+    wall_lines.push(PlanLine {
+        start: [start[0] + nx, start[1] + ny],
+        end: [start[0] - nx, start[1] - ny],
+    });
+    wall_lines.push(PlanLine {
+        start: [end[0] + nx, end[1] + ny],
+        end: [end[0] - nx, end[1] - ny],
+    });
+
+    wall_hatches.push(PlanHatch {
+        corners: [
+            [start[0] + nx, start[1] + ny],
+            [end[0] + nx, end[1] + ny],
+            [end[0] - nx, end[1] - ny],
+            [start[0] - nx, start[1] - ny],
+        ],
+        element_id,
+    });
+}
+
 /// Generate 2D plan view data from walls (legacy API).
 ///
 /// Each wall produces 4 lines: inner edge, outer edge, and two end caps.
@@ -62,44 +113,14 @@ pub fn generate_plan(walls: &[WallParams]) -> PlanViewData {
     let mut wall_lines = Vec::new();
     let mut wall_hatches = Vec::new();
     for wall in walls {
-        let dx = wall.end[0] - wall.start[0];
-        let dy = wall.end[1] - wall.start[1];
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 1e-10 {
-            continue;
-        }
-        let nx = -dy / len * wall.thickness / 2.0;
-        let ny = dx / len * wall.thickness / 2.0;
-
-        // Inner and outer wall lines
-        wall_lines.push(PlanLine {
-            start: [wall.start[0] + nx, wall.start[1] + ny],
-            end: [wall.end[0] + nx, wall.end[1] + ny],
-        });
-        wall_lines.push(PlanLine {
-            start: [wall.start[0] - nx, wall.start[1] - ny],
-            end: [wall.end[0] - nx, wall.end[1] - ny],
-        });
-        // End caps
-        wall_lines.push(PlanLine {
-            start: [wall.start[0] + nx, wall.start[1] + ny],
-            end: [wall.start[0] - nx, wall.start[1] - ny],
-        });
-        wall_lines.push(PlanLine {
-            start: [wall.end[0] + nx, wall.end[1] + ny],
-            end: [wall.end[0] - nx, wall.end[1] - ny],
-        });
-
-        // Hatch for the wall cross-section
-        wall_hatches.push(PlanHatch {
-            corners: [
-                [wall.start[0] + nx, wall.start[1] + ny],
-                [wall.end[0] + nx, wall.end[1] + ny],
-                [wall.end[0] - nx, wall.end[1] - ny],
-                [wall.start[0] - nx, wall.start[1] - ny],
-            ],
-            element_id: String::new(),
-        });
+        append_wall_plan_geometry(
+            &mut wall_lines,
+            &mut wall_hatches,
+            wall.start,
+            wall.end,
+            wall.thickness,
+            String::new(),
+        );
     }
     PlanViewData {
         wall_lines,
@@ -129,102 +150,67 @@ pub fn generate_plan_from_elements(elements: &[Element]) -> PlanViewData {
 
     // Generate wall lines + hatches
     for wall in &walls {
-        let dx = wall.end[0] - wall.start[0];
-        let dy = wall.end[1] - wall.start[1];
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 1e-10 {
-            continue;
-        }
-        let nx = -dy / len * wall.thickness / 2.0;
-        let ny = dx / len * wall.thickness / 2.0;
-
-        wall_lines.push(PlanLine {
-            start: [wall.start[0] + nx, wall.start[1] + ny],
-            end: [wall.end[0] + nx, wall.end[1] + ny],
-        });
-        wall_lines.push(PlanLine {
-            start: [wall.start[0] - nx, wall.start[1] - ny],
-            end: [wall.end[0] - nx, wall.end[1] - ny],
-        });
-        wall_lines.push(PlanLine {
-            start: [wall.start[0] + nx, wall.start[1] + ny],
-            end: [wall.start[0] - nx, wall.start[1] - ny],
-        });
-        wall_lines.push(PlanLine {
-            start: [wall.end[0] + nx, wall.end[1] + ny],
-            end: [wall.end[0] - nx, wall.end[1] - ny],
-        });
-
-        wall_hatches.push(PlanHatch {
-            corners: [
-                [wall.start[0] + nx, wall.start[1] + ny],
-                [wall.end[0] + nx, wall.end[1] + ny],
-                [wall.end[0] - nx, wall.end[1] - ny],
-                [wall.start[0] - nx, wall.start[1] - ny],
-            ],
-            element_id: wall.meta.id.clone(),
-        });
+        append_wall_plan_geometry(
+            &mut wall_lines,
+            &mut wall_hatches,
+            wall.start,
+            wall.end,
+            wall.thickness,
+            wall.meta.id.clone(),
+        );
     }
 
     // Generate opening symbols
     for element in elements {
         match element {
             Element::Door(door) => {
-                if let Some(host_wall) = walls.iter().find(|w| w.meta.id == door.wall_id) {
-                    let dx = host_wall.end[0] - host_wall.start[0];
-                    let dy = host_wall.end[1] - host_wall.start[1];
-                    let len = (dx * dx + dy * dy).sqrt();
-                    if len < 1e-10 {
-                        continue;
-                    }
-                    let ux = dx / len;
-                    let uy = dy / len;
-                    // Normal points to "inner" side
-                    let _nx = -uy;
-                    let _ny = ux;
+                let Some(host_wall) = walls.iter().find(|w| w.meta.id == door.wall_id) else {
+                    continue;
+                };
+                let Some(geom) = host_wall.geometry() else {
+                    continue;
+                };
+                let center = host_wall.point_along(door.position_along_wall);
+                let half_w = door.width * 0.5;
+                let hinge_sign = if door.swing.hinge_on_start() {
+                    -1.0
+                } else {
+                    1.0
+                };
+                let hinge = offset_along(center, geom.axis_u, half_w * hinge_sign);
+                let open_sign = if door.swing.opens_towards_positive_normal() {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let swing_angle =
+                    (open_sign * geom.axis_u[1]).atan2(open_sign * -geom.axis_u[0]);
 
-                    let center_x = host_wall.start[0] + ux * door.position_along_wall * len;
-                    let center_y = host_wall.start[1] + uy * door.position_along_wall * len;
-
-                    // Door swing angle: quarter circle from wall direction
-                    let base_angle = uy.atan2(ux);
-                    let swing_angle = match door.swing {
-                        DoorSwing::Right => base_angle + std::f64::consts::FRAC_PI_2,
-                        DoorSwing::Left => base_angle - std::f64::consts::FRAC_PI_2,
-                    };
-
-                    opening_symbols.push(PlanSymbol {
-                        symbol_type: PlanSymbolType::DoorSwing,
-                        center: [center_x, center_y],
-                        angle: swing_angle,
-                        radius: door.width,
-                        element_id: door.meta.id.clone(),
-                    });
-                }
+                opening_symbols.push(PlanSymbol {
+                    symbol_type: PlanSymbolType::DoorSwing,
+                    center: hinge,
+                    angle: swing_angle,
+                    radius: door.width,
+                    element_id: door.meta.id.clone(),
+                });
             }
             Element::Window(window) => {
-                if let Some(host_wall) = walls.iter().find(|w| w.meta.id == window.wall_id) {
-                    let dx = host_wall.end[0] - host_wall.start[0];
-                    let dy = host_wall.end[1] - host_wall.start[1];
-                    let len = (dx * dx + dy * dy).sqrt();
-                    if len < 1e-10 {
-                        continue;
-                    }
-                    let ux = dx / len;
-                    let uy = dy / len;
+                let Some(host_wall) = walls.iter().find(|w| w.meta.id == window.wall_id) else {
+                    continue;
+                };
+                let Some(geom) = host_wall.geometry() else {
+                    continue;
+                };
+                let center = host_wall.point_along(window.position_along_wall);
+                let base_angle = geom.axis_u[1].atan2(geom.axis_u[0]);
 
-                    let center_x = host_wall.start[0] + ux * window.position_along_wall * len;
-                    let center_y = host_wall.start[1] + uy * window.position_along_wall * len;
-                    let base_angle = uy.atan2(ux);
-
-                    opening_symbols.push(PlanSymbol {
-                        symbol_type: PlanSymbolType::WindowGlazing,
-                        center: [center_x, center_y],
-                        angle: base_angle,
-                        radius: window.width,
-                        element_id: window.meta.id.clone(),
-                    });
-                }
+                opening_symbols.push(PlanSymbol {
+                    symbol_type: PlanSymbolType::WindowGlazing,
+                    center,
+                    angle: base_angle,
+                    radius: window.width,
+                    element_id: window.meta.id.clone(),
+                });
             }
             _ => {}
         }

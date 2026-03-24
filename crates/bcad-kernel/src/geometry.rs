@@ -23,7 +23,10 @@ fn signed_area(points: &[(f64, f64)]) -> f64 {
     area * 0.5
 }
 
-fn normalize_loop(points: &[(f64, f64)], ccw: bool) -> Result<Vec<(f64, f64)>, crate::error::KernelError> {
+fn normalize_loop(
+    points: &[(f64, f64)],
+    ccw: bool,
+) -> Result<Vec<(f64, f64)>, crate::error::KernelError> {
     let mut cleaned: Vec<(f64, f64)> = Vec::with_capacity(points.len());
     for &p in points {
         if cleaned.last().is_some_and(|&last| point_eq(last, p)) {
@@ -110,7 +113,10 @@ pub fn extrude_sketch_with_holes(
 ///
 /// `points` must be ordered (clockwise or counter-clockwise) and form a closed polygon.
 /// The polygon is placed on the Z=0 plane and swept upward by `height`.
-pub fn extrude_sketch_points(points: &[(f64, f64)], height: f64) -> Result<Solid, crate::error::KernelError> {
+pub fn extrude_sketch_points(
+    points: &[(f64, f64)],
+    height: f64,
+) -> Result<Solid, crate::error::KernelError> {
     extrude_sketch_with_holes(points, &[], height)
 }
 
@@ -200,7 +206,8 @@ pub fn tessellate_boundary_segments(
                 start_angle,
                 end_angle,
             } => {
-                let arc_pts = arc_to_points(*center, *radius, *start_angle, *end_angle, arc_segments);
+                let arc_pts =
+                    arc_to_points(*center, *radius, *start_angle, *end_angle, arc_segments);
                 // Skip the first point of the arc (it should coincide with the
                 // current last point of `pts`).
                 for &p in arc_pts.iter().skip(1) {

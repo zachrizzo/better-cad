@@ -32,6 +32,12 @@ pub struct Sketch {
     next_line_id: usize,
 }
 
+impl Default for Sketch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Sketch {
     pub fn new() -> Self {
         Self {

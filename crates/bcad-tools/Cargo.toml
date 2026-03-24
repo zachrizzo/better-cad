@@ -1,0 +1,14 @@
+[package]
+name = "bcad-tools"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bcad-domain = { path = "../bcad-domain" }
+serde.workspace = true
+serde_json.workspace = true
+glam = "0.29"
+uuid.workspace = true
+log.workspace = true
+
+[dev-dependencies]

@@ -1,0 +1,8 @@
+[package]
+name = "bcad-2d"
+version = "0.1.0"
+edition = "2021"
+description = "2D plan-view symbol primitives and generators for BetterCAD"
+
+[dependencies]
+serde = { workspace = true }

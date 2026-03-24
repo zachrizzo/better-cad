@@ -85,18 +85,18 @@ pub fn generate_section_cut(
     for element in elements {
         match element {
             Element::Wall(wall) => {
-                if let Some((seg, hatch)) =
+                if let Some(result) =
                     intersect_wall_with_cut(wall, cut_start, ux, uy, nx, ny, cut_len)
                 {
                     max_height = max_height.max(wall.height);
                     cut_lines.push(CutLine {
-                        start: seg.0,
-                        end: seg.1,
+                        start: result.segment.0,
+                        end: result.segment.1,
                         element_id: wall.meta.id.clone(),
                         element_kind: "wall".to_string(),
                     });
                     hatch_polygons.push(HatchPolygon {
-                        points: hatch,
+                        points: result.hatch,
                         element_id: wall.meta.id.clone(),
                     });
                 }
@@ -153,6 +153,14 @@ pub fn generate_section_cut(
     }
 }
 
+/// Result of intersecting a wall with a section cut plane.
+struct WallCutResult {
+    /// Bounding segment of the cut: (lower-left, upper-right).
+    segment: ([f64; 2], [f64; 2]),
+    /// Hatch polygon (4-corner rectangle in the section plane).
+    hatch: Vec<[f64; 2]>,
+}
+
 /// Wall-cut intersection helper.
 fn intersect_wall_with_cut(
     wall: &WallElement,
@@ -162,7 +170,7 @@ fn intersect_wall_with_cut(
     nx: f64,
     ny: f64,
     cut_len: f64,
-) -> Option<(([f64; 2], [f64; 2]), Vec<[f64; 2]>)> {
+) -> Option<WallCutResult> {
     let ws_u = (wall.start[0] - cut_start[0]) * ux + (wall.start[1] - cut_start[1]) * uy;
     let we_u = (wall.end[0] - cut_start[0]) * ux + (wall.end[1] - cut_start[1]) * uy;
 
@@ -224,8 +232,8 @@ fn intersect_wall_with_cut(
             [u_hi, wall.height],
             [u_lo, wall.height],
         ];
-        let seg = ([u_lo, 0.0], [u_hi, wall.height]);
-        return Some((seg, hatch));
+        let segment = ([u_lo, 0.0], [u_hi, wall.height]);
+        return Some(WallCutResult { segment, hatch });
     }
 
     // Parallel wall: show as a rectangle in section
@@ -236,8 +244,8 @@ fn intersect_wall_with_cut(
         [u_start, wall.height],
     ];
 
-    let seg = ([u_start, 0.0], [u_end, wall.height]);
-    Some((seg, hatch))
+    let segment = ([u_start, 0.0], [u_end, wall.height]);
+    Some(WallCutResult { segment, hatch })
 }
 
 /// Generate an elevation view looking in the given direction.
@@ -262,40 +270,37 @@ pub fn generate_elevation(direction: &str, elements: &[Element]) -> ElevationVie
     let mut max_w = f64::MIN;
 
     for element in elements {
-        match element {
-            Element::Wall(wall) => {
-                let s_h = wall.start[0] * hx + wall.start[1] * hy;
-                let e_h = wall.end[0] * hx + wall.end[1] * hy;
-                max_h = max_h.max(wall.height);
-                min_w = min_w.min(s_h).min(e_h);
-                max_w = max_w.max(s_h).max(e_h);
+        if let Element::Wall(wall) = element {
+            let s_h = wall.start[0] * hx + wall.start[1] * hy;
+            let e_h = wall.end[0] * hx + wall.end[1] * hy;
+            max_h = max_h.max(wall.height);
+            min_w = min_w.min(s_h).min(e_h);
+            max_w = max_w.max(s_h).max(e_h);
 
-                // Bottom line
-                lines.push(ElevationLine {
-                    start: [s_h, 0.0],
-                    end: [e_h, 0.0],
-                    element_id: wall.meta.id.clone(),
-                });
-                // Top line
-                lines.push(ElevationLine {
-                    start: [s_h, wall.height],
-                    end: [e_h, wall.height],
-                    element_id: wall.meta.id.clone(),
-                });
-                // Left vertical
-                lines.push(ElevationLine {
-                    start: [s_h, 0.0],
-                    end: [s_h, wall.height],
-                    element_id: wall.meta.id.clone(),
-                });
-                // Right vertical
-                lines.push(ElevationLine {
-                    start: [e_h, 0.0],
-                    end: [e_h, wall.height],
-                    element_id: wall.meta.id.clone(),
-                });
-            }
-            _ => {}
+            // Bottom line
+            lines.push(ElevationLine {
+                start: [s_h, 0.0],
+                end: [e_h, 0.0],
+                element_id: wall.meta.id.clone(),
+            });
+            // Top line
+            lines.push(ElevationLine {
+                start: [s_h, wall.height],
+                end: [e_h, wall.height],
+                element_id: wall.meta.id.clone(),
+            });
+            // Left vertical
+            lines.push(ElevationLine {
+                start: [s_h, 0.0],
+                end: [s_h, wall.height],
+                element_id: wall.meta.id.clone(),
+            });
+            // Right vertical
+            lines.push(ElevationLine {
+                start: [e_h, 0.0],
+                end: [e_h, wall.height],
+                element_id: wall.meta.id.clone(),
+            });
         }
     }
 

@@ -1,9 +1,9 @@
-pub mod geometry;
-pub mod topology;
-pub mod tessellation;
-pub mod materials;
 pub mod document;
 pub mod error;
+pub mod geometry;
+pub mod materials;
+pub mod tessellation;
+pub mod topology;
 
 /// Smoke-test entry point.
 pub fn ping() -> &'static str {

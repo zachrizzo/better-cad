@@ -1,7 +1,7 @@
-pub mod sketch;
 pub mod constraint;
-pub mod solver;
 pub mod equations;
+pub mod sketch;
+pub mod solver;
 
 /// Smoke-test entry point.
 pub fn ping() -> &'static str {
