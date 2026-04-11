@@ -842,7 +842,7 @@ fn insert_cloned_element(
 ) -> ChangeFlags {
     let mut cloned = source;
     let new_id = uuid::Uuid::new_v4().to_string();
-    crate::event_loop::set_element_id_and_offset(&mut cloned, &new_id, 0.5);
+    crate::command_translator::set_element_id_and_offset(&mut cloned, &new_id, 0.5);
     let label = format!("{} {}", action_label, cloned.meta().name);
     state.history.push(HistoryEntry {
         label,

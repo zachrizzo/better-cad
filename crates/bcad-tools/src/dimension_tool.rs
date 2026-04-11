@@ -3,12 +3,12 @@
 //! Two-point dimension with sub-modes: Aligned, Horizontal, Vertical,
 //! Chain, Baseline, Ordinate.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{Element, ElementMeta, LevelRef};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
-const DIMENSION_SNAP_DISTANCE: f64 = 0.2;
 const DEFAULT_DIMENSION_OFFSET: f64 = 0.5;
 const DIM_COLOR: [f32; 4] = [0.9, 0.3, 0.3, 1.0];
 
@@ -129,7 +129,7 @@ impl Tool for DimensionTool {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
                 self.base
-                    .update_cursor(plan_pos, snap, DIMENSION_SNAP_DISTANCE);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -139,7 +139,7 @@ impl Tool for DimensionTool {
                 ..
             } => {
                 self.base
-                    .update_cursor(plan_pos, snap, DIMENSION_SNAP_DISTANCE);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
                 self.sub_mode = ctx.defaults.dimension_sub_mode;
 
@@ -242,11 +242,25 @@ impl Tool for DimensionTool {
         let mut geom = Vec::new();
 
         if let Some(pos) = self.base.cursor_pos {
+            let color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => DIM_COLOR,
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.06,
-                color: DIM_COLOR,
+                color,
                 shape: MarkerShape::Circle,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

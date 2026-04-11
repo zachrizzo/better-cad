@@ -3,11 +3,10 @@
 //! Two-point tool: click start, click end to define a section cut line.
 //! Creates a saved view and switches to it.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{Element, ElementMeta, LevelRef, ViewElement};
 use glam::Vec2;
-
-const SECTION_SNAP_THRESHOLD: f64 = 0.3;
 const SECTION_COLOR: [f32; 4] = [0.9, 0.2, 0.2, 1.0];
 
 #[derive(Debug, Clone)]
@@ -64,7 +63,7 @@ impl Tool for SectionTool {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
                 self.base
-                    .update_cursor(plan_pos, snap, SECTION_SNAP_THRESHOLD);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -74,7 +73,7 @@ impl Tool for SectionTool {
                 ..
             } => {
                 self.base
-                    .update_cursor(plan_pos, snap, SECTION_SNAP_THRESHOLD);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
 
                 match &self.state {
@@ -155,11 +154,25 @@ impl Tool for SectionTool {
         let mut geom = Vec::new();
 
         if let Some(pos) = self.base.cursor_pos {
+            let color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => SECTION_COLOR,
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.06,
-                color: SECTION_COLOR,
+                color,
                 shape: MarkerShape::Circle,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

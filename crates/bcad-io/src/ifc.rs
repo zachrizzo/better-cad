@@ -6,8 +6,9 @@
 
 use bcad_domain::{
     BeamElement, ColumnElement, DoorElement, DoorHardwareType, DoorStyle, DoorSwing, Element,
-    ElementMeta, FloorElement, FoundationElement, LevelElement, RoofElement, RoofType, RoomElement,
-    StairElement, StairType, WallElement, WindowElement, WindowHardwareType, WindowStyle,
+    ElementMeta, FloorElement, FoundationElement, FurnitureElement, LevelElement, PlumbingElement,
+    RoofElement, RoofType, RoomElement, StairElement, StairType, WallElement, WindowElement,
+    WindowHardwareType, WindowStyle,
 };
 use std::collections::HashMap;
 
@@ -331,6 +332,43 @@ pub fn import_ifc(data: &[u8]) -> Result<IfcImportResult, crate::IoError> {
                     entity_id: eid,
                     message: "Space imported with default boundary".into(),
                 });
+            }
+            "IFCFURNISHINGELEMENT" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Furnishing #{}", eid));
+                let placement_ref = parse_entity_ref(&attrs.get(5).cloned().unwrap_or_default());
+                let (x, y, _z) = resolve_placement_location(&entities, placement_ref);
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.first().cloned().unwrap_or_default());
+                let elem = Element::Furniture(FurnitureElement {
+                    meta,
+                    symbol_type: "generic".to_string(),
+                    position: [x, y],
+                    rotation: 0.0,
+                    width: 0.6,
+                    depth: 0.6,
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(elem);
+            }
+            "IFCFLOWTERMINAL" => {
+                let name = unquote_spf(&attrs.get(2).cloned().unwrap_or_default())
+                    .unwrap_or_else(|| format!("Terminal #{}", eid));
+                let placement_ref = parse_entity_ref(&attrs.get(5).cloned().unwrap_or_default());
+                let (x, y, _z) = resolve_placement_location(&entities, placement_ref);
+                let mut meta = ElementMeta::new(&name);
+                meta.ifc_guid = unquote_spf(&attrs.first().cloned().unwrap_or_default());
+                // Map to plumbing as a generic terminal
+                let elem = Element::Plumbing(PlumbingElement {
+                    meta,
+                    symbol_type: "generic".to_string(),
+                    position: [x, y],
+                    rotation: 0.0,
+                });
+                let idx = elements.len();
+                ifc_to_element_idx.insert(eid, idx);
+                elements.push(elem);
             }
             _ => {}
         }
@@ -1161,7 +1199,96 @@ impl IfcWriter {
                         );
                         storey_elements.push(id);
                     }
-                    // Skip: Level, Grid, Material, FamilyType, etc. + doors/windows with wall_id
+                    Element::Furniture(furn) => {
+                        let id = self.write_furnishing_element(
+                            &furn.meta.id,
+                            &furn.meta.name,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                            furn.position[0],
+                            furn.position[1],
+                            furn.width,
+                            furn.depth,
+                            0.9, // default height
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Cabinet(cab) => {
+                        let id = self.write_furnishing_element(
+                            &cab.meta.id,
+                            &cab.meta.name,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                            cab.position[0],
+                            cab.position[1],
+                            cab.width,
+                            cab.depth,
+                            cab.height,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Electrical(elec) => {
+                        let id = self.write_flow_terminal(
+                            &elec.meta.id,
+                            &elec.meta.name,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                            elec.position[0],
+                            elec.position[1],
+                            0.1,
+                            0.1,
+                            0.05,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Plumbing(plumb) => {
+                        let id = self.write_flow_terminal(
+                            &plumb.meta.id,
+                            &plumb.meta.name,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                            plumb.position[0],
+                            plumb.position[1],
+                            0.15,
+                            0.15,
+                            0.1,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::Hvac(hvac) => {
+                        let w = hvac.width.unwrap_or(0.3);
+                        let d = hvac.depth.unwrap_or(0.3);
+                        let id = self.write_flow_terminal(
+                            &hvac.meta.id,
+                            &hvac.meta.name,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                            hvac.position[0],
+                            hvac.position[1],
+                            w,
+                            d,
+                            0.1,
+                        );
+                        storey_elements.push(id);
+                    }
+                    Element::FireSafety(fs) => {
+                        let id = self.write_distribution_element(
+                            &fs.meta.id,
+                            &fs.meta.name,
+                            owner_history,
+                            storey_info.placement,
+                            body_ctx,
+                            fs.position[0],
+                            fs.position[1],
+                        );
+                        storey_elements.push(id);
+                    }
+                    // Skip: Level, Grid, Material, FamilyType, Accessibility, etc. + doors/windows with wall_id
                     _ => {}
                 }
             }
@@ -1844,6 +1971,95 @@ impl IfcWriter {
         );
 
         space_id
+    }
+
+    fn write_furnishing_element(
+        &mut self,
+        seed_id: &str,
+        name: &str,
+        owner_history: u32,
+        storey_placement: u32,
+        body_ctx: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        depth: f64,
+        height: f64,
+    ) -> u32 {
+        let placement = self.write_local_placement(Some(storey_placement), x, y, 0.0);
+        let profile = self.write_rectangle_profile(width, depth);
+        let solid = self.write_extruded_area_solid(profile, height);
+        let shape = self.write_body_shape(solid, body_ctx);
+
+        let guid = make_ifc_guid(&format!("furnishing_{}", seed_id));
+        let elem_id = self.alloc();
+        self.emit(
+            elem_id,
+            format!(
+                "IFCFURNISHINGELEMENT('{}',#{},'{}','Furnishing',$,#{},#{},$)",
+                guid, owner_history, name, placement, shape
+            ),
+        );
+        elem_id
+    }
+
+    /// IfcFlowTerminal: used for plumbing fixtures, electrical outlets/lights, HVAC terminals.
+    fn write_flow_terminal(
+        &mut self,
+        seed_id: &str,
+        name: &str,
+        owner_history: u32,
+        storey_placement: u32,
+        body_ctx: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        depth: f64,
+        height: f64,
+    ) -> u32 {
+        let placement = self.write_local_placement(Some(storey_placement), x, y, 0.0);
+        let profile = self.write_rectangle_profile(width.max(0.01), depth.max(0.01));
+        let solid = self.write_extruded_area_solid(profile, height.max(0.01));
+        let shape = self.write_body_shape(solid, body_ctx);
+
+        let guid = make_ifc_guid(&format!("flowterminal_{}", seed_id));
+        let elem_id = self.alloc();
+        self.emit(
+            elem_id,
+            format!(
+                "IFCFLOWTERMINAL('{}',#{},'{}','Terminal',$,#{},#{},$,$)",
+                guid, owner_history, name, placement, shape
+            ),
+        );
+        elem_id
+    }
+
+    /// IfcDistributionElement: used for fire safety devices.
+    fn write_distribution_element(
+        &mut self,
+        seed_id: &str,
+        name: &str,
+        owner_history: u32,
+        storey_placement: u32,
+        body_ctx: u32,
+        x: f64,
+        y: f64,
+    ) -> u32 {
+        let placement = self.write_local_placement(Some(storey_placement), x, y, 0.0);
+        let profile = self.write_rectangle_profile(0.1, 0.1);
+        let solid = self.write_extruded_area_solid(profile, 0.05);
+        let shape = self.write_body_shape(solid, body_ctx);
+
+        let guid = make_ifc_guid(&format!("distrib_{}", seed_id));
+        let elem_id = self.alloc();
+        self.emit(
+            elem_id,
+            format!(
+                "IFCDISTRIBUTIONELEMENT('{}',#{},'{}','Distribution',$,#{},#{},$)",
+                guid, owner_history, name, placement, shape
+            ),
+        );
+        elem_id
     }
 
     // --- Property sets ---

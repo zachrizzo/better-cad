@@ -125,7 +125,7 @@ pub fn sink(center: [f64; 2], rotation: f64) -> Vec<StyledPrimitive> {
         rotation,
         [0.0, 0.0],
         0.015,
-        SymbolLineClass::Primary,
+        SymbolLineClass::Secondary,
         false,
     );
     let faucet_y = d * 0.38;
@@ -241,7 +241,7 @@ pub fn shower(center: [f64; 2], rotation: f64) -> Vec<StyledPrimitive> {
         rotation,
         [0.0, 0.0],
         0.02,
-        SymbolLineClass::Primary,
+        SymbolLineClass::Secondary,
         false,
     );
     add_circle(
@@ -292,7 +292,7 @@ pub fn urinal(center: [f64; 2], rotation: f64) -> Vec<StyledPrimitive> {
         rotation,
         [0.0, -hd * 0.3],
         0.02,
-        SymbolLineClass::Primary,
+        SymbolLineClass::Secondary,
         false,
     );
     out
@@ -418,7 +418,7 @@ pub fn hose_bib(center: [f64; 2], rotation: f64) -> Vec<StyledPrimitive> {
         center,
         rotation,
         &pts,
-        SymbolLineClass::Secondary,
+        SymbolLineClass::Primary,
         true,
         false,
     );

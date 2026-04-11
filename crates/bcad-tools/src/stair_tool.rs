@@ -2,12 +2,12 @@
 //!
 //! Two-point tool with straight/spiral modes. Click start, click end.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{Element, ElementMeta, StairElement, StairType};
 use glam::Vec2;
 
 const MIN_STAIR_RUN: f64 = 0.4;
-const STAIR_SNAP_THRESHOLD: f64 = 0.3;
 const STAIR_COLOR: [f32; 4] = [0.4, 0.7, 0.3, 1.0];
 
 #[derive(Debug, Clone)]
@@ -74,7 +74,7 @@ impl Tool for StairTool {
                         pos = apply_ortho_constraint(*start, pos);
                     }
                 }
-                self.base.update_cursor(pos, snap, STAIR_SNAP_THRESHOLD);
+                self.base.update_cursor(pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -90,7 +90,7 @@ impl Tool for StairTool {
                         pos = apply_ortho_constraint(*start, pos);
                     }
                 }
-                self.base.update_cursor(pos, snap, STAIR_SNAP_THRESHOLD);
+                self.base.update_cursor(pos, snap, DEFAULT_SNAP_DISTANCE);
                 let snapped = self.base.pos().unwrap_or(pos);
 
                 match &self.state {
@@ -158,11 +158,25 @@ impl Tool for StairTool {
         let mut geom = Vec::new();
 
         if let Some(pos) = self.base.cursor_pos {
+            let color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => STAIR_COLOR,
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.06,
-                color: STAIR_COLOR,
+                color,
                 shape: MarkerShape::Circle,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

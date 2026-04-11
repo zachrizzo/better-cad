@@ -116,7 +116,7 @@ pub fn exit_sign(center: [f64; 2], rotation: f64) -> Vec<StyledPrimitive> {
         rotation,
         [0.18, 0.0],
         [0.24, 0.0],
-        SymbolLineClass::Secondary,
+        SymbolLineClass::Annotation,
         false,
     );
     add_line(
@@ -126,7 +126,7 @@ pub fn exit_sign(center: [f64; 2], rotation: f64) -> Vec<StyledPrimitive> {
         rotation,
         [0.21, 0.03],
         [0.24, 0.0],
-        SymbolLineClass::Secondary,
+        SymbolLineClass::Annotation,
         false,
     );
     add_line(
@@ -136,7 +136,7 @@ pub fn exit_sign(center: [f64; 2], rotation: f64) -> Vec<StyledPrimitive> {
         rotation,
         [0.21, -0.03],
         [0.24, 0.0],
-        SymbolLineClass::Secondary,
+        SymbolLineClass::Annotation,
         false,
     );
     out

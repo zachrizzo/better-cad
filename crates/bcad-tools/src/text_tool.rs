@@ -3,11 +3,10 @@
 //! Simple click-to-place tool that creates a Generic element with text
 //! annotation data. The user can then select it and edit in the property panel.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{Element, ElementMeta, GenericElement, LevelRef};
 use glam::Vec2;
-
-const TEXT_SNAP_THRESHOLD: f64 = 0.3;
 const TEXT_COLOR: [f32; 4] = [0.9, 0.9, 0.3, 1.0];
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
@@ -83,7 +82,7 @@ impl Tool for TextTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, TEXT_SNAP_THRESHOLD);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 self.cursor_pos = self.base.pos().unwrap_or(plan_pos);
                 ToolAction::StateChanged
             }
@@ -93,7 +92,7 @@ impl Tool for TextTool {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.base.update_cursor(plan_pos, snap, TEXT_SNAP_THRESHOLD);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
                 let element = self.create_text_element(pos, ctx);
                 ToolAction::EmitCommands(vec![Command::CreateElement(element)])
@@ -126,10 +125,14 @@ impl Tool for TextTool {
             });
 
             // Cursor crosshair marker
+            let cursor_color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => TEXT_COLOR,
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.05,
-                color: TEXT_COLOR,
+                color: cursor_color,
                 shape: MarkerShape::Circle,
             });
 
@@ -139,6 +142,16 @@ impl Tool for TextTool {
                 text: "Click to place text".to_string(),
                 font_size: 10.0,
                 color: WHITE,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

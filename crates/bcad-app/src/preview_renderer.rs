@@ -18,6 +18,8 @@ use bcad_tools::tool_trait::{MarkerShape, PreviewGeometry};
 use egui::{Color32, FontId, Pos2, Rect, Stroke};
 use glam::Vec2;
 
+use crate::coordinate_transforms::world_to_screen_vec2;
+
 // ---------------------------------------------------------------------------
 // Color conversion
 // ---------------------------------------------------------------------------
@@ -59,27 +61,6 @@ pub fn pen_to_screen_px(pen: PenWeight, zoom: f32) -> f32 {
 // ---------------------------------------------------------------------------
 // World-to-screen projection
 // ---------------------------------------------------------------------------
-
-/// Project a world-space 2D point (plan coordinates) to screen-space `Pos2`
-/// using the 2D orthographic camera.
-///
-/// This is the inverse of `screen_to_plan` in event_loop.rs for the 2D
-/// viewport. The orthographic camera uses:
-///   half_w = zoom_level * aspect * 0.5
-///   half_h = zoom_level * 0.5
-///   ndc_x = (world_x - pan_offset.x) / half_w
-///   ndc_y = (world_y - pan_offset.y) / half_h
-///   screen_x = (ndc_x + 1) / 2 * viewport_width + viewport_x
-///   screen_y = (1 - ndc_y) / 2 * viewport_height + viewport_y
-fn world_to_screen_2d(world: Vec2, camera: &CameraState, viewport: Rect) -> Pos2 {
-    let half_w = camera.zoom_level * camera.aspect * 0.5;
-    let half_h = camera.zoom_level * 0.5;
-    let ndc_x = (world.x - camera.pan_offset.x) / half_w;
-    let ndc_y = (world.y - camera.pan_offset.y) / half_h;
-    let screen_x = (ndc_x + 1.0) * 0.5 * viewport.width() + viewport.min.x;
-    let screen_y = (1.0 - ndc_y) * 0.5 * viewport.height() + viewport.min.y;
-    Pos2::new(screen_x, screen_y)
-}
 
 /// Project a world-space 2D point (plan XZ coordinates) to screen-space `Pos2`
 /// using the 3D perspective camera.
@@ -130,7 +111,7 @@ pub fn render_preview(
     // Closure that projects world coords to screen coords.
     let project = |world: Vec2| -> Option<Pos2> {
         if is_2d {
-            Some(world_to_screen_2d(world, camera_2d, viewport))
+            Some(world_to_screen_vec2(world, camera_2d, viewport))
         } else {
             world_to_screen_3d(world, camera_3d, viewport, level_y)
         }
@@ -276,8 +257,8 @@ fn world_radius_to_pixels(
     level_y: f32,
 ) -> f32 {
     if is_2d {
-        let c = world_to_screen_2d(center, camera_2d, viewport);
-        let edge = world_to_screen_2d(Vec2::new(center.x + radius, center.y), camera_2d, viewport);
+        let c = world_to_screen_vec2(center, camera_2d, viewport);
+        let edge = world_to_screen_vec2(Vec2::new(center.x + radius, center.y), camera_2d, viewport);
         (edge.x - c.x).abs().max(4.0)
     } else {
         let c = world_to_screen_3d(center, camera_3d, viewport, level_y);
@@ -427,8 +408,8 @@ fn pixels_per_world_unit(
     );
     let offset = Vec2::new(center.x + 1.0, center.y);
     if is_2d {
-        let sc = world_to_screen_2d(center, camera_2d, viewport);
-        let so = world_to_screen_2d(offset, camera_2d, viewport);
+        let sc = world_to_screen_vec2(center, camera_2d, viewport);
+        let so = world_to_screen_vec2(offset, camera_2d, viewport);
         (so.x - sc.x).abs().max(1.0)
     } else {
         let sc = world_to_screen_3d(center, camera_3d, viewport, level_y);

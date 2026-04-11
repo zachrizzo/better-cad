@@ -361,7 +361,7 @@ pub fn bookshelf(center: [f64; 2], rotation: f64, width: f64, depth: f64) -> Vec
         rotation,
         [-width * 0.46, depth * 0.32],
         [width * 0.46, depth * 0.32],
-        LC,
+        SymbolLineClass::Secondary,
         false,
     );
     let shelf_count = clamp((width / 0.45).round(), 2.0, 6.0) as i32;

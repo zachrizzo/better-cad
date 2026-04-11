@@ -4,9 +4,14 @@
 //! All state mutations flow through the command processor.
 
 mod ai_service;
+mod camera_controller;
 mod command_processor;
+mod command_translator;
+mod coordinate_transforms;
+pub mod elevation_renderer;
 mod event_loop;
 mod file_ops;
+mod input_handler;
 mod mesh_regeneration;
 mod plan_renderer_2d;
 mod preview_renderer;

@@ -5,6 +5,9 @@ pub mod ifc;
 pub mod prototype_format;
 pub mod step;
 
+pub use dxf_io::{export_dxf, import_dxf};
+pub use ifc::{export_ifc, import_ifc};
+
 /// I/O error type for file import/export operations.
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {

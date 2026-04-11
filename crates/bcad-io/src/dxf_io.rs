@@ -4,9 +4,12 @@
 //! Uses AIA-standard layer naming (A-WALL, A-DOOR, A-WIND, etc.).
 
 use bcad_domain::{
-    BeamElement, ColumnElement, ElectricalElement, Element, ElementMeta, FloorElement,
-    FoundationElement, FurnitureElement, PlumbingElement, RoofElement, RoofType, RoomElement,
-    SiteDetailElement, StairElement, StairType, WallElement,
+    AccessibilityElement, BeamElement, CabinetElement, ColumnElement, DoorElement,
+    DoorHardwareType, DoorStyle, DoorSwing, ElectricalElement, Element, ElementMeta,
+    FireSafetyElement, FloorElement, FoundationElement, FurnitureElement, HvacElement,
+    LeaderAnnotationElement, PlumbingElement, RoofElement, RoofType, RoomElement,
+    SiteDetailElement, StairElement, StairType, WallElement, WindowElement, WindowHardwareType,
+    WindowStyle,
 };
 use std::io::Cursor;
 
@@ -38,6 +41,8 @@ const STANDARD_LAYERS: &[(&str, i16)] = &[
     ("G-ANNO", 7),  // white
     ("G-DIMS", 7),  // white
     ("G-TAGS", 7),  // white
+    ("M-HVAC", 4),  // cyan (HVAC)
+    ("F-SAFE", 1),  // red  (fire safety)
 ];
 
 /// Ensure standard layers exist in the drawing.
@@ -145,6 +150,18 @@ pub fn export_dxf(elements: &[Element]) -> Result<Vec<u8>, Box<dyn std::error::E
             }
             Element::SiteDetail(site) => {
                 add_site_detail_entity(&mut drawing, site);
+            }
+            Element::Hvac(hvac) => {
+                add_hvac_symbol(&mut drawing, hvac);
+            }
+            Element::FireSafety(fs) => {
+                add_fire_safety_symbol(&mut drawing, fs);
+            }
+            Element::Accessibility(acc) => {
+                add_accessibility_symbol(&mut drawing, acc);
+            }
+            Element::Cabinet(cab) => {
+                add_cabinet_entity(&mut drawing, cab);
             }
             _ => {
                 // Other element types (Level, Grid, View, Sheet, Material, etc.)
@@ -594,6 +611,126 @@ fn add_site_detail_entity(drawing: &mut dxf::Drawing, site: &SiteDetailElement) 
 }
 
 // ---------------------------------------------------------------------------
+// HVAC symbols
+// ---------------------------------------------------------------------------
+
+fn add_hvac_symbol(drawing: &mut dxf::Drawing, hvac: &HvacElement) {
+    let px = hvac.position[0];
+    let py = hvac.position[1];
+    let layer = "M-HVAC";
+    let w = hvac.width.unwrap_or(0.3);
+    let d = hvac.depth.unwrap_or(0.3);
+    let hw = w * 0.5;
+    let hd = d * 0.5;
+
+    // Rectangle footprint
+    let boundary = vec![
+        [px - hw, py - hd],
+        [px + hw, py - hd],
+        [px + hw, py + hd],
+        [px - hw, py + hd],
+    ];
+    add_closed_polyline(drawing, &boundary, layer);
+
+    // Diagonal cross for duct symbol
+    add_line(drawing, px - hw, py - hd, px + hw, py + hd, layer);
+    add_line(drawing, px + hw, py - hd, px - hw, py + hd, layer);
+}
+
+// ---------------------------------------------------------------------------
+// Fire safety symbols
+// ---------------------------------------------------------------------------
+
+fn add_fire_safety_symbol(drawing: &mut dxf::Drawing, fs: &FireSafetyElement) {
+    let px = fs.position[0];
+    let py = fs.position[1];
+    let layer = "F-SAFE";
+
+    match fs.symbol_type.as_str() {
+        "sprinkler" => {
+            // Circle with cross
+            add_circle_approx(drawing, px, py, 0.1, layer);
+            add_line(drawing, px - 0.1, py, px + 0.1, py, layer);
+            add_line(drawing, px, py - 0.1, px, py + 0.1, layer);
+        }
+        "fire_extinguisher" => {
+            // Small cylinder shape
+            let boundary = vec![
+                [px - 0.06, py - 0.1],
+                [px + 0.06, py - 0.1],
+                [px + 0.06, py + 0.1],
+                [px - 0.06, py + 0.1],
+            ];
+            add_closed_polyline(drawing, &boundary, layer);
+            add_circle_approx(drawing, px, py + 0.1, 0.06, layer);
+        }
+        "smoke_detector" => {
+            add_circle_approx(drawing, px, py, 0.12, layer);
+            add_line(drawing, px - 0.06, py, px + 0.06, py, layer);
+        }
+        _ => {
+            // Generic: X circle
+            add_circle_approx(drawing, px, py, 0.12, layer);
+            add_line(drawing, px - 0.085, py - 0.085, px + 0.085, py + 0.085, layer);
+            add_line(drawing, px + 0.085, py - 0.085, px - 0.085, py + 0.085, layer);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Accessibility symbols
+// ---------------------------------------------------------------------------
+
+fn add_accessibility_symbol(drawing: &mut dxf::Drawing, acc: &AccessibilityElement) {
+    let px = acc.position[0];
+    let py = acc.position[1];
+    let layer = "G-ANNO";
+    let w = acc.width.unwrap_or(0.6);
+    let d = acc.depth.unwrap_or(0.6);
+    let hw = w * 0.5;
+    let hd = d * 0.5;
+
+    // Wheelchair symbol approximation: rectangle + circle (head)
+    let boundary = vec![
+        [px - hw, py - hd],
+        [px + hw, py - hd],
+        [px + hw, py + hd * 0.5],
+        [px - hw, py + hd * 0.5],
+    ];
+    add_closed_polyline(drawing, &boundary, layer);
+    add_circle_approx(drawing, px, py + hd * 0.8, hd * 0.2, layer);
+}
+
+// ---------------------------------------------------------------------------
+// Cabinet entities
+// ---------------------------------------------------------------------------
+
+fn add_cabinet_entity(drawing: &mut dxf::Drawing, cab: &CabinetElement) {
+    let px = cab.position[0];
+    let py = cab.position[1];
+    let hw = cab.width * 0.5;
+    let hd = cab.depth * 0.5;
+    let layer = "F-FURN";
+
+    // Outer rectangle
+    let boundary = vec![
+        [px - hw, py - hd],
+        [px + hw, py - hd],
+        [px + hw, py + hd],
+        [px - hw, py + hd],
+    ];
+    add_closed_polyline(drawing, &boundary, layer);
+
+    // Door count indicator: vertical divider lines
+    let doors = cab.door_count.max(1) as usize;
+    for i in 1..doors {
+        let frac = i as f64 / doors as f64;
+        let x = px - hw + cab.width * frac;
+        add_line(drawing, x, py - hd, x, py + hd, layer);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helper: add a LINE entity
 // ---------------------------------------------------------------------------
 
@@ -798,6 +935,99 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                         };
                         elements.push(Element::Wall(wall));
                     }
+                }
+            }
+            EntityType::Text(text) => {
+                // TEXT entities → LeaderAnnotationElement on any layer
+                let px = text.location.x;
+                let py = text.location.y;
+                elements.push(Element::LeaderAnnotation(LeaderAnnotationElement {
+                    meta: ElementMeta::new(format!(
+                        "Imported Text {}",
+                        elements.len() + 1
+                    )),
+                    start: [px, py],
+                    end: [px + 1.0, py],
+                    text: text.value.clone(),
+                    arrow_type: "closed".to_string(),
+                }));
+            }
+            EntityType::MText(mtext) => {
+                // MTEXT entities → LeaderAnnotationElement
+                let px = mtext.insertion_point.x;
+                let py = mtext.insertion_point.y;
+                elements.push(Element::LeaderAnnotation(LeaderAnnotationElement {
+                    meta: ElementMeta::new(format!(
+                        "Imported MText {}",
+                        elements.len() + 1
+                    )),
+                    start: [px, py],
+                    end: [px + 1.0, py],
+                    text: mtext.text.clone(),
+                    arrow_type: "closed".to_string(),
+                }));
+            }
+            EntityType::Insert(ins) => {
+                // INSERT entities: map block name to domain element
+                let block_upper = ins.name.to_uppercase();
+                let px = ins.location.x;
+                let py = ins.location.y;
+
+                if block_upper.contains("DOOR") {
+                    elements.push(Element::Door(DoorElement {
+                        meta: ElementMeta::new(format!(
+                            "Imported Door {}",
+                            elements.len() + 1
+                        )),
+                        wall_id: String::new(),
+                        position_along_wall: 0.5,
+                        width: 0.9,
+                        height: 2.1,
+                        sill_height: 0.0,
+                        swing: DoorSwing::OutRight,
+                        hardware_type: DoorHardwareType::Lever,
+                        style: DoorStyle::Flush,
+                    }));
+                } else if block_upper.contains("WINDOW") || block_upper.contains("WIN") {
+                    elements.push(Element::Window(WindowElement {
+                        meta: ElementMeta::new(format!(
+                            "Imported Window {}",
+                            elements.len() + 1
+                        )),
+                        wall_id: String::new(),
+                        position_along_wall: 0.5,
+                        width: 1.2,
+                        height: 1.0,
+                        sill_height: 0.9,
+                        hardware_type: WindowHardwareType::Latch,
+                        style: WindowStyle::Picture,
+                    }));
+                } else if block_upper.contains("COLUMN") || block_upper.contains("COL") {
+                    elements.push(Element::Column(ColumnElement {
+                        meta: ElementMeta::new(format!(
+                            "Imported Column {}",
+                            elements.len() + 1
+                        )),
+                        center: [px, py],
+                        width: 0.3,
+                        depth: 0.3,
+                        height: 3.0,
+                        diameter: None,
+                        column_segments: 24,
+                    }));
+                } else {
+                    // Generic block → furniture
+                    elements.push(Element::Furniture(FurnitureElement {
+                        meta: ElementMeta::new(format!(
+                            "Imported Block {}",
+                            elements.len() + 1
+                        )),
+                        symbol_type: ins.name.clone(),
+                        position: [px, py],
+                        rotation: ins.rotation,
+                        width: ins.x_scale_factor * 0.6,
+                        depth: ins.y_scale_factor * 0.6,
+                    }));
                 }
             }
             _ => {

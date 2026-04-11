@@ -49,6 +49,12 @@ impl ToolManager {
         // Register all tools
         tools.insert(ToolId::Select, Box::new(SelectTool::new()));
         tools.insert(ToolId::Wall, Box::new(WallTool::new()));
+        // ArcWall shares the WallTool implementation. The wall_tool produces
+        // straight walls by default (arc: None); the arc mode is toggled via
+        // UI once the tool is active. Registering it here means
+        // ToolId::ArcWall activates a real WallTool instance instead of
+        // falling back to the workaround in event_loop.
+        tools.insert(ToolId::ArcWall, Box::new(WallTool::new()));
         tools.insert(ToolId::Door, Box::new(DoorTool::new()));
         tools.insert(ToolId::Window, Box::new(WindowTool::new()));
         tools.insert(ToolId::Column, Box::new(ColumnTool::new()));
@@ -256,6 +262,7 @@ mod tests {
         let expected_tools = vec![
             ToolId::Select,
             ToolId::Wall,
+            ToolId::ArcWall,
             ToolId::Door,
             ToolId::Window,
             ToolId::Column,

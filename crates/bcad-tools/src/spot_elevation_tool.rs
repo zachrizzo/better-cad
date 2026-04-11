@@ -2,11 +2,10 @@
 //!
 //! Simplest tool: single-click to place an elevation marker.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{Element, ElementMeta, LevelRef};
 use glam::Vec2;
-
-const SPOT_SNAP_DISTANCE: f64 = 0.3;
 const SPOT_COLOR: [f32; 4] = [0.9, 0.6, 0.1, 1.0];
 
 pub struct SpotElevationTool {
@@ -54,7 +53,7 @@ impl Tool for SpotElevationTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, SPOT_SNAP_DISTANCE);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -63,7 +62,7 @@ impl Tool for SpotElevationTool {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.base.update_cursor(plan_pos, snap, SPOT_SNAP_DISTANCE);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
 
                 self.spot_count += 1;
@@ -108,12 +107,26 @@ impl Tool for SpotElevationTool {
     fn preview_geometry(&self, ctx: &ToolContext) -> Vec<PreviewGeometry> {
         let mut geom = Vec::new();
 
+        // Snap ring indicator (shown behind the spot marker)
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.2,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.16 },
+            });
+        }
+
         if let Some(pos) = self.base.cursor_pos {
             // Elevation marker circle
+            let marker_color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => SPOT_COLOR,
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.15,
-                color: SPOT_COLOR,
+                color: marker_color,
                 shape: MarkerShape::Ring { inner_radius: 0.1 },
             });
 

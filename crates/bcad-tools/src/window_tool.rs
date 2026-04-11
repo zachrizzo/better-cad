@@ -3,14 +3,13 @@
 //! Structurally identical to the Door tool, but produces WindowElement
 //! and has no swing direction.
 
-use crate::snap::project_point_onto_segment;
+use crate::snap::{project_point_onto_segment, DEFAULT_SNAP_DISTANCE};
 use crate::tool_trait::*;
 use bcad_domain::{Element, ElementMeta, WindowElement, WindowHardwareType, WindowStyle};
 use glam::Vec2;
 
 const WINDOW_ATTACH_DISTANCE: f32 = 0.8;
 const WINDOW_END_CLEARANCE: f64 = 0.05;
-const WINDOW_SNAP_THRESHOLD: f64 = 0.3;
 const WINDOW_COLOR: [f32; 4] = [0.3, 0.7, 1.0, 1.0];
 
 #[derive(Debug, Clone)]
@@ -123,7 +122,7 @@ impl Tool for WindowTool {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
                 self.base
-                    .update_cursor(plan_pos, snap, WINDOW_SNAP_THRESHOLD);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 self.candidate = self.find_candidate(plan_pos, ctx);
                 ToolAction::StateChanged
             }
@@ -224,13 +223,26 @@ impl Tool for WindowTool {
             let color = if self.candidate.is_some() {
                 WINDOW_COLOR
             } else {
-                [0.5, 0.5, 0.5, 1.0]
+                match &self.base.snap_result {
+                    Some(s) => snap_type_color(s.snap_type),
+                    None => [0.5, 0.5, 0.5, 1.0],
+                }
             };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.06,
                 color,
                 shape: MarkerShape::Circle,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

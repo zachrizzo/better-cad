@@ -3,6 +3,7 @@
 //! Click to select an element (by proximity picking). Click empty space
 //! to deselect. This is the default tool.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::Element;
 use glam::Vec2;
@@ -169,7 +170,7 @@ impl Tool for SelectTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, 0.3);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
 
                 // If dragging a gizmo axis, accumulate delta
                 if let (Some(axis), Some(start)) = (self.dragging_axis, self.drag_start) {

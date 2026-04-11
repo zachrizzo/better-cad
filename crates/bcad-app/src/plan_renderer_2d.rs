@@ -8,11 +8,13 @@ use bcad_2d::style::{DomainColor, PenWeight, StyledPrimitive};
 use bcad_2d::symbols::door_window::{
     self, DoorParams, Swing, WindowParams,
 };
-use bcad_2d::wall_outline::{self, WallSegment};
+use bcad_2d::wall_outline::{self, WallOpening, WallSegment};
 use bcad_domain::{DoorSwing, Element, WallElement};
 use bcad_render::camera::CameraState;
 use bcad_state::ui_state::Theme;
 use egui::{Color32, FontId, Pos2, Rect, Stroke};
+
+use crate::coordinate_transforms::{world_dist_to_px, world_to_screen_f64};
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -46,17 +48,68 @@ pub fn render_2d_plan(
         })
         .collect();
 
-    // --- Wall outlines ---
+    // Build wall segments with opening intervals from doors and windows.
     let wall_segments: Vec<WallSegment> = walls_on_level
         .iter()
-        .map(|w| WallSegment {
-            id: w.meta.id.clone(),
-            start: w.start,
-            end: w.end,
-            thickness: w.thickness,
+        .map(|w| {
+            let wall_len = {
+                let dx = w.end[0] - w.start[0];
+                let dy = w.end[1] - w.start[1];
+                (dx * dx + dy * dy).sqrt()
+            };
+
+            let openings: Vec<WallOpening> = if wall_len < 1e-6 {
+                vec![]
+            } else {
+                elements
+                    .iter()
+                    .filter_map(|e| {
+                        let (pos, width, wall_id) = match e {
+                            Element::Door(d) => (d.position_along_wall, d.width, &d.wall_id),
+                            Element::Window(win) => (win.position_along_wall, win.width, &win.wall_id),
+                            _ => return None,
+                        };
+                        if wall_id != &w.meta.id {
+                            return None;
+                        }
+                        let half_t = (width / wall_len) * 0.5;
+                        let t_start = (pos - half_t).max(0.0);
+                        let t_end = (pos + half_t).min(1.0);
+                        if t_end > t_start {
+                            Some(WallOpening { t_start, t_end })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
+
+            WallSegment {
+                id: w.meta.id.clone(),
+                start: w.start,
+                end: w.end,
+                thickness: w.thickness,
+                openings,
+            }
         })
         .collect();
 
+    // Rendering order: hatch fill → outlines → symbols → annotations.
+
+    // 1. Wall diagonal hatch fill (45°, FreeCAD/standard architectural style).
+    let hatch_color = match theme {
+        Theme::Dark => Color32::from_rgb(160, 160, 160),
+        Theme::Light => Color32::from_rgb(80, 80, 80),
+    };
+    let hatch_stroke = Stroke::new(0.5, hatch_color);
+    let hatch_lines = wall_outline::build_wall_hatch_lines(&wall_segments, 0.06);
+    for line in &hatch_lines {
+        let s = world_to_screen_f64(line.start, camera, viewport_rect);
+        let e = world_to_screen_f64(line.end, camera, viewport_rect);
+        painter.line_segment([s, e], hatch_stroke);
+    }
+
+    // 2. Wall outlines (with opening gaps).
     let wall_styled = wall_outline::build_visible_wall_styled_lines(&wall_segments);
     for sp in &wall_styled {
         draw_styled_primitive(painter, viewport_rect, camera, sp, theme);
@@ -154,27 +207,6 @@ pub fn render_2d_plan(
 }
 
 // ---------------------------------------------------------------------------
-// World-to-screen projection
-// ---------------------------------------------------------------------------
-
-fn world_to_screen(world: [f64; 2], camera: &CameraState, rect: Rect) -> Pos2 {
-    let hw = camera.zoom_level * camera.aspect * 0.5;
-    let hh = camera.zoom_level * 0.5;
-    let nx = (world[0] as f32 - camera.pan_offset.x) / hw;
-    let ny = (world[1] as f32 - camera.pan_offset.y) / hh;
-    Pos2::new(
-        rect.center().x + nx * rect.width() * 0.5,
-        rect.center().y - ny * rect.height() * 0.5,
-    )
-}
-
-/// Convert a world-space distance to screen pixels (approximate, horizontal).
-fn world_dist_to_px(dist: f64, camera: &CameraState, rect: Rect) -> f32 {
-    let hw = camera.zoom_level * camera.aspect * 0.5;
-    (dist as f32 / hw) * rect.width() * 0.5
-}
-
-// ---------------------------------------------------------------------------
 // Color helpers
 // ---------------------------------------------------------------------------
 
@@ -223,7 +255,7 @@ fn draw_styled_primitive(
             }
             let screen_pts: Vec<Pos2> = points
                 .iter()
-                .map(|p| world_to_screen(*p, camera, viewport))
+                .map(|p| world_to_screen_f64(*p, camera, viewport))
                 .collect();
 
             if *closed && screen_pts.len() >= 3 {
@@ -242,7 +274,7 @@ fn draw_styled_primitive(
             }
         }
         SymbolPrimitive::Circle { center, radius } => {
-            let screen_center = world_to_screen(*center, camera, viewport);
+            let screen_center = world_to_screen_f64(*center, camera, viewport);
             let screen_radius = world_dist_to_px(*radius, camera, viewport);
             painter.circle_stroke(screen_center, screen_radius, stroke);
         }
@@ -261,7 +293,7 @@ fn draw_styled_primitive(
                 let angle = start_angle + t * angle_span;
                 let wx = center[0] + radius * angle.cos();
                 let wy = center[1] + radius * angle.sin();
-                pts.push(world_to_screen([wx, wy], camera, viewport));
+                pts.push(world_to_screen_f64([wx, wy], camera, viewport));
             }
             for pair in pts.windows(2) {
                 painter.line_segment([pair[0], pair[1]], stroke);
@@ -273,7 +305,7 @@ fn draw_styled_primitive(
             font_size,
             anchor,
         } => {
-            let screen_pos = world_to_screen(*position, camera, viewport);
+            let screen_pos = world_to_screen_f64(*position, camera, viewport);
             let screen_font_size = world_dist_to_px(*font_size, camera, viewport).max(8.0);
             let align = match anchor {
                 TextAnchor::TopLeft => egui::Align2::LEFT_TOP,
@@ -295,8 +327,8 @@ fn draw_styled_primitive(
             );
         }
         SymbolPrimitive::FilledRect { min, max } => {
-            let screen_min = world_to_screen(*min, camera, viewport);
-            let screen_max = world_to_screen(*max, camera, viewport);
+            let screen_min = world_to_screen_f64(*min, camera, viewport);
+            let screen_max = world_to_screen_f64(*max, camera, viewport);
             let rect = Rect::from_two_pos(screen_min, screen_max);
             painter.rect_filled(rect, 0.0, color);
         }
@@ -401,7 +433,7 @@ fn draw_column(
 
     if let Some(diameter) = col.diameter {
         // Circular column: draw circle + cross.
-        let screen_center = world_to_screen(col.center, camera, viewport);
+        let screen_center = world_to_screen_f64(col.center, camera, viewport);
         let screen_radius = world_dist_to_px(diameter / 2.0, camera, viewport);
         painter.circle_stroke(screen_center, screen_radius, stroke);
 
@@ -434,7 +466,7 @@ fn draw_column(
         ];
         let screen_corners: Vec<Pos2> = corners
             .iter()
-            .map(|c| world_to_screen(*c, camera, viewport))
+            .map(|c| world_to_screen_f64(*c, camera, viewport))
             .collect();
 
         // Filled background.
@@ -480,7 +512,7 @@ fn draw_room_label(
     let cx: f64 = room.boundary.iter().map(|p| p[0]).sum::<f64>() / n;
     let cy: f64 = room.boundary.iter().map(|p| p[1]).sum::<f64>() / n;
 
-    let screen_pos = world_to_screen([cx, cy], camera, viewport);
+    let screen_pos = world_to_screen_f64([cx, cy], camera, viewport);
     let color = domain_color_to_color32(DomainColor::Annotation, theme);
 
     // Room name.
@@ -536,7 +568,7 @@ fn draw_stair(
     ];
     let screen_corners: Vec<Pos2> = corners
         .iter()
-        .map(|c| world_to_screen(*c, camera, viewport))
+        .map(|c| world_to_screen_f64(*c, camera, viewport))
         .collect();
     for i in 0..4 {
         painter.line_segment(
@@ -553,8 +585,8 @@ fn draw_stair(
         let base_y = stair.start[1] + uy * run_len * t;
         let p1 = [base_x + nx * half_w, base_y + ny * half_w];
         let p2 = [base_x - nx * half_w, base_y - ny * half_w];
-        let sp1 = world_to_screen(p1, camera, viewport);
-        let sp2 = world_to_screen(p2, camera, viewport);
+        let sp1 = world_to_screen_f64(p1, camera, viewport);
+        let sp2 = world_to_screen_f64(p2, camera, viewport);
         painter.line_segment([sp1, sp2], tread_stroke);
     }
 
@@ -569,8 +601,8 @@ fn draw_stair(
         stair.start[0] + ux * run_len * arrow_end_t,
         stair.start[1] + uy * run_len * arrow_end_t,
     ];
-    let ss = world_to_screen(arrow_s, camera, viewport);
-    let se = world_to_screen(arrow_e, camera, viewport);
+    let ss = world_to_screen_f64(arrow_s, camera, viewport);
+    let se = world_to_screen_f64(arrow_e, camera, viewport);
     painter.line_segment([ss, se], outline_stroke);
 
     // Arrowhead.
@@ -584,9 +616,9 @@ fn draw_stair(
         tip[0] - ux * ah - nx * ah * 0.5,
         tip[1] - uy * ah - ny * ah * 0.5,
     ];
-    let s_tip = world_to_screen(tip, camera, viewport);
-    let s_al = world_to_screen(al, camera, viewport);
-    let s_ar = world_to_screen(ar, camera, viewport);
+    let s_tip = world_to_screen_f64(tip, camera, viewport);
+    let s_al = world_to_screen_f64(al, camera, viewport);
+    let s_ar = world_to_screen_f64(ar, camera, viewport);
     painter.line_segment([s_al, s_tip], outline_stroke);
     painter.line_segment([s_ar, s_tip], outline_stroke);
 }

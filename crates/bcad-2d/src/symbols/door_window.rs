@@ -417,10 +417,12 @@ pub fn fixed_window(p: &WindowParams) -> Vec<StyledPrimitive> {
     out
 }
 
-/// Double hung window: three parallel lines.
+/// Double hung window: three parallel lines spanning the full wall thickness.
+///
+/// The outer frame lines sit at ±wall_thickness/2 and the centre glass line at 0.
 pub fn double_hung_window(p: &WindowParams) -> Vec<StyledPrimitive> {
     let mut out = Vec::new();
-    let offset = p.wall_thickness * 0.3;
+    let offset = p.wall_thickness / 2.0;
     opening_line(&mut out, p, offset, SymbolLineClass::Primary);
     opening_line(&mut out, p, 0.0, SymbolLineClass::Secondary);
     opening_line(&mut out, p, -offset, SymbolLineClass::Primary);
@@ -505,9 +507,11 @@ pub fn sliding_window(p: &WindowParams) -> Vec<StyledPrimitive> {
 }
 
 /// Awning window: top frame + arc sweeping outward + bottom line.
+///
+/// Frame lines are placed at ±wall_thickness/2 to span the full wall thickness.
 pub fn awning_window(p: &WindowParams) -> Vec<StyledPrimitive> {
     let mut out = Vec::new();
-    let offset = p.wall_thickness * 0.3;
+    let offset = p.wall_thickness / 2.0;
     let dir = p.dir;
     let normal = p.normal;
 

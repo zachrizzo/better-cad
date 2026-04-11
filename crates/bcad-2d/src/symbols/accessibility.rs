@@ -123,7 +123,7 @@ pub fn ramp(center: [f64; 2], rotation: f64, show_label: bool) -> Vec<StyledPrim
         rotation,
         [0.20, 0.0],
         [0.30, 0.0],
-        SymbolLineClass::Secondary,
+        SymbolLineClass::Annotation,
         false,
     );
     add_line(
@@ -133,7 +133,7 @@ pub fn ramp(center: [f64; 2], rotation: f64, show_label: bool) -> Vec<StyledPrim
         rotation,
         [0.26, 0.03],
         [0.30, 0.0],
-        SymbolLineClass::Secondary,
+        SymbolLineClass::Annotation,
         false,
     );
     add_line(
@@ -143,7 +143,7 @@ pub fn ramp(center: [f64; 2], rotation: f64, show_label: bool) -> Vec<StyledPrim
         rotation,
         [0.26, -0.03],
         [0.30, 0.0],
-        SymbolLineClass::Secondary,
+        SymbolLineClass::Annotation,
         false,
     );
     if show_label {
@@ -162,7 +162,7 @@ pub fn grab_bar(center: [f64; 2], rotation: f64) -> Vec<StyledPrimitive> {
         rotation,
         [-0.30, 0.0],
         [0.30, 0.0],
-        SymbolLineClass::Cut,
+        SymbolLineClass::Primary,
         false,
     );
     add_circle(

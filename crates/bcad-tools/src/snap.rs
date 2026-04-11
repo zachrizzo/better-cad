@@ -6,6 +6,13 @@
 //! queries.
 
 use crate::tool_trait::{SnapCandidate, SnapMode};
+
+/// Unified snap threshold used by all drawing tools.
+///
+/// Any tool that calls `snap.find_nearest(point, ...)` or
+/// `base.update_cursor(pos, snap, ...)` should pass this value so that snap
+/// sensitivity is consistent across the application.
+pub const DEFAULT_SNAP_DISTANCE: f64 = 0.35;
 use bcad_domain::Element;
 use glam::Vec2;
 
