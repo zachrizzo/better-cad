@@ -214,22 +214,51 @@ impl SnapContext {
         }
     }
 
+    /// Priority of a snap mode (lower = higher priority, same scale as spatial hash).
+    fn mode_priority(mode: SnapMode) -> u32 {
+        match mode {
+            SnapMode::Endpoint => 0,
+            SnapMode::Center => 1,
+            SnapMode::Intersection => 2,
+            SnapMode::Midpoint => 3,
+            SnapMode::Perpendicular => 4,
+            SnapMode::Nearest => 5,
+            SnapMode::Edge | SnapMode::Foundation | SnapMode::Mesh | SnapMode::Grid => 6,
+        }
+    }
+
     /// Find the nearest snap candidate within threshold distance.
+    ///
+    /// Uses **priority-first** selection: within the threshold radius, a higher-
+    /// priority type (e.g. Endpoint) always beats a lower-priority type (e.g.
+    /// Nearest) even when the lower-priority candidate is physically closer.
+    /// Distance is only used to break ties within the same priority level.
     pub fn find_nearest(&self, point: Vec2, threshold: f64) -> Option<SnapResult> {
         if !self.enabled || self.candidates.is_empty() {
             return None;
         }
         let threshold_sq = (threshold * threshold) as f32;
-        let mut best: Option<(f32, usize)> = None;
+        // best = (priority, dist_sq, index)
+        let mut best: Option<(u32, f32, usize)> = None;
         for (i, c) in self.candidates.iter().enumerate() {
             let d_sq = (point - c.point).length_squared();
-            if d_sq <= threshold_sq {
-                if best.map_or(true, |(bd, _)| d_sq < bd) {
-                    best = Some((d_sq, i));
-                }
+            if d_sq > threshold_sq {
+                continue;
+            }
+            let pri = c.modes
+                .iter()
+                .map(|m| Self::mode_priority(*m))
+                .min()
+                .unwrap_or(6);
+            let dominated = match best {
+                None => true,
+                Some((bp, bd, _)) => pri < bp || (pri == bp && d_sq < bd),
+            };
+            if dominated {
+                best = Some((pri, d_sq, i));
             }
         }
-        best.map(|(_, idx)| {
+        best.map(|(_, _, idx)| {
             let c = &self.candidates[idx];
             SnapResult {
                 point: c.point,
@@ -240,6 +269,8 @@ impl SnapContext {
     }
 
     /// Find nearest snap candidate filtered by allowed modes.
+    ///
+    /// Uses the same priority-first selection as [`find_nearest`].
     pub fn find_nearest_filtered(
         &self,
         point: Vec2,
@@ -250,19 +281,26 @@ impl SnapContext {
             return None;
         }
         let threshold_sq = (threshold * threshold) as f32;
-        let mut best: Option<(f32, usize, SnapMode)> = None;
+        // best = (priority, dist_sq, index, matched_mode)
+        let mut best: Option<(u32, f32, usize, SnapMode)> = None;
         for (i, c) in self.candidates.iter().enumerate() {
             let matching_mode = c.modes.iter().find(|m| allowed_modes.contains(m));
             if let Some(&mode) = matching_mode {
                 let d_sq = (point - c.point).length_squared();
-                if d_sq <= threshold_sq {
-                    if best.map_or(true, |(bd, _, _)| d_sq < bd) {
-                        best = Some((d_sq, i, mode));
-                    }
+                if d_sq > threshold_sq {
+                    continue;
+                }
+                let pri = Self::mode_priority(mode);
+                let dominated = match best {
+                    None => true,
+                    Some((bp, bd, _, _)) => pri < bp || (pri == bp && d_sq < bd),
+                };
+                if dominated {
+                    best = Some((pri, d_sq, i, mode));
                 }
             }
         }
-        best.map(|(_, idx, mode)| {
+        best.map(|(_, _, idx, mode)| {
             let c = &self.candidates[idx];
             SnapResult {
                 point: c.point,

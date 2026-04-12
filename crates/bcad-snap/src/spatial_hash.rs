@@ -89,13 +89,16 @@ impl SpatialHashGrid {
                             continue;
                         }
 
-                        // Prefer closer candidates; break ties by priority
+                        // Priority-first selection (lower number = higher priority).
+                        // Within the snap radius, Endpoint always beats Nearest even if
+                        // the Nearest point is physically closer.  Distance is only used
+                        // to break ties among candidates with the same priority.
                         let dominated = match best_idx {
                             None => true,
                             Some(_) => {
-                                dist_sq < best_dist_sq
-                                    || (dist_sq == best_dist_sq
-                                        && candidate.priority < best_priority)
+                                candidate.priority < best_priority
+                                    || (candidate.priority == best_priority
+                                        && dist_sq < best_dist_sq)
                             }
                         };
 

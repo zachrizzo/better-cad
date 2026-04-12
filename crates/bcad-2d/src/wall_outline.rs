@@ -100,12 +100,24 @@ pub fn wall_outline_polyline(wall: &WallSegment) -> Option<Vec<StyledPrimitive>>
 fn build_footprint(wall: &WallSegment) -> Option<Footprint> {
     let corners = wall_outline_corners(wall)?;
     let side_edges = vec![
-        OutlineLine { start: corners[0], end: corners[1] },
-        OutlineLine { start: corners[3], end: corners[2] },
+        OutlineLine {
+            start: corners[0],
+            end: corners[1],
+        },
+        OutlineLine {
+            start: corners[3],
+            end: corners[2],
+        },
     ];
     let cap_edges = vec![
-        OutlineLine { start: corners[0], end: corners[3] },
-        OutlineLine { start: corners[1], end: corners[2] },
+        OutlineLine {
+            start: corners[0],
+            end: corners[3],
+        },
+        OutlineLine {
+            start: corners[1],
+            end: corners[2],
+        },
     ];
     Some(Footprint {
         id: wall.id.clone(),
@@ -137,7 +149,7 @@ fn build_mitered_footprint(wall: &WallSegment, all_walls: &[WallSegment]) -> Opt
     let this_right_pt = [wall.start[0] - nx * half_t, wall.start[1] - ny * half_t];
     let this_dir = [ux, uy];
 
-    let eps_dist = 0.01;
+    let eps_dist = 0.05;
 
     for other in all_walls {
         if other.id == wall.id {
@@ -146,84 +158,134 @@ fn build_mitered_footprint(wall: &WallSegment, all_walls: &[WallSegment]) -> Opt
         let odx = other.end[0] - other.start[0];
         let ody = other.end[1] - other.start[1];
         let olen = (odx * odx + ody * ody).sqrt();
-        if olen < EPS { continue; }
+        if olen < EPS {
+            continue;
+        }
         let oux = odx / olen;
         let ouy = ody / olen;
 
         // Skip parallel walls
         let cross_val = ux * ouy - uy * oux;
-        if cross_val.abs() < 0.05 { continue; }
+        if cross_val.abs() < 0.05 {
+            continue;
+        }
 
         let onx = -ouy;
         let ony = oux;
         let other_half_t = other.thickness / 2.0;
-        let other_left_pt = [other.start[0] + onx * other_half_t, other.start[1] + ony * other_half_t];
-        let other_right_pt = [other.start[0] - onx * other_half_t, other.start[1] - ony * other_half_t];
+        let other_left_pt = [
+            other.start[0] + onx * other_half_t,
+            other.start[1] + ony * other_half_t,
+        ];
+        let other_right_pt = [
+            other.start[0] - onx * other_half_t,
+            other.start[1] - ony * other_half_t,
+        ];
         let other_dir = [oux, ouy];
 
         // Check start endpoint
-        let ds_s = ((other.start[0] - wall.start[0]).powi(2) + (other.start[1] - wall.start[1]).powi(2)).sqrt();
-        let ds_e = ((other.end[0] - wall.start[0]).powi(2) + (other.end[1] - wall.start[1]).powi(2)).sqrt();
+        let ds_s = ((other.start[0] - wall.start[0]).powi(2)
+            + (other.start[1] - wall.start[1]).powi(2))
+        .sqrt();
+        let ds_e = ((other.end[0] - wall.start[0]).powi(2)
+            + (other.end[1] - wall.start[1]).powi(2))
+        .sqrt();
         if ds_s < eps_dist || ds_e < eps_dist {
             let max_dist = (wall.thickness + other.thickness) * 2.0;
             if let Some(lc) = ll_intersect(this_left_pt, this_dir, other_left_pt, other_dir) {
                 let d = ((lc[0] - wall.start[0]).powi(2) + (lc[1] - wall.start[1]).powi(2)).sqrt();
-                if d < max_dist { corners[0] = lc; } // sPlus
+                if d < max_dist {
+                    corners[0] = lc;
+                } // sPlus
             }
             if let Some(rc) = ll_intersect(this_right_pt, this_dir, other_right_pt, other_dir) {
                 let d = ((rc[0] - wall.start[0]).powi(2) + (rc[1] - wall.start[1]).powi(2)).sqrt();
-                if d < max_dist { corners[3] = rc; } // sMinus
+                if d < max_dist {
+                    corners[3] = rc;
+                } // sMinus
             }
         }
 
         // Check end endpoint
-        let de_s = ((other.start[0] - wall.end[0]).powi(2) + (other.start[1] - wall.end[1]).powi(2)).sqrt();
-        let de_e = ((other.end[0] - wall.end[0]).powi(2) + (other.end[1] - wall.end[1]).powi(2)).sqrt();
+        let de_s = ((other.start[0] - wall.end[0]).powi(2)
+            + (other.start[1] - wall.end[1]).powi(2))
+        .sqrt();
+        let de_e =
+            ((other.end[0] - wall.end[0]).powi(2) + (other.end[1] - wall.end[1]).powi(2)).sqrt();
         if de_s < eps_dist || de_e < eps_dist {
             let max_dist = (wall.thickness + other.thickness) * 2.0;
             if let Some(lc) = ll_intersect(this_left_pt, this_dir, other_left_pt, other_dir) {
                 let d = ((lc[0] - wall.end[0]).powi(2) + (lc[1] - wall.end[1]).powi(2)).sqrt();
-                if d < max_dist { corners[1] = lc; } // ePlus
+                if d < max_dist {
+                    corners[1] = lc;
+                } // ePlus
             }
             if let Some(rc) = ll_intersect(this_right_pt, this_dir, other_right_pt, other_dir) {
                 let d = ((rc[0] - wall.end[0]).powi(2) + (rc[1] - wall.end[1]).powi(2)).sqrt();
-                if d < max_dist { corners[2] = rc; } // eMinus
+                if d < max_dist {
+                    corners[2] = rc;
+                } // eMinus
             }
         }
     }
 
     // Determine which endpoints have junctions (so we suppress end-cap edges there)
     let has_start_junction = all_walls.iter().any(|o| {
-        if o.id == wall.id { return false; }
-        let ds_s = ((o.start[0] - wall.start[0]).powi(2) + (o.start[1] - wall.start[1]).powi(2)).sqrt();
+        if o.id == wall.id {
+            return false;
+        }
+        let ds_s =
+            ((o.start[0] - wall.start[0]).powi(2) + (o.start[1] - wall.start[1]).powi(2)).sqrt();
         let ds_e = ((o.end[0] - wall.start[0]).powi(2) + (o.end[1] - wall.start[1]).powi(2)).sqrt();
         ds_s < eps_dist || ds_e < eps_dist
     });
     let has_end_junction = all_walls.iter().any(|o| {
-        if o.id == wall.id { return false; }
+        if o.id == wall.id {
+            return false;
+        }
         let de_s = ((o.start[0] - wall.end[0]).powi(2) + (o.start[1] - wall.end[1]).powi(2)).sqrt();
         let de_e = ((o.end[0] - wall.end[0]).powi(2) + (o.end[1] - wall.end[1]).powi(2)).sqrt();
         de_s < eps_dist || de_e < eps_dist
     });
 
     let side_edges = vec![
-        OutlineLine { start: corners[0], end: corners[1] }, // outer face
-        OutlineLine { start: corners[3], end: corners[2] }, // inner face
+        OutlineLine {
+            start: corners[0],
+            end: corners[1],
+        }, // outer face
+        OutlineLine {
+            start: corners[3],
+            end: corners[2],
+        }, // inner face
     ];
     let mut cap_edges = Vec::new();
     if !has_start_junction {
-        cap_edges.push(OutlineLine { start: corners[0], end: corners[3] });
+        cap_edges.push(OutlineLine {
+            start: corners[0],
+            end: corners[3],
+        });
     }
     if !has_end_junction {
-        cap_edges.push(OutlineLine { start: corners[1], end: corners[2] });
+        cap_edges.push(OutlineLine {
+            start: corners[1],
+            end: corners[2],
+        });
     }
-    Some(Footprint { id: wall.id.clone(), corners, side_edges, cap_edges, openings: wall.openings.clone() })
+    Some(Footprint {
+        id: wall.id.clone(),
+        corners,
+        side_edges,
+        cap_edges,
+        openings: wall.openings.clone(),
+    })
 }
 
 /// 2D line-line intersection (point + direction form).
 fn ll_intersect(p1: [f64; 2], d1: [f64; 2], p2: [f64; 2], d2: [f64; 2]) -> Option<[f64; 2]> {
     let denom = d1[0] * d2[1] - d1[1] * d2[0];
-    if denom.abs() < 1e-10 { return None; }
+    if denom.abs() < 1e-10 {
+        return None;
+    }
     let t = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / denom;
     Some([p1[0] + t * d1[0], p1[1] + t * d1[1]])
 }
@@ -234,11 +296,24 @@ fn cross2(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
 
 /// Compute the parametric interval `[t_enter, t_exit]` of a segment that
 /// lies inside a convex polygon.  Returns `None` if there is no overlap.
+///
+/// Works correctly for both CW and CCW polygon windings by computing the
+/// signed area and normalising the cross-product sign accordingly.
 fn interval_inside_convex(
     seg_start: [f64; 2],
     seg_end: [f64; 2],
     polygon: &[[f64; 2]; 4],
 ) -> Option<(f64, f64)> {
+    // Compute 2× signed area (Shoelace).  Negative → CW winding.
+    let mut signed_area2 = 0.0_f64;
+    for i in 0..4 {
+        let a = polygon[i];
+        let b = polygon[(i + 1) % 4];
+        signed_area2 += a[0] * b[1] - b[0] * a[1];
+    }
+    // Normalise to CCW convention: multiply base/slope by -1 when CW.
+    let winding: f64 = if signed_area2 < 0.0 { -1.0 } else { 1.0 };
+
     let dx = seg_end[0] - seg_start[0];
     let dy = seg_end[1] - seg_start[1];
     let mut t_enter: f64 = 0.0;
@@ -250,20 +325,24 @@ fn interval_inside_convex(
         let ex = b[0] - a[0];
         let ey = b[1] - a[1];
 
-        let base = cross2(ex, ey, seg_start[0] - a[0], seg_start[1] - a[1]);
-        let slope = cross2(ex, ey, dx, dy);
+        // Positive base → seg_start is on the "inside" half-plane for CCW convention.
+        let base = winding * cross2(ex, ey, seg_start[0] - a[0], seg_start[1] - a[1]);
+        let slope = winding * cross2(ex, ey, dx, dy);
 
         if slope.abs() < EPS {
+            // Segment is parallel to this edge; return None if outside.
             if base < -EPS {
                 return None;
             }
             continue;
         }
 
-        let t = (-EPS - base) / slope;
+        let t = -base / slope;
         if slope > 0.0 {
+            // Segment is entering the half-plane.
             t_enter = t_enter.max(t);
         } else {
+            // Segment is exiting the half-plane.
             t_exit = t_exit.min(t);
         }
         if t_enter > t_exit {
@@ -408,7 +487,11 @@ pub fn build_wall_fill_quads(walls: &[WallSegment]) -> Vec<Vec<[f64; 2]>> {
         // Compute which intervals of the wall (0..1) should be filled.
         let mut fill_intervals: Vec<(f64, f64)> = vec![(0.0, 1.0)];
         let mut sorted_openings = fp.openings.clone();
-        sorted_openings.sort_by(|a, b| a.t_start.partial_cmp(&b.t_start).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_openings.sort_by(|a, b| {
+            a.t_start
+                .partial_cmp(&b.t_start)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         for opening in &sorted_openings {
             let clamped = (opening.t_start.max(0.0), opening.t_end.min(1.0));
             if clamped.1 > clamped.0 + EPS {
@@ -482,7 +565,10 @@ pub fn build_wall_hatch_lines(walls: &[WallSegment], hatch_spacing: f64) -> Vec<
                 let ey = y0 + (y1 - y0) * t1;
                 let seg_len = ((ex - sx).powi(2) + (ey - sy).powi(2)).sqrt();
                 if seg_len >= MIN_SEGMENT {
-                    lines.push(OutlineLine { start: [sx, sy], end: [ex, ey] });
+                    lines.push(OutlineLine {
+                        start: [sx, sy],
+                        end: [ex, ey],
+                    });
                 }
             }
             k += step;
@@ -571,6 +657,8 @@ mod tests {
 
     #[test]
     fn t_junction_clips_overlapping_edges() {
+        // w1: horizontal wall.  w2: vertical wall whose end joins w1's midpoint.
+        // The inner face of w1 that falls inside w2's footprint must be clipped away.
         let w1 = WallSegment {
             id: "w1".into(),
             start: [0.0, 0.0],
@@ -586,7 +674,84 @@ mod tests {
             openings: vec![],
         };
         let lines = build_visible_wall_outlines(&[w1, w2]);
-        assert!(!lines.is_empty());
+
+        // No two lines should overlap (the inner face of w1 inside w2's footprint
+        // must have been clipped away, so we won't see a double-line there).
+        // Verify by checking that no output line has zero length.
+        for line in &lines {
+            let dx = line.end[0] - line.start[0];
+            let dy = line.end[1] - line.start[1];
+            let len = (dx * dx + dy * dy).sqrt();
+            assert!(len > MIN_SEGMENT, "degenerate zero-length line in output");
+        }
+
+        // Total visible line count: w1 has outer + inner faces (both clipped at junction)
+        // + start + end caps; w2 has outer + inner side edges + start cap (end is junction).
+        // We expect 8–10 segments (the exact count varies with miter geometry) and
+        // definitely more than 4 (the single-wall baseline), confirming both walls rendered.
+        assert!(
+            lines.len() >= 5,
+            "expected at least 5 outline segments for T-junction, got {}",
+            lines.len()
+        );
+    }
+
+    /// Closing a rectangular loop: four walls should produce completely merged
+    /// outlines with no overlap at any corner.
+    #[test]
+    fn closed_loop_no_overlap() {
+        let t = 0.2_f64;
+        // Square room, 4 m × 4 m, corners at (0,0), (4,0), (4,4), (0,4).
+        let walls = vec![
+            WallSegment {
+                id: "s".into(),
+                start: [0.0, 0.0],
+                end: [4.0, 0.0],
+                thickness: t,
+                openings: vec![],
+            },
+            WallSegment {
+                id: "e".into(),
+                start: [4.0, 0.0],
+                end: [4.0, 4.0],
+                thickness: t,
+                openings: vec![],
+            },
+            WallSegment {
+                id: "n".into(),
+                start: [4.0, 4.0],
+                end: [0.0, 4.0],
+                thickness: t,
+                openings: vec![],
+            },
+            WallSegment {
+                id: "w".into(),
+                start: [0.0, 4.0],
+                end: [0.0, 0.0],
+                thickness: t,
+                openings: vec![],
+            },
+        ];
+
+        let lines = build_visible_wall_outlines(&walls);
+
+        // No degenerate lines.
+        for line in &lines {
+            let dx = line.end[0] - line.start[0];
+            let dy = line.end[1] - line.start[1];
+            let len = (dx * dx + dy * dy).sqrt();
+            assert!(len > MIN_SEGMENT, "degenerate zero-length line in closed loop");
+        }
+
+        // A fully-closed square room should produce exactly 8 visible segments:
+        // 4 outer face edges + 4 inner face edges.  End-caps are suppressed at
+        // every junction.  No extra double-lines should appear.
+        assert_eq!(
+            lines.len(),
+            8,
+            "closed square room should yield 8 outline segments, got {}",
+            lines.len()
+        );
     }
 
     #[test]
@@ -623,11 +788,18 @@ mod tests {
             start: [0.0, 0.0],
             end: [5.0, 0.0],
             thickness: 0.2,
-            openings: vec![WallOpening { t_start: 0.4, t_end: 0.6 }],
+            openings: vec![WallOpening {
+                t_start: 0.4,
+                t_end: 0.6,
+            }],
         };
         let lines = build_visible_wall_outlines(&[wall]);
         // 2 side edges each split into 2 = 4, plus 2 end caps = 6 total
-        assert_eq!(lines.len(), 6, "opening should split each side edge into 2 segments");
+        assert_eq!(
+            lines.len(),
+            6,
+            "opening should split each side edge into 2 segments"
+        );
     }
 
     #[test]
@@ -637,7 +809,10 @@ mod tests {
             start: [0.0, 0.0],
             end: [5.0, 0.0],
             thickness: 0.2,
-            openings: vec![WallOpening { t_start: 0.3, t_end: 0.7 }],
+            openings: vec![WallOpening {
+                t_start: 0.3,
+                t_end: 0.7,
+            }],
         };
         let quads = build_wall_fill_quads(&[wall]);
         // One opening → two fill quads (before and after)

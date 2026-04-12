@@ -1,13 +1,306 @@
-//! Sub-toolbars for Sketch and Dimension modes.
+//! Toolbars for BetterCAD.
 //!
-//! These appear as a secondary horizontal bar below the main menu bar
-//! when the respective tool is active.
+//! - `tool_palette`: left-side vertical panel with all drawing tools (like FreeCAD)
+//! - `sketch_toolbar`: secondary horizontal bar for Sketch mode
+//! - `dimension_toolbar`: secondary horizontal bar for Dimension mode
 
 use bcad_state::sketch_state::{ConstraintStatus, SketchDrawMode};
-use bcad_state::ui_state::DimensionSubMode;
+use bcad_state::ui_state::{DimensionSubMode, ToolType};
 use bcad_state::{AppState, Command};
 
 use crate::theme;
+
+// ---------------------------------------------------------------------------
+// Left tool palette (vertical, FreeCAD-style)
+// ---------------------------------------------------------------------------
+
+struct PaletteEntry {
+    tool: ToolType,
+    label: &'static str,
+    shortcut: &'static str,
+}
+
+/// Render the vertical tool palette for the left side panel.
+///
+/// Buttons are grouped by category with separator labels.  Each button is
+/// styled as a selectable label and emits a [`Command::SetActiveTool`] when
+/// clicked.
+pub fn tool_palette(ui: &mut egui::Ui, state: &AppState) -> Vec<Command> {
+    let mut cmds = Vec::new();
+    let active = state.ui.active_tool;
+    let tc = theme::colors(state.ui.theme);
+
+    // Button size: full width of the panel, fixed height.
+    const BTN_H: f32 = 28.0;
+
+    // Helper: one tool button.
+    // Returns true if clicked.
+    let btn = |ui: &mut egui::Ui, tool: ToolType, label: &str, shortcut: &str| -> bool {
+        let is_active = active == tool;
+
+        // Compose the display: label + muted shortcut hint
+        let text = if shortcut.is_empty() {
+            egui::RichText::new(label).size(11.5)
+        } else {
+            egui::RichText::new(label).size(11.5)
+        };
+
+        let resp = ui.add_sized(
+            [ui.available_width(), BTN_H],
+            egui::SelectableLabel::new(is_active, text),
+        );
+
+        // Hover tooltip shows full name + shortcut
+        let hint = if shortcut.is_empty() {
+            label.to_string()
+        } else {
+            format!("{label}  [{shortcut}]")
+        };
+        resp.clone().on_hover_text(hint);
+
+        // Show shortcut hint text faintly on the right side when not active
+        if !shortcut.is_empty() && !is_active {
+            let rect = resp.rect;
+            let painter = ui.painter();
+            painter.text(
+                egui::pos2(rect.max.x - 4.0, rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                shortcut,
+                egui::FontId::proportional(9.0),
+                tc.text_muted,
+            );
+        }
+
+        resp.clicked()
+    };
+
+    // Category header helper
+    let header = |ui: &mut egui::Ui, text: &str| {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(text)
+                .size(9.5)
+                .color(tc.text_muted)
+                .strong(),
+        );
+    };
+
+    // ---- General ----
+    header(ui, "GENERAL");
+    if btn(ui, ToolType::Select, "Select", "Esc") {
+        cmds.push(Command::SetActiveTool {
+            tool: ToolType::Select,
+        });
+    }
+
+    ui.separator();
+
+    // ---- Architecture ----
+    header(ui, "ARCHITECTURE");
+    for entry in &[
+        PaletteEntry {
+            tool: ToolType::Wall,
+            label: "Wall",
+            shortcut: "W",
+        },
+        PaletteEntry {
+            tool: ToolType::Door,
+            label: "Door",
+            shortcut: "D",
+        },
+        PaletteEntry {
+            tool: ToolType::Window,
+            label: "Window",
+            shortcut: "N",
+        },
+        PaletteEntry {
+            tool: ToolType::Floor,
+            label: "Floor",
+            shortcut: "F",
+        },
+        PaletteEntry {
+            tool: ToolType::Roof,
+            label: "Roof",
+            shortcut: "O",
+        },
+        PaletteEntry {
+            tool: ToolType::Stair,
+            label: "Stair",
+            shortcut: "S",
+        },
+        PaletteEntry {
+            tool: ToolType::Room,
+            label: "Room",
+            shortcut: "",
+        },
+    ] {
+        if btn(ui, entry.tool, entry.label, entry.shortcut) {
+            cmds.push(Command::SetActiveTool { tool: entry.tool });
+        }
+    }
+
+    ui.separator();
+
+    // ---- Structure ----
+    header(ui, "STRUCTURE");
+    for entry in &[
+        PaletteEntry {
+            tool: ToolType::Column,
+            label: "Column",
+            shortcut: "C",
+        },
+        PaletteEntry {
+            tool: ToolType::Beam,
+            label: "Beam",
+            shortcut: "B",
+        },
+        PaletteEntry {
+            tool: ToolType::Foundation,
+            label: "Foundation",
+            shortcut: "H",
+        },
+    ] {
+        if btn(ui, entry.tool, entry.label, entry.shortcut) {
+            cmds.push(Command::SetActiveTool { tool: entry.tool });
+        }
+    }
+
+    ui.separator();
+
+    // ---- Interior ----
+    header(ui, "INTERIOR");
+    for entry in &[
+        PaletteEntry {
+            tool: ToolType::Furniture,
+            label: "Furniture",
+            shortcut: "I",
+        },
+        PaletteEntry {
+            tool: ToolType::Cabinet,
+            label: "Cabinet",
+            shortcut: "J",
+        },
+        PaletteEntry {
+            tool: ToolType::Parking,
+            label: "Parking",
+            shortcut: "P",
+        },
+    ] {
+        if btn(ui, entry.tool, entry.label, entry.shortcut) {
+            cmds.push(Command::SetActiveTool { tool: entry.tool });
+        }
+    }
+
+    ui.separator();
+
+    // ---- MEP ----
+    header(ui, "MEP");
+    for entry in &[
+        PaletteEntry {
+            tool: ToolType::Plumbing,
+            label: "Plumbing",
+            shortcut: "U",
+        },
+        PaletteEntry {
+            tool: ToolType::Electrical,
+            label: "Electrical",
+            shortcut: "E",
+        },
+        PaletteEntry {
+            tool: ToolType::Hvac,
+            label: "HVAC",
+            shortcut: "V",
+        },
+        PaletteEntry {
+            tool: ToolType::FireSafety,
+            label: "Fire Safety",
+            shortcut: "G",
+        },
+        PaletteEntry {
+            tool: ToolType::Accessibility,
+            label: "Access.",
+            shortcut: "Y",
+        },
+    ] {
+        if btn(ui, entry.tool, entry.label, entry.shortcut) {
+            cmds.push(Command::SetActiveTool { tool: entry.tool });
+        }
+    }
+
+    ui.separator();
+
+    // ---- Annotation ----
+    header(ui, "ANNOTATE");
+    for entry in &[
+        PaletteEntry {
+            tool: ToolType::Dimension,
+            label: "Dimension",
+            shortcut: "A",
+        },
+        PaletteEntry {
+            tool: ToolType::Text,
+            label: "Text",
+            shortcut: "T",
+        },
+        PaletteEntry {
+            tool: ToolType::Section,
+            label: "Section",
+            shortcut: "-",
+        },
+        PaletteEntry {
+            tool: ToolType::SpotElevation,
+            label: "Spot Elev.",
+            shortcut: "",
+        },
+    ] {
+        if btn(ui, entry.tool, entry.label, entry.shortcut) {
+            cmds.push(Command::SetActiveTool { tool: entry.tool });
+        }
+    }
+
+    ui.separator();
+
+    // ---- Measure ----
+    header(ui, "MEASURE");
+    for entry in &[
+        PaletteEntry {
+            tool: ToolType::Measure,
+            label: "Measure",
+            shortcut: "M",
+        },
+        PaletteEntry {
+            tool: ToolType::MeasurePath,
+            label: "Path",
+            shortcut: "",
+        },
+        PaletteEntry {
+            tool: ToolType::MeasureArea,
+            label: "Area",
+            shortcut: "",
+        },
+        PaletteEntry {
+            tool: ToolType::MeasureAngle,
+            label: "Angle",
+            shortcut: "",
+        },
+    ] {
+        if btn(ui, entry.tool, entry.label, entry.shortcut) {
+            cmds.push(Command::SetActiveTool { tool: entry.tool });
+        }
+    }
+
+    ui.separator();
+
+    // ---- Sketch ----
+    header(ui, "SKETCH");
+    if btn(ui, ToolType::Sketch, "Sketch", "K") {
+        cmds.push(Command::SetActiveTool {
+            tool: ToolType::Sketch,
+        });
+    }
+
+    cmds
+}
 
 // ---------------------------------------------------------------------------
 // Sketch toolbar

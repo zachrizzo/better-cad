@@ -12,6 +12,12 @@ use glam::Vec2;
 const MIN_WALL_LENGTH: f64 = 0.2;
 const WALL_COLOR: [f32; 4] = [1.0, 0.667, 0.0, 1.0]; // #ffaa00
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+const CLOSE_LOOP_COLOR: [f32; 4] = [0.0, 0.9, 0.4, 1.0]; // green — loop-close indicator
+
+/// When the cursor is within this many meters of the chain origin, snap to it
+/// to close the loop.  Larger than DEFAULT_SNAP_DISTANCE so it fires before
+/// the wall edge snap does.
+const CLOSE_LOOP_SNAP_RADIUS: f32 = 0.6;
 
 // ---------------------------------------------------------------------------
 // State machine
@@ -34,6 +40,10 @@ pub struct WallTool {
     base: ToolBase,
     shift_held: bool,
     wall_count: u32,
+    /// The very first point clicked when starting the current chain.
+    /// Used to snap back to it when closing a loop (drawing the final wall).
+    /// `None` when Idle or when only one wall has been started (not yet chaining).
+    chain_origin: Option<Vec2>,
 }
 
 impl WallTool {
@@ -43,6 +53,7 @@ impl WallTool {
             base: ToolBase::default(),
             shift_held: false,
             wall_count: 0,
+            chain_origin: None,
         }
     }
 
@@ -54,7 +65,13 @@ impl WallTool {
     }
 
     /// Apply ortho and snap to get the effective cursor position.
-    fn get_constrained_pos(&self, raw: Vec2, shift: bool, snap: &SnapContext, ctx: &ToolContext) -> Vec2 {
+    fn get_constrained_pos(
+        &self,
+        raw: Vec2,
+        shift: bool,
+        snap: &SnapContext,
+        ctx: &ToolContext,
+    ) -> Vec2 {
         let mut point = raw;
 
         // Apply ortho constraint if shift held and we have a start point
@@ -64,13 +81,32 @@ impl WallTool {
             }
         }
 
-        // Try discrete snap points first (endpoints, midpoints)
+        // 1. Close-loop snap: highest priority when in chain mode.
+        //    If the cursor is within CLOSE_LOOP_SNAP_RADIUS of the chain origin,
+        //    snap directly to it so the final wall closes the room perfectly.
+        if matches!(self.state, WallState::ChainDrawing { .. }) {
+            if let Some(origin) = self.chain_origin {
+                if (point - origin).length() <= CLOSE_LOOP_SNAP_RADIUS {
+                    return origin;
+                }
+            }
+        }
+
+        // 2. Discrete endpoint/midpoint snap (priority-first within radius).
+        //    The spatial hash now returns Endpoint before Nearest even when
+        //    Nearest is physically closer — so corner points don't steal priority.
         if let Some(result) = snap.find_nearest(point, DEFAULT_SNAP_DISTANCE) {
             return result.point;
         }
 
-        // Then try continuous wall edge snap — find nearest point on any wall edge
-        if let Some(edge_pt) = nearest_point_on_wall_edge(point, ctx, DEFAULT_SNAP_DISTANCE as f32) {
+        // 3. Continuous wall edge snap — for T-junction creation.
+        //    Guard: skip if cursor is already near a wall endpoint; the discrete
+        //    snap above should handle that case.  This prevents the edge snap from
+        //    pulling the cursor onto the wall face when you are trying to connect
+        //    to a corner.
+        if let Some(edge_pt) =
+            nearest_point_on_wall_edge_no_endpoints(point, ctx, DEFAULT_SNAP_DISTANCE as f32)
+        {
             return edge_pt;
         }
 
@@ -103,8 +139,17 @@ impl WallTool {
 }
 
 /// Find the nearest point on any wall's edge (both sides + centerline) to the cursor.
-/// Returns None if no wall edge is within `max_dist`.
-fn nearest_point_on_wall_edge(cursor: Vec2, ctx: &ToolContext, max_dist: f32) -> Option<Vec2> {
+///
+/// This variant skips walls whose endpoints are within `max_dist` of the cursor
+/// so that endpoint snap (handled by the discrete snap context) takes priority
+/// at corners.  This prevents the wall face from stealing snap when the user
+/// is trying to connect a new wall to an existing wall endpoint.
+fn nearest_point_on_wall_edge_no_endpoints(
+    cursor: Vec2,
+    ctx: &ToolContext,
+    max_dist: f32,
+) -> Option<Vec2> {
+    let endpoint_sqr = max_dist * max_dist;
     let mut best_point: Option<Vec2> = None;
     let mut best_dist = max_dist;
 
@@ -116,24 +161,37 @@ fn nearest_point_on_wall_edge(cursor: Vec2, ctx: &ToolContext, max_dist: f32) ->
 
         let ws = Vec2::new(wall.start[0] as f32, wall.start[1] as f32);
         let we = Vec2::new(wall.end[0] as f32, wall.end[1] as f32);
+
+        // Skip this wall entirely if the cursor is near either of its endpoints.
+        // The discrete endpoint snap handles those cases; edge snap would steal priority.
+        if (cursor - ws).length_squared() <= endpoint_sqr
+            || (cursor - we).length_squared() <= endpoint_sqr
+        {
+            continue;
+        }
+
         let wdir = we - ws;
         let wlen = wdir.length();
-        if wlen < 1e-6 { continue; }
+        if wlen < 1e-6 {
+            continue;
+        }
         let wunit = wdir / wlen;
         let wnorm = Vec2::new(-wunit.y, wunit.x);
         let half_t = wall.thickness as f32 * 0.5;
 
         // Check 3 lines: centerline, left edge, right edge
         let lines: [(Vec2, Vec2); 3] = [
-            (ws, we),                                                    // centerline
-            (ws + wnorm * half_t, we + wnorm * half_t),                 // left edge
-            (ws - wnorm * half_t, we - wnorm * half_t),                 // right edge
+            (ws, we),                                   // centerline
+            (ws + wnorm * half_t, we + wnorm * half_t), // left edge
+            (ws - wnorm * half_t, we - wnorm * half_t), // right edge
         ];
 
         for (ls, le) in &lines {
             let seg = *le - *ls;
             let seg_len = seg.length();
-            if seg_len < 1e-6 { continue; }
+            if seg_len < 1e-6 {
+                continue;
+            }
             // Project cursor onto this line segment
             let t = ((cursor - *ls).dot(seg)) / (seg_len * seg_len);
             let t_clamped = t.clamp(0.0, 1.0);
@@ -202,19 +260,43 @@ impl Tool for WallTool {
             } => {
                 let pos = self.get_constrained_pos(plan_pos, shift, snap, ctx);
 
-                match &self.state {
+                match &self.state.clone() {
                     WallState::Idle => {
                         self.state = WallState::Drawing { start: pos };
+                        // chain_origin not yet set — we don't know if this will
+                        // be a chain yet (might be a single wall).
                         ToolAction::StateChanged
                     }
-                    WallState::Drawing { start } | WallState::ChainDrawing { start } => {
+                    WallState::Drawing { start } => {
                         let s = *start;
                         let length = (pos - s).length() as f64;
                         if length < MIN_WALL_LENGTH {
                             return ToolAction::Nothing;
                         }
                         let cmds = self.create_wall_element(s, pos, ctx);
+                        // Record chain origin when entering chain mode for the first time.
+                        self.chain_origin = Some(s);
                         self.state = WallState::ChainDrawing { start: pos };
+                        ToolAction::EmitCommands(cmds)
+                    }
+                    WallState::ChainDrawing { start } => {
+                        let s = *start;
+                        let length = (pos - s).length() as f64;
+                        if length < MIN_WALL_LENGTH {
+                            return ToolAction::Nothing;
+                        }
+                        let cmds = self.create_wall_element(s, pos, ctx);
+                        // Detect loop closure: if pos snapped back to chain_origin,
+                        // finish the chain automatically.
+                        let closed = self
+                            .chain_origin
+                            .map(|o| (pos - o).length() < 0.01)
+                            .unwrap_or(false);
+                        if closed {
+                            self.reset();
+                        } else {
+                            self.state = WallState::ChainDrawing { start: pos };
+                        }
                         ToolAction::EmitCommands(cmds)
                     }
                 }
@@ -276,6 +358,26 @@ impl Tool for WallTool {
             });
         }
 
+        // Close-loop indicator: green ring at chain origin when cursor is near it.
+        if matches!(self.state, WallState::ChainDrawing { .. }) {
+            if let (Some(origin), Some(cursor)) = (self.chain_origin, self.base.cursor_pos) {
+                if (cursor - origin).length() <= CLOSE_LOOP_SNAP_RADIUS {
+                    geom.push(PreviewGeometry::Point {
+                        position: origin,
+                        radius: 0.15,
+                        color: CLOSE_LOOP_COLOR,
+                        shape: MarkerShape::Ring { inner_radius: 0.09 },
+                    });
+                    geom.push(PreviewGeometry::Point {
+                        position: origin,
+                        radius: 0.06,
+                        color: CLOSE_LOOP_COLOR,
+                        shape: MarkerShape::Circle,
+                    });
+                }
+            }
+        }
+
         if let Some(start) = self.pending_start() {
             // Start point marker
             geom.push(PreviewGeometry::Point {
@@ -309,8 +411,8 @@ impl Tool for WallTool {
                     // Default rectangle corners
                     let mut p0 = Vec2::new(start.x + nx, start.y + ny); // start left
                     let mut p1 = Vec2::new(start.x - nx, start.y - ny); // start right
-                    let mut p2 = Vec2::new(end.x - nx, end.y - ny);     // end right
-                    let mut p3 = Vec2::new(end.x + nx, end.y + ny);     // end left
+                    let mut p2 = Vec2::new(end.x - nx, end.y - ny); // end right
+                    let mut p3 = Vec2::new(end.x + nx, end.y + ny); // end left
 
                     // Check if start or end snaps to an existing wall endpoint
                     // and compute junction corners for the preview
@@ -331,7 +433,8 @@ impl Tool for WallTool {
                             }
 
                             // Skip parallel walls
-                            let cross_dirs = (dx / len) * (other_dy / other_len) - (dy / len) * (other_dx / other_len);
+                            let cross_dirs = (dx / len) * (other_dy / other_len)
+                                - (dy / len) * (other_dx / other_len);
                             if cross_dirs.abs() < 0.05 {
                                 continue;
                             }
@@ -386,7 +489,8 @@ impl Tool for WallTool {
                                 } else {
                                     [-other_dx / other_len, -other_dy / other_len]
                                 };
-                                let cross = (-dx / len) * other_away[1] - (-dy / len) * other_away[0];
+                                let cross =
+                                    (-dx / len) * other_away[1] - (-dy / len) * other_away[0];
 
                                 let this_left = [start.x + nx, start.y + ny];
                                 let this_right = [start.x - nx, start.y - ny];
@@ -468,6 +572,7 @@ impl Tool for WallTool {
         self.state = WallState::Idle;
         self.base.clear();
         self.shift_held = false;
+        self.chain_origin = None;
     }
 }
 

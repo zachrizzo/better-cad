@@ -142,6 +142,19 @@ impl BcadUi {
             status_bar::show(ui, state);
         });
 
+        // ----- Left tool palette -----
+        egui::SidePanel::left("tool_panel")
+            .exact_width(84.0)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        cmds.extend(toolbar::tool_palette(ui, state));
+                    });
+            });
+
         // ----- Right side panel (resizable) -----
         egui::SidePanel::right("side_panel")
             .default_width(320.0)
@@ -257,25 +270,23 @@ impl BcadUi {
         if self.active_right_tab == RightTab::Chat {
             cmds.extend(chat_panel::show(ui, state));
         } else {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                match self.active_right_tab {
-                    RightTab::Properties => {
-                        cmds.extend(level_manager::show(ui, state));
-                        ui.separator();
-                        if state.ui.active_tool == ToolType::Sketch {
-                            cmds.extend(constraint_panel::show(ui, state));
-                        } else {
-                            cmds.extend(property_panel::show(ui, state));
-                        }
+            egui::ScrollArea::vertical().show(ui, |ui| match self.active_right_tab {
+                RightTab::Properties => {
+                    cmds.extend(level_manager::show(ui, state));
+                    ui.separator();
+                    if state.ui.active_tool == ToolType::Sketch {
+                        cmds.extend(constraint_panel::show(ui, state));
+                    } else {
+                        cmds.extend(property_panel::show(ui, state));
                     }
-                    RightTab::View => {
-                        cmds.extend(view_panel::show(ui, state));
-                    }
-                    RightTab::Layers => {
-                        cmds.extend(layer_panel::show(ui, state));
-                    }
-                    RightTab::Chat => unreachable!(),
                 }
+                RightTab::View => {
+                    cmds.extend(view_panel::show(ui, state));
+                }
+                RightTab::Layers => {
+                    cmds.extend(layer_panel::show(ui, state));
+                }
+                RightTab::Chat => unreachable!(),
             });
         }
 
