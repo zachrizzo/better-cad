@@ -84,8 +84,7 @@ impl RoomTool {
 
         // Room element
         elements.push(Element::Room(RoomElement {
-            meta: ElementMeta::new(format!("Room {}", self.room_count))
-                .with_level(level_id),
+            meta: ElementMeta::new(format!("Room {}", self.room_count)).with_level(level_id),
             boundary,
             boundary_segments: Vec::new(),
         }));
@@ -136,7 +135,8 @@ impl Tool for RoomTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
+                self.base
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 self.cursor_pos = self.base.pos().unwrap_or(plan_pos);
                 ToolAction::StateChanged
             }
@@ -146,7 +146,8 @@ impl Tool for RoomTool {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
+                self.base
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
 
                 // If we have >= 3 points, check if clicking near first point to close
@@ -162,9 +163,7 @@ impl Tool for RoomTool {
                 ToolAction::StateChanged
             }
 
-            ToolInput::RightClick { .. } | ToolInput::DoubleClick { .. } => {
-                self.finish_room(ctx)
-            }
+            ToolInput::RightClick { .. } | ToolInput::DoubleClick { .. } => self.finish_room(ctx),
 
             ToolInput::KeyDown {
                 key: KeyCode::Escape,
@@ -232,10 +231,8 @@ impl Tool for RoomTool {
 
             // Area label at centroid
             let area = polygon_area(&preview_pts);
-            let cx: f32 =
-                preview_pts.iter().map(|v| v.x).sum::<f32>() / preview_pts.len() as f32;
-            let cy: f32 =
-                preview_pts.iter().map(|v| v.y).sum::<f32>() / preview_pts.len() as f32;
+            let cx: f32 = preview_pts.iter().map(|v| v.x).sum::<f32>() / preview_pts.len() as f32;
+            let cy: f32 = preview_pts.iter().map(|v| v.y).sum::<f32>() / preview_pts.len() as f32;
             geom.push(PreviewGeometry::Label {
                 position: Vec2::new(cx, cy),
                 text: format!("Area: {}", format_area(area, ctx.length_unit)),
@@ -626,8 +623,12 @@ mod tests {
         assert!(geom.len() >= 5);
 
         // Verify there's a polygon and a label in the preview
-        let has_polygon = geom.iter().any(|g| matches!(g, PreviewGeometry::Polygon { .. }));
-        let has_label = geom.iter().any(|g| matches!(g, PreviewGeometry::Label { .. }));
+        let has_polygon = geom
+            .iter()
+            .any(|g| matches!(g, PreviewGeometry::Polygon { .. }));
+        let has_label = geom
+            .iter()
+            .any(|g| matches!(g, PreviewGeometry::Label { .. }));
         assert!(has_polygon);
         assert!(has_label);
     }
@@ -668,10 +669,7 @@ mod tests {
             if let Command::BatchCreate(elements) = &cmds[0] {
                 for el in elements {
                     let meta = el.meta();
-                    assert_eq!(
-                        meta.level_id.as_ref().map(|l| l.as_ref()),
-                        Some("level-1")
-                    );
+                    assert_eq!(meta.level_id.as_ref().map(|l| l.as_ref()), Some("level-1"));
                 }
             }
         }

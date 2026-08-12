@@ -51,6 +51,45 @@ pub fn single_swing_door(p: &DoorParams) -> Vec<StyledPrimitive> {
     let span_e = [cx + dir[0] * half, cy + dir[1] * half];
     push_line(&mut out, span_s, span_e, SymbolLineClass::Secondary);
 
+    // Frame jamb lines - swing-aware so the hinge-end jamb doesn't overlap the leaf.
+    // The hinge-end jamb only extends toward the exterior (opposite to open_dir).
+    // The free-end jamb spans the full wall thickness.
+    let ht = (p.wall_thickness / 2.0).max(0.05);
+    match p.swing {
+        Swing::Left => {
+            // Hinge at span_s, leaf swings in +normal → jamb exterior half only (-normal side)
+            push_line(
+                &mut out,
+                [cx - dir[0] * half - normal[0] * ht, cy - dir[1] * half - normal[1] * ht],
+                [cx - dir[0] * half,                   cy - dir[1] * half                  ],
+                SymbolLineClass::Primary,
+            );
+            // Free end at span_e → full jamb across wall thickness
+            push_line(
+                &mut out,
+                [cx + dir[0] * half - normal[0] * ht, cy + dir[1] * half - normal[1] * ht],
+                [cx + dir[0] * half + normal[0] * ht, cy + dir[1] * half + normal[1] * ht],
+                SymbolLineClass::Primary,
+            );
+        }
+        Swing::Right => {
+            // Hinge at span_e, leaf swings in -normal → jamb exterior half only (+normal side)
+            push_line(
+                &mut out,
+                [cx + dir[0] * half,                   cy + dir[1] * half                  ],
+                [cx + dir[0] * half + normal[0] * ht, cy + dir[1] * half + normal[1] * ht],
+                SymbolLineClass::Primary,
+            );
+            // Free end at span_s → full jamb across wall thickness
+            push_line(
+                &mut out,
+                [cx - dir[0] * half - normal[0] * ht, cy - dir[1] * half - normal[1] * ht],
+                [cx - dir[0] * half + normal[0] * ht, cy - dir[1] * half + normal[1] * ht],
+                SymbolLineClass::Primary,
+            );
+        }
+    }
+
     // Hinge and swing directions
     let (hinge, closed_dir, open_dir) = match p.swing {
         Swing::Left => {
@@ -70,20 +109,9 @@ pub fn single_swing_door(p: &DoorParams) -> Vec<StyledPrimitive> {
     ];
     push_line(&mut out, hinge, leaf_end, SymbolLineClass::Primary);
 
-    // Quarter-arc sweep
-    let mut arc_pts = Vec::with_capacity(15);
-    for i in 0..=14 {
-        let theta = (PI / 2.0) * (i as f64 / 14.0);
-        arc_pts.push([
-            hinge[0] + p.width * (closed_dir[0] * theta.cos() + open_dir[0] * theta.sin()),
-            hinge[1] + p.width * (closed_dir[1] * theta.cos() + open_dir[1] * theta.sin()),
-        ]);
-    }
+    // Quarter-arc sweep — true circular arc (FreeCAD-compatible, ISO 128).
     out.push(StyledPrimitive::new(
-        SymbolPrimitive::Polyline {
-            points: arc_pts,
-            closed: false,
-        },
+        swing_arc(hinge, p.width, closed_dir, open_dir),
         SymbolLineClass::Secondary,
         DOMAIN,
     ));
@@ -105,6 +133,23 @@ pub fn double_swing_door(p: &DoorParams) -> Vec<StyledPrimitive> {
     let span_e = [cx + dir[0] * half, cy + dir[1] * half];
     push_line(&mut out, span_s, span_e, SymbolLineClass::Secondary);
 
+    // Frame jamb lines — both ends are hinges.
+    // Left hinge leaf swings in +normal → jamb extends toward -normal (exterior) only.
+    // Right hinge leaf swings in -normal → jamb extends toward +normal (exterior) only.
+    let ht = (p.wall_thickness / 2.0).max(0.05);
+    push_line(
+        &mut out,
+        [cx - dir[0] * half - normal[0] * ht, cy - dir[1] * half - normal[1] * ht],
+        [cx - dir[0] * half,                   cy - dir[1] * half                  ],
+        SymbolLineClass::Primary,
+    );
+    push_line(
+        &mut out,
+        [cx + dir[0] * half,                   cy + dir[1] * half                  ],
+        [cx + dir[0] * half + normal[0] * ht, cy + dir[1] * half + normal[1] * ht],
+        SymbolLineClass::Primary,
+    );
+
     let leaf_w = p.width / 2.0;
 
     // Left leaf + arc
@@ -114,19 +159,8 @@ pub fn double_swing_door(p: &DoorParams) -> Vec<StyledPrimitive> {
         hinge_l[1] + normal[1] * leaf_w,
     ];
     push_line(&mut out, hinge_l, leaf_end_l, SymbolLineClass::Primary);
-    let mut arc_l = Vec::with_capacity(15);
-    for i in 0..=14 {
-        let theta = (PI / 2.0) * (i as f64 / 14.0);
-        arc_l.push([
-            hinge_l[0] + leaf_w * (dir[0] * theta.cos() + normal[0] * theta.sin()),
-            hinge_l[1] + leaf_w * (dir[1] * theta.cos() + normal[1] * theta.sin()),
-        ]);
-    }
     out.push(StyledPrimitive::new(
-        SymbolPrimitive::Polyline {
-            points: arc_l,
-            closed: false,
-        },
+        swing_arc(hinge_l, leaf_w, dir, normal),
         SymbolLineClass::Secondary,
         DOMAIN,
     ));
@@ -138,19 +172,13 @@ pub fn double_swing_door(p: &DoorParams) -> Vec<StyledPrimitive> {
         hinge_r[1] - normal[1] * leaf_w,
     ];
     push_line(&mut out, hinge_r, leaf_end_r, SymbolLineClass::Primary);
-    let mut arc_r = Vec::with_capacity(15);
-    for i in 0..=14 {
-        let theta = (PI / 2.0) * (i as f64 / 14.0);
-        arc_r.push([
-            hinge_r[0] + leaf_w * (-dir[0] * theta.cos() - normal[0] * theta.sin()),
-            hinge_r[1] + leaf_w * (-dir[1] * theta.cos() - normal[1] * theta.sin()),
-        ]);
-    }
     out.push(StyledPrimitive::new(
-        SymbolPrimitive::Polyline {
-            points: arc_r,
-            closed: false,
-        },
+        swing_arc(
+            hinge_r,
+            leaf_w,
+            [-dir[0], -dir[1]],
+            [-normal[0], -normal[1]],
+        ),
         SymbolLineClass::Secondary,
         DOMAIN,
     ));
@@ -167,6 +195,9 @@ pub fn sliding_door(p: &DoorParams) -> Vec<StyledPrimitive> {
     let cy = p.center[1];
     let panel_depth = p.wall_thickness * 0.15;
     let panel_width = p.width * 0.55;
+
+    // Frame jamb lines at the full opening edges
+    push_jamb_lines(&mut out, cx, cy, dir, normal, p.width / 2.0, p.wall_thickness);
 
     // Panel 1
     let p1c = [
@@ -242,6 +273,9 @@ pub fn pocket_door(p: &DoorParams) -> Vec<StyledPrimitive> {
     let panel_e = [cx + dir[0] * half, cy + dir[1] * half];
     push_line(&mut out, panel_s, panel_e, SymbolLineClass::Primary);
 
+    // Frame jamb lines
+    push_jamb_lines(&mut out, cx, cy, dir, normal, half, p.wall_thickness);
+
     let pocket_offset: f64 = match p.swing {
         Swing::Left => -1.0,
         Swing::Right => 1.0,
@@ -292,6 +326,9 @@ pub fn bifold_door(p: &DoorParams) -> Vec<StyledPrimitive> {
     let span_s = [cx - dir[0] * half, cy - dir[1] * half];
     let span_e = [cx + dir[0] * half, cy + dir[1] * half];
     push_line(&mut out, span_s, span_e, SymbolLineClass::Secondary);
+
+    // Frame jamb lines
+    push_jamb_lines(&mut out, cx, cy, dir, normal, half, p.wall_thickness);
 
     let fold_depth = p.width * 0.3;
     let mid = [cx + normal[0] * fold_depth, cy + normal[1] * fold_depth];
@@ -410,10 +447,14 @@ pub struct WindowParams {
     pub wall_thickness: f64,
 }
 
-/// Fixed window: single line across opening.
+/// Fixed window: three parallel lines spanning the full wall thickness
+/// (outer frame + glass pane + outer frame), per ISO 128 / FreeCAD convention.
 pub fn fixed_window(p: &WindowParams) -> Vec<StyledPrimitive> {
     let mut out = Vec::new();
-    opening_line(&mut out, p, 0.0, SymbolLineClass::Primary);
+    let offset = p.wall_thickness / 2.0;
+    opening_line(&mut out, p, offset, SymbolLineClass::Primary);
+    opening_line(&mut out, p, 0.0, SymbolLineClass::Secondary);
+    opening_line(&mut out, p, -offset, SymbolLineClass::Primary);
     out
 }
 
@@ -440,19 +481,8 @@ pub fn casement_window(p: &WindowParams) -> Vec<StyledPrimitive> {
 
     let hinge_edge = [p.center[0] - dir[0] * half, p.center[1] - dir[1] * half];
 
-    let mut arc_pts = Vec::with_capacity(15);
-    for i in 0..=14 {
-        let theta = (PI / 2.0) * (i as f64 / 14.0);
-        arc_pts.push([
-            hinge_edge[0] + p.width * (dir[0] * theta.cos() + normal[0] * theta.sin()),
-            hinge_edge[1] + p.width * (dir[1] * theta.cos() + normal[1] * theta.sin()),
-        ]);
-    }
     out.push(StyledPrimitive::new(
-        SymbolPrimitive::Polyline {
-            points: arc_pts,
-            closed: false,
-        },
+        swing_arc(hinge_edge, p.width, dir, normal),
         SymbolLineClass::Secondary,
         DOMAIN,
     ));
@@ -522,19 +552,8 @@ pub fn awning_window(p: &WindowParams) -> Vec<StyledPrimitive> {
         p.center[1] + normal[1] * offset,
     ];
     let awning_depth = p.width * 0.5;
-    let mut arc_pts = Vec::with_capacity(15);
-    for i in 0..=14 {
-        let theta = (PI / 2.0) * (i as f64 / 14.0);
-        arc_pts.push([
-            top_edge[0] + awning_depth * (dir[0] * theta.cos() - normal[0] * theta.sin()),
-            top_edge[1] + awning_depth * (dir[1] * theta.cos() - normal[1] * theta.sin()),
-        ]);
-    }
     out.push(StyledPrimitive::new(
-        SymbolPrimitive::Polyline {
-            points: arc_pts,
-            closed: false,
-        },
+        swing_arc(top_edge, awning_depth, dir, [-normal[0], -normal[1]]),
         SymbolLineClass::Secondary,
         DOMAIN,
     ));
@@ -584,6 +603,74 @@ pub fn bay_window(p: &WindowParams) -> Vec<StyledPrimitive> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Build a true circular arc `SymbolPrimitive` for a door or window swing.
+///
+/// The arc is centred at `hinge` with the given `radius`.  It sweeps from the
+/// direction of `closed_dir` to the direction of `open_dir` over exactly 90°,
+/// matching FreeCAD's `Part.Arc` 3-point construction.
+///
+/// The sweep direction (CW vs CCW) is determined automatically from the
+/// cross-product of `closed_dir` and `open_dir` so the result always traces
+/// the correct quarter-circle regardless of wall orientation.
+fn swing_arc(
+    hinge: [f64; 2],
+    radius: f64,
+    closed_dir: [f64; 2],
+    open_dir: [f64; 2],
+) -> SymbolPrimitive {
+    let start_angle = f64::atan2(closed_dir[1], closed_dir[0]);
+    let cross = closed_dir[0] * open_dir[1] - closed_dir[1] * open_dir[0];
+    let end_angle = if cross >= 0.0 {
+        start_angle + PI / 2.0
+    } else {
+        start_angle - PI / 2.0
+    };
+    SymbolPrimitive::Arc {
+        center: hinge,
+        radius,
+        start_angle,
+        end_angle,
+    }
+}
+
+/// Draw two short jamb (frame) lines at the left and right edges of a door
+/// opening.  Each jamb is a line perpendicular to the wall that spans the
+/// full wall thickness, centred on the opening edge.  This matches the ISO 128
+/// / FreeCAD convention for door-frame representation in plan.
+fn push_jamb_lines(
+    out: &mut Vec<StyledPrimitive>,
+    cx: f64,
+    cy: f64,
+    dir: [f64; 2],
+    normal: [f64; 2],
+    half_width: f64,
+    wall_thickness: f64,
+) {
+    let ht = (wall_thickness / 2.0).max(0.05); // min 5 cm so jambs are always visible
+
+    // Left jamb (at the -dir end of the opening)
+    let ls = [
+        cx - dir[0] * half_width - normal[0] * ht,
+        cy - dir[1] * half_width - normal[1] * ht,
+    ];
+    let le = [
+        cx - dir[0] * half_width + normal[0] * ht,
+        cy - dir[1] * half_width + normal[1] * ht,
+    ];
+    push_line(out, ls, le, SymbolLineClass::Primary);
+
+    // Right jamb (at the +dir end of the opening)
+    let rs = [
+        cx + dir[0] * half_width - normal[0] * ht,
+        cy + dir[1] * half_width - normal[1] * ht,
+    ];
+    let re = [
+        cx + dir[0] * half_width + normal[0] * ht,
+        cy + dir[1] * half_width + normal[1] * ht,
+    ];
+    push_line(out, rs, re, SymbolLineClass::Primary);
+}
 
 fn push_line(
     out: &mut Vec<StyledPrimitive>,

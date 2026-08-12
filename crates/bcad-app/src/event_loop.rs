@@ -14,7 +14,7 @@ use bcad_render::camera::{
 };
 use bcad_render::gpu::GpuContext;
 use bcad_render::surface::RenderSurface;
-use bcad_render::viewport::{ViewMode as RenderViewMode, ViewportLayout};
+use bcad_render::viewport::{ViewMode as RenderViewMode, ViewportLayout, ViewportRect};
 use bcad_render::Pipelines;
 use bcad_snap::snap_engine::SnapEngine;
 use bcad_state::chat_state::UiChatMessage;
@@ -257,6 +257,7 @@ impl ApplicationHandler for App {
                     &mut state.camera_2d,
                     width,
                     height,
+                    state.ui_viewport_rect,
                 );
                 state.window.request_redraw();
             }
@@ -270,23 +271,26 @@ impl ApplicationHandler for App {
                 let (ui_commands, ui_actions, ui_viewport_rect) =
                     state.bcad_ui.show(&state.egui_ctx, &mut state.app_state);
                 state.ui_viewport_rect = ui_viewport_rect;
+                update_camera_aspects(
+                    &state.app_state,
+                    &mut state.camera_3d,
+                    &mut state.camera_2d,
+                    state.surface.width,
+                    state.surface.height,
+                    state.ui_viewport_rect,
+                );
 
                 // --- Render tool preview geometry as egui overlay ---
                 {
                     let tool_ctx = build_tool_context(&state.app_state);
                     let preview = state.tool_manager.preview_geometry(&tool_ctx);
                     if !preview.is_empty() {
-                        let painter = state.egui_ctx.layer_painter(egui::LayerId::new(
+                        let mut painter = state.egui_ctx.layer_painter(egui::LayerId::new(
                             egui::Order::Foreground,
                             egui::Id::new("tool_preview"),
                         ));
-                        // Single-view modes render across the full wgpu surface, so the
-                        // preview overlay needs to project into that same rect.
-                        let viewport_rect = full_surface_rect_points(
-                            state.scale_factor,
-                            state.surface.width,
-                            state.surface.height,
-                        );
+                        painter.set_clip_rect(ui_viewport_rect);
+                        // Single-view modes render into the central viewport rect (excludes panels).
                         let level_y = state
                             .app_state
                             .levels
@@ -296,7 +300,7 @@ impl ApplicationHandler for App {
                             bcad_state::ui_state::ViewMode::TwoD => {
                                 preview_renderer::render_preview(
                                     &painter,
-                                    viewport_rect,
+                                    ui_viewport_rect,
                                     &preview,
                                     &state.camera_2d,
                                     &state.camera_3d,
@@ -307,7 +311,7 @@ impl ApplicationHandler for App {
                             bcad_state::ui_state::ViewMode::ThreeD => {
                                 preview_renderer::render_preview(
                                     &painter,
-                                    viewport_rect,
+                                    ui_viewport_rect,
                                     &preview,
                                     &state.camera_2d,
                                     &state.camera_3d,
@@ -364,10 +368,6 @@ impl ApplicationHandler for App {
                     state.app_state.ui.view_mode,
                     bcad_state::ui_state::ViewMode::TwoD | bcad_state::ui_state::ViewMode::Split
                 ) {
-                    let plan_painter = state.egui_ctx.layer_painter(egui::LayerId::new(
-                        egui::Order::Background,
-                        egui::Id::new("plan_2d"),
-                    ));
                     let plan_viewport = match state.app_state.ui.view_mode {
                         bcad_state::ui_state::ViewMode::Split => {
                             let rm = state_view_mode_to_render(state.app_state.ui.view_mode);
@@ -383,19 +383,18 @@ impl ApplicationHandler for App {
                                     egui::vec2(r2d.width as f32 / sf, r2d.height as f32 / sf),
                                 )
                             } else {
-                                full_surface_rect_points(
-                                    state.scale_factor,
-                                    state.surface.width,
-                                    state.surface.height,
-                                )
+                                ui_viewport_rect
                             }
                         }
-                        _ => full_surface_rect_points(
-                            state.scale_factor,
-                            state.surface.width,
-                            state.surface.height,
-                        ),
+                        // In TwoD mode, render into the central panel rect (excludes side panels).
+                        _ => ui_viewport_rect,
                     };
+                    // Clip the painter to plan_viewport so no drawing bleeds into panel areas.
+                    let mut plan_painter = state.egui_ctx.layer_painter(egui::LayerId::new(
+                        egui::Order::Background,
+                        egui::Id::new("plan_2d"),
+                    ));
+                    plan_painter.set_clip_rect(plan_viewport);
                     plan_renderer_2d::render_2d_plan(
                         &plan_painter,
                         plan_viewport,
@@ -424,10 +423,8 @@ impl ApplicationHandler for App {
                 for cmd in &all_commands {
                     if let bcad_state::Command::SendChatMessage { content } = cmd {
                         let content = content.clone();
-                        let elements =
-                            &state.app_state.document.prototype.project.elements;
-                        let active_level_id =
-                            state.app_state.levels.active_level_id.clone();
+                        let elements = &state.app_state.document.prototype.project.elements;
+                        let active_level_id = state.app_state.levels.active_level_id.clone();
                         if let Some(chat) = state.app_state.chat.active_chat_mut() {
                             state.ai_service.send_message(
                                 chat,
@@ -466,9 +463,7 @@ impl ApplicationHandler for App {
                                         if let Some(UiChatMessage::Assistant { content, .. }) =
                                             chat.ui_messages.last_mut()
                                         {
-                                            if !content.is_empty()
-                                                && !content.ends_with('\n')
-                                            {
+                                            if !content.is_empty() && !content.ends_with('\n') {
                                                 content.push('\n');
                                             }
                                             content.push_str(&format!(
@@ -479,13 +474,11 @@ impl ApplicationHandler for App {
                                     }
                                 }
                                 StreamChunk::CreateElement(element) => {
-                                    ai_commands.push(bcad_state::Command::CreateElement {
-                                        element,
-                                    });
+                                    ai_commands
+                                        .push(bcad_state::Command::CreateElement { element });
                                 }
                                 StreamChunk::DeleteElement(id) => {
-                                    ai_commands
-                                        .push(bcad_state::Command::DeleteElement { id });
+                                    ai_commands.push(bcad_state::Command::DeleteElement { id });
                                 }
                                 StreamChunk::SetViewMode(mode) => {
                                     let vm = match mode.as_str() {
@@ -493,9 +486,7 @@ impl ApplicationHandler for App {
                                         "split" => bcad_state::ui_state::ViewMode::Split,
                                         _ => bcad_state::ui_state::ViewMode::TwoD,
                                     };
-                                    ai_commands.push(bcad_state::Command::SetViewMode {
-                                        mode: vm,
-                                    });
+                                    ai_commands.push(bcad_state::Command::SetViewMode { mode: vm });
                                 }
                                 StreamChunk::Done => {
                                     if let Some(chat) = state.app_state.chat.active_chat_mut() {
@@ -551,8 +542,7 @@ impl ApplicationHandler for App {
                                 &mut state.app_state,
                             );
                             if ai_change_flags.contains(bcad_state::ChangeFlags::ELEMENTS) {
-                                let elements =
-                                    &state.app_state.document.prototype.project.elements;
+                                let elements = &state.app_state.document.prototype.project.elements;
                                 state.snap_engine.rebuild(elements);
                                 state.mesh_cache.regenerate_all(elements, &state.gpu);
                             }
@@ -566,8 +556,11 @@ impl ApplicationHandler for App {
                     let elements = &state.app_state.document.prototype.project.elements;
                     state.snap_engine.rebuild(elements);
                     state.mesh_cache.regenerate_all(elements, &state.gpu);
-                    log::info!("Snap engine rebuilt: {} elements, {} snap candidates",
-                        elements.len(), state.snap_engine.candidate_count());
+                    log::info!(
+                        "Snap engine rebuilt: {} elements, {} snap candidates",
+                        elements.len(),
+                        state.snap_engine.candidate_count()
+                    );
                 }
                 sync_tool_manager_from_state(state);
                 update_camera_aspects(
@@ -576,6 +569,7 @@ impl ApplicationHandler for App {
                     &mut state.camera_2d,
                     state.surface.width,
                     state.surface.height,
+                    state.ui_viewport_rect,
                 );
                 apply_programmatic_camera_if_needed(state);
                 sync_measurement_feedback(state);
@@ -606,6 +600,7 @@ impl ApplicationHandler for App {
                     &state.camera_3d,
                     state.surface.width,
                     state.surface.height,
+                    state.ui_viewport_rect,
                 );
                 let screen_pos = Vec2::new(position.x as f32, position.y as f32);
                 if !egui_wants_pointer {
@@ -684,6 +679,7 @@ impl ApplicationHandler for App {
                         &state.camera_3d,
                         state.surface.width,
                         state.surface.height,
+                        state.ui_viewport_rect,
                     );
                     let screen_pos = Vec2::new(position.x as f32, position.y as f32);
                     let active_vp = active_viewport_for_cursor(
@@ -904,7 +900,6 @@ fn physical_position_in_rect(
     ))
 }
 
-
 fn dispatch_tool_pointer_press(
     state: &mut RunningState,
     viewport: ActiveViewport,
@@ -1009,43 +1004,32 @@ fn screen_to_plan(
     cam3d: &RenderCameraState,
     sw: u32,
     sh: u32,
+    ui_viewport_rect: egui::Rect,
 ) -> Vec2 {
     let vp = active_viewport_for_cursor(position, app_state, sw, sh);
     let rm = state_view_mode_to_render(app_state.ui.view_mode);
     let layout = ViewportLayout::compute(rm, sw, sh);
     match vp {
         ActiveViewport::Viewport2D => {
-            let (nx, ny) = if let Some(ref r) = layout.viewport_2d {
-                let lx = (position.x / sf) as f32;
-                let ly = (position.y / sf) as f32;
-                let ls = sf as f32;
-                (
-                    (lx - r.x as f32 / ls) / (r.width as f32 / ls) * 2.0 - 1.0,
-                    1.0 - (ly - r.y as f32 / ls) / (r.height as f32 / ls) * 2.0,
-                )
+            let projection_rect = if app_state.ui.view_mode == ViewMode::TwoD {
+                ui_viewport_rect
             } else {
-                let nx = (position.x / sf) / (sw as f64 / sf) * 2.0 - 1.0;
-                let ny = 1.0 - (position.y / sf) / (sh as f64 / sf) * 2.0;
-                (nx as f32, ny as f32)
+                layout
+                    .viewport_2d
+                    .as_ref()
+                    .map(|rect| viewport_rect_points(rect, sf))
+                    .unwrap_or_else(|| full_surface_rect_points(sf, sw, sh))
             };
-            let hw = cam2d.zoom_level * cam2d.aspect * 0.5;
-            let hh = cam2d.zoom_level * 0.5;
-            Vec2::new(nx * hw + cam2d.pan_offset.x, ny * hh + cam2d.pan_offset.y)
+            project_2d_screen_to_plan(position, sf, projection_rect, cam2d)
         }
         ActiveViewport::Viewport3D => {
-            let (nx, ny) = if let Some(ref r) = layout.viewport_3d {
-                let lx = (position.x / sf) as f32;
-                let ly = (position.y / sf) as f32;
-                let ls = sf as f32;
-                (
-                    (lx - r.x as f32 / ls) / (r.width as f32 / ls) * 2.0 - 1.0,
-                    1.0 - (ly - r.y as f32 / ls) / (r.height as f32 / ls) * 2.0,
-                )
-            } else {
-                let nx = (position.x / sf) / (sw as f64 / sf) * 2.0 - 1.0;
-                let ny = 1.0 - (position.y / sf) / (sh as f64 / sf) * 2.0;
-                (nx as f32, ny as f32)
-            };
+            let projection_rect = layout
+                .viewport_3d
+                .as_ref()
+                .map(|rect| viewport_rect_points(rect, sf))
+                .unwrap_or_else(|| full_surface_rect_points(sf, sw, sh));
+            let (nx, ny) =
+                logical_position_to_ndc(position, sf, projection_rect).unwrap_or((0.0, 0.0));
             // Project to active level elevation (not hardcoded Y=0)
             let level_y = app_state
                 .levels
@@ -1058,6 +1042,44 @@ fn screen_to_plan(
             }
         }
     }
+}
+
+fn viewport_rect_points(rect: &ViewportRect, scale_factor: f64) -> egui::Rect {
+    let sf = scale_factor as f32;
+    egui::Rect::from_min_size(
+        egui::pos2(rect.x as f32 / sf, rect.y as f32 / sf),
+        egui::vec2(rect.width as f32 / sf, rect.height as f32 / sf),
+    )
+}
+
+fn logical_position_to_ndc(
+    position: PhysicalPosition<f64>,
+    scale_factor: f64,
+    rect: egui::Rect,
+) -> Option<(f32, f32)> {
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return None;
+    }
+
+    let x = position.x as f32 / scale_factor as f32;
+    let y = position.y as f32 / scale_factor as f32;
+
+    Some((
+        (x - rect.min.x) / rect.width() * 2.0 - 1.0,
+        1.0 - (y - rect.min.y) / rect.height() * 2.0,
+    ))
+}
+
+fn project_2d_screen_to_plan(
+    position: PhysicalPosition<f64>,
+    scale_factor: f64,
+    rect: egui::Rect,
+    camera: &RenderCameraState,
+) -> Vec2 {
+    let (nx, ny) = logical_position_to_ndc(position, scale_factor, rect).unwrap_or((0.0, 0.0));
+    let hw = camera.zoom_level * camera.aspect * 0.5;
+    let hh = camera.zoom_level * 0.5;
+    Vec2::new(nx * hw + camera.pan_offset.x, ny * hh + camera.pan_offset.y)
 }
 
 // --- Snap & tool context ---
@@ -1126,7 +1148,6 @@ fn build_tool_context(state: &AppState) -> ToolContext {
     };
     build_tool_context_for_viewport(state, vp)
 }
-
 
 fn sync_tool_manager_from_state(state: &mut RunningState) {
     let desired = tool_type_to_tool_id(state.app_state.ui.active_tool);
@@ -1235,6 +1256,7 @@ fn sync_measurement_feedback(state: &mut RunningState) {
             &state.camera_3d,
             state.surface.width,
             state.surface.height,
+            state.ui_viewport_rect,
         );
         [
             plan_pos.x as f64,
@@ -1245,6 +1267,37 @@ fn sync_measurement_feedback(state: &mut RunningState) {
             plan_pos.y as f64,
         ]
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{pos2, vec2};
+
+    #[test]
+    fn logical_position_to_ndc_uses_rect_origin() {
+        let rect = egui::Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 600.0));
+
+        let (nx, ny) = logical_position_to_ndc(PhysicalPosition::new(500.0, 350.0), 1.0, rect)
+            .expect("valid rect should project");
+
+        assert!(nx.abs() < 1e-6);
+        assert!(ny.abs() < 1e-6);
+    }
+
+    #[test]
+    fn project_2d_center_maps_to_camera_pan_offset() {
+        let rect = egui::Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 600.0));
+        let mut camera = RenderCameraState::default_2d();
+        camera.aspect = rect.width() / rect.height();
+        camera.pan_offset = Vec2::new(12.5, -3.25);
+
+        let plan_pos =
+            project_2d_screen_to_plan(PhysicalPosition::new(500.0, 350.0), 1.0, rect, &camera);
+
+        assert!((plan_pos.x - camera.pan_offset.x).abs() < 1e-6);
+        assert!((plan_pos.y - camera.pan_offset.y).abs() < 1e-6);
+    }
 }
 
 // --- Keyboard shortcuts ---
@@ -1296,7 +1349,10 @@ fn handle_keyboard_shortcuts(
     // Note: The select tool already handles Delete/Backspace via ToolInput::KeyDown,
     // emitting Command::DeleteSelected. We handle it here too as a fallback for
     // when other tools are active (so Delete always works).
-    if matches!(key, Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace)) {
+    if matches!(
+        key,
+        Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace)
+    ) {
         if let Some(ref id) = app_state.ui.selected_body_id {
             cmds.push(bcad_state::Command::DeleteElement { id: id.clone() });
             cmds.push(bcad_state::Command::ClearSelection);

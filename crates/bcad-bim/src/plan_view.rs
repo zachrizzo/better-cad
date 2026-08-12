@@ -183,8 +183,7 @@ pub fn generate_plan_from_elements(elements: &[Element]) -> PlanViewData {
                 } else {
                     -1.0
                 };
-                let swing_angle =
-                    (open_sign * geom.axis_u[1]).atan2(open_sign * -geom.axis_u[0]);
+                let swing_angle = (open_sign * geom.axis_u[1]).atan2(open_sign * -geom.axis_u[0]);
 
                 opening_symbols.push(PlanSymbol {
                     symbol_type: PlanSymbolType::DoorSwing,

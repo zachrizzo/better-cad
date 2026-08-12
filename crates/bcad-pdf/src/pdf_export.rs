@@ -13,8 +13,8 @@ use bcad_domain::{
 };
 
 use crate::drawing_helpers::{
-    draw_circle, draw_line_seg, draw_rect, mm, reset_dash, set_dash_pattern_mm,
-    set_fill_color_rgb, set_pen, set_stroke_color_rgb,
+    draw_circle, draw_line_seg, draw_rect, mm, reset_dash, set_dash_pattern_mm, set_fill_color_rgb,
+    set_pen, set_stroke_color_rgb,
 };
 use crate::title_block::{get_drawable_area, render_title_block, DrawableArea, TitleBlockConfig};
 use crate::types::*;
@@ -365,8 +365,18 @@ fn draw_walls(
 
         // --- Wall poche (solid gray fill) ---
         // Draw filled polygon first, then stroke the outline on top.
-        set_fill_color_rgb(layer, WALL_POCHE_GRAY.0, WALL_POCHE_GRAY.1, WALL_POCHE_GRAY.2);
-        set_stroke_color_rgb(layer, WALL_POCHE_GRAY.0, WALL_POCHE_GRAY.1, WALL_POCHE_GRAY.2);
+        set_fill_color_rgb(
+            layer,
+            WALL_POCHE_GRAY.0,
+            WALL_POCHE_GRAY.1,
+            WALL_POCHE_GRAY.2,
+        );
+        set_stroke_color_rgb(
+            layer,
+            WALL_POCHE_GRAY.0,
+            WALL_POCHE_GRAY.1,
+            WALL_POCHE_GRAY.2,
+        );
         set_pen(layer, 0.01); // hairline for fill shape
         let fill_line = Line {
             points: points.clone(),
@@ -1077,4 +1087,3 @@ fn format_dim(meters: f64) -> String {
         format!("{:.2} m", meters)
     }
 }
-

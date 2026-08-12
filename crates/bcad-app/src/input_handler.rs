@@ -25,9 +25,7 @@ pub(crate) fn winit_mouse_button_to_camera_button(
 }
 
 /// Map a winit mouse button to the tool system's `MouseButton` type.
-pub(crate) fn winit_mouse_button_to_tool_button(
-    button: winit::event::MouseButton,
-) -> MouseButton {
+pub(crate) fn winit_mouse_button_to_tool_button(button: winit::event::MouseButton) -> MouseButton {
     match button {
         winit::event::MouseButton::Left => MouseButton::Left,
         winit::event::MouseButton::Middle => MouseButton::Middle,

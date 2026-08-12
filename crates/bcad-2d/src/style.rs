@@ -633,7 +633,10 @@ mod tests {
     fn symbol_line_class_to_pen_weight() {
         assert_eq!(SymbolLineClass::Cut.to_pen_weight(), PenWeight::Heavy);
         assert_eq!(SymbolLineClass::Primary.to_pen_weight(), PenWeight::Wide);
-        assert_eq!(SymbolLineClass::Secondary.to_pen_weight(), PenWeight::Medium);
+        assert_eq!(
+            SymbolLineClass::Secondary.to_pen_weight(),
+            PenWeight::Medium
+        );
         assert_eq!(SymbolLineClass::Annotation.to_pen_weight(), PenWeight::Fine);
     }
 

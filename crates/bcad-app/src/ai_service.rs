@@ -17,8 +17,9 @@ use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 
 use bcad_domain::{
-    ColumnElement, DoorElement, Element, ElementMeta, FloorElement, FurnitureElement, LevelElement,
-    PlumbingElement, ElectricalElement, RoofElement, StairElement, WallElement, WindowElement,
+    ColumnElement, DoorElement, ElectricalElement, Element, ElementMeta, FloorElement,
+    FurnitureElement, LevelElement, PlumbingElement, RoofElement, StairElement, WallElement,
+    WindowElement,
 };
 use bcad_state::chat_state::{ApiMessage, Chat, UiChatMessage};
 
@@ -58,7 +59,10 @@ impl AiConfig {
 pub enum StreamChunk {
     TextDelta(String),
     /// A tool was called and executed; `status` is a short human-readable message.
-    ToolCall { name: String, status: String },
+    ToolCall {
+        name: String,
+        status: String,
+    },
     /// The tool execution produced an element to be created on the main thread.
     CreateElement(Element),
     /// The tool execution requests deletion of an element.
@@ -168,10 +172,7 @@ impl ProxyConnection {
 
         let response_str = String::from_utf8_lossy(&response);
         if !response_str.contains("101") {
-            return Err(format!(
-                "WS handshake rejected: {}",
-                response_str.trim()
-            ));
+            return Err(format!("WS handshake rejected: {}", response_str.trim()));
         }
 
         log::info!("AI proxy WebSocket connected (persistent session)");
@@ -204,7 +205,14 @@ impl ProxyConnection {
         loop {
             match ws_read_frame(&mut self.stream) {
                 Ok(Some(text)) => {
-                    log::debug!("AI WS frame: {}", if text.len() > 200 { &text[..200] } else { &text });
+                    log::debug!(
+                        "AI WS frame: {}",
+                        if text.len() > 200 {
+                            &text[..200]
+                        } else {
+                            &text
+                        }
+                    );
                     let event: serde_json::Value = match serde_json::from_str(&text) {
                         Ok(v) => v,
                         Err(e) => {
@@ -238,35 +246,22 @@ impl ProxyConnection {
                             log::info!("AI tool_call: {} (callId={})", name, call_id);
 
                             // Execute the tool
-                            let result = execute_tool(
-                                &name,
-                                &input,
-                                &elements_snapshot,
-                                active_level_id,
-                            );
+                            let result =
+                                execute_tool(&name, &input, &elements_snapshot, active_level_id);
 
                             // Push created elements / deletions / view mode changes
                             // to the main thread via StreamChunk, and update our local
                             // snapshot so later tool calls see the new state.
                             for elem in &result.created_elements {
                                 elements_snapshot.push(elem.clone());
-                                push_chunk(
-                                    buffer,
-                                    StreamChunk::CreateElement(elem.clone()),
-                                );
+                                push_chunk(buffer, StreamChunk::CreateElement(elem.clone()));
                             }
                             for del_id in &result.deleted_element_ids {
                                 elements_snapshot.retain(|e| e.id() != del_id.as_str());
-                                push_chunk(
-                                    buffer,
-                                    StreamChunk::DeleteElement(del_id.clone()),
-                                );
+                                push_chunk(buffer, StreamChunk::DeleteElement(del_id.clone()));
                             }
                             if let Some(ref mode) = result.set_view_mode {
-                                push_chunk(
-                                    buffer,
-                                    StreamChunk::SetViewMode(mode.clone()),
-                                );
+                                push_chunk(buffer, StreamChunk::SetViewMode(mode.clone()));
                             }
 
                             // Send result back to proxy
@@ -276,16 +271,13 @@ impl ProxyConnection {
                                 "result": result.result_json,
                                 "isError": result.is_error,
                             });
-                            if let Err(e) = ws_send_text(
-                                &mut self.stream,
-                                &result_msg.to_string().into_bytes(),
-                            ) {
+                            if let Err(e) =
+                                ws_send_text(&mut self.stream, &result_msg.to_string().into_bytes())
+                            {
                                 log::error!("Failed to send tool_result: {}", e);
                                 push_chunk(
                                     buffer,
-                                    StreamChunk::Error(format!(
-                                        "Failed to send tool_result: {e}"
-                                    )),
+                                    StreamChunk::Error(format!("Failed to send tool_result: {e}")),
                                 );
                                 break;
                             }
@@ -318,10 +310,7 @@ impl ProxyConnection {
                 }
                 Ok(None) => break, // connection closed
                 Err(e) => {
-                    push_chunk(
-                        buffer,
-                        StreamChunk::Error(format!("WS read error: {e}")),
-                    );
+                    push_chunk(buffer, StreamChunk::Error(format!("WS read error: {e}")));
                     break;
                 }
             }
@@ -982,10 +971,7 @@ fn tool_create_level(input: &serde_json::Value) -> ToolResult {
     let id = m.id.clone();
     m.level_id = None; // Levels don't have a level_id
 
-    let elem = Element::Level(LevelElement {
-        meta: m,
-        elevation,
-    });
+    let elem = Element::Level(LevelElement { meta: m, elevation });
 
     let mut result = ToolResult::ok(
         serde_json::json!({
@@ -1456,17 +1442,15 @@ fn tool_create_room(
         let wid = m.id.clone();
         wall_ids.push(wid.clone());
 
-        result
-            .created_elements
-            .push(Element::Wall(WallElement {
-                meta: m,
-                start,
-                end,
-                height: wall_height,
-                thickness: wall_thickness,
-                arc: None,
-                arc_segments: 24,
-            }));
+        result.created_elements.push(Element::Wall(WallElement {
+            meta: m,
+            start,
+            end,
+            height: wall_height,
+            thickness: wall_thickness,
+            arc: None,
+            arc_segments: 24,
+        }));
     }
 
     // Create floor
@@ -1475,14 +1459,12 @@ fn tool_create_room(
         let m = meta(&format!("Room Floor ({})", room_name), Some(&level_id));
         let fid = m.id.clone();
         floor_id = Some(fid);
-        result
-            .created_elements
-            .push(Element::Floor(FloorElement {
-                meta: m,
-                boundary: boundary.clone(),
-                thickness: floor_thickness,
-                boundary_segments: Vec::new(),
-            }));
+        result.created_elements.push(Element::Floor(FloorElement {
+            meta: m,
+            boundary: boundary.clone(),
+            thickness: floor_thickness,
+            boundary_segments: Vec::new(),
+        }));
     }
 
     // Create room element
@@ -1692,9 +1674,7 @@ fn tool_delete_elements(input: &serde_json::Value, elements: &[Element]) -> Tool
 fn tool_set_view_mode(input: &serde_json::Value) -> ToolResult {
     let mode = json_str(input, "mode").unwrap_or("2d");
     if mode != "2d" && mode != "3d" && mode != "split" {
-        return ToolResult::err(
-            "Invalid mode: expected one of '2d', '3d', or 'split'".to_string(),
-        );
+        return ToolResult::err("Invalid mode: expected one of '2d', '3d', or 'split'".to_string());
     }
 
     let mut result = ToolResult::ok(

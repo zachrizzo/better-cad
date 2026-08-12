@@ -9,6 +9,7 @@ use bcad_render::camera::CameraState as RenderCameraState;
 use bcad_render::viewport::ViewportLayout;
 use bcad_state::ui_state::ViewMode;
 use bcad_state::AppState;
+use egui::Rect;
 use glam::Vec3;
 
 // Re-export from event_loop for the view-mode conversion (internal helper).
@@ -29,10 +30,11 @@ pub(crate) fn update_camera_aspects(
     c2d: &mut RenderCameraState,
     w: u32,
     h: u32,
+    ui_viewport_rect: Rect,
 ) {
     match app_state.ui.view_mode {
         ViewMode::TwoD => {
-            c2d.aspect = w as f32 / h as f32;
+            c2d.aspect = viewport_aspect(ui_viewport_rect, w, h);
             c3d.aspect = c2d.aspect;
         }
         ViewMode::ThreeD => {
@@ -49,6 +51,16 @@ pub(crate) fn update_camera_aspects(
                 c3d.aspect = r.aspect();
             }
         }
+    }
+}
+
+fn viewport_aspect(rect: Rect, fallback_width: u32, fallback_height: u32) -> f32 {
+    if rect.width() > 0.0 && rect.height() > 0.0 {
+        rect.width() / rect.height()
+    } else if fallback_height == 0 {
+        1.0
+    } else {
+        fallback_width as f32 / fallback_height as f32
     }
 }
 
@@ -77,4 +89,26 @@ pub(crate) fn apply_look_at_camera(
     camera.distance = distance;
     camera.azimuth = delta.x.atan2(delta.z);
     camera.elevation = (delta.y / distance).asin();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{pos2, vec2};
+
+    #[test]
+    fn two_d_mode_uses_visible_viewport_aspect() {
+        let mut app_state = AppState::default();
+        app_state.ui.view_mode = ViewMode::TwoD;
+
+        let mut c3d = RenderCameraState::default_3d();
+        let mut c2d = RenderCameraState::default_2d();
+        let viewport_rect = Rect::from_min_size(pos2(84.0, 24.0), vec2(996.0, 600.0));
+
+        update_camera_aspects(&app_state, &mut c3d, &mut c2d, 1400, 900, viewport_rect);
+
+        let expected = viewport_rect.width() / viewport_rect.height();
+        assert!((c2d.aspect - expected).abs() < f32::EPSILON);
+        assert!((c3d.aspect - expected).abs() < f32::EPSILON);
+    }
 }

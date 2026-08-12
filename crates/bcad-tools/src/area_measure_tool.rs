@@ -57,7 +57,8 @@ impl Tool for AreaMeasureTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
+                self.base
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -70,7 +71,8 @@ impl Tool for AreaMeasureTool {
                     self.vertices.clear();
                     self.closed = false;
                 }
-                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
+                self.base
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
 
                 // Check if closing

@@ -69,8 +69,7 @@ pub fn solve(sketch: &mut Sketch) -> SolverResult {
         let constraints_clone: Vec<Constraint> = sketch.constraints.clone();
         let mut row_offset = 0usize;
         for c in &constraints_clone {
-            let triplets =
-                equations::jacobian_contributions(c, sketch, &param_map, row_offset);
+            let triplets = equations::jacobian_contributions(c, sketch, &param_map, row_offset);
             for (r, c_idx, val) in triplets {
                 jac[(r, c_idx)] = val;
             }

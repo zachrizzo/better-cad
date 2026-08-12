@@ -146,21 +146,36 @@ pub fn wall_mesh_with_openings(
     for interval in &intervals {
         if interval.start - cursor > 1e-8 {
             piece_meshes.push(wall_piece_mesh(
-                wall, &vecs, cursor, interval.start, 0.0, wall.height,
+                wall,
+                &vecs,
+                cursor,
+                interval.start,
+                0.0,
+                wall.height,
             )?);
         }
         cursor = interval.end;
     }
     if vecs.length - cursor > 1e-8 {
         piece_meshes.push(wall_piece_mesh(
-            wall, &vecs, cursor, vecs.length, 0.0, wall.height,
+            wall,
+            &vecs,
+            cursor,
+            vecs.length,
+            0.0,
+            wall.height,
         )?);
     }
 
     for interval in &intervals {
         if interval.sill > 1e-8 {
             piece_meshes.push(wall_piece_mesh(
-                wall, &vecs, interval.start, interval.end, 0.0, interval.sill,
+                wall,
+                &vecs,
+                interval.start,
+                interval.end,
+                0.0,
+                interval.sill,
             )?);
         }
         if wall.height - interval.top > 1e-8 {
@@ -175,11 +190,8 @@ pub fn wall_mesh_with_openings(
         }
     }
 
-    combine_meshes(&piece_meshes).ok_or_else(|| {
-        KernelError::TopologyError(
-            "wall openings removed all geometry".into(),
-        )
-    })
+    combine_meshes(&piece_meshes)
+        .ok_or_else(|| KernelError::TopologyError("wall openings removed all geometry".into()))
 }
 
 fn wall_piece_mesh(
@@ -370,11 +382,8 @@ pub fn curved_wall_mesh_with_openings(
         }
     }
 
-    combine_meshes(&piece_meshes).ok_or_else(|| {
-        KernelError::TopologyError(
-            "curved wall produced no geometry".into(),
-        )
-    })
+    combine_meshes(&piece_meshes)
+        .ok_or_else(|| KernelError::TopologyError("curved wall produced no geometry".into()))
 }
 
 /// Corner adjustment at a wall endpoint where it meets another wall.

@@ -82,7 +82,8 @@ impl Tool for TextTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
+                self.base
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 self.cursor_pos = self.base.pos().unwrap_or(plan_pos);
                 ToolAction::StateChanged
             }
@@ -92,7 +93,8 @@ impl Tool for TextTool {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
+                self.base
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
                 let element = self.create_text_element(pos, ctx);
                 ToolAction::EmitCommands(vec![Command::CreateElement(element)])

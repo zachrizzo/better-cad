@@ -155,7 +155,8 @@ impl Tool for DoorTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
+                self.base
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 self.candidate = self.find_candidate(plan_pos, ctx);
                 ToolAction::StateChanged
             }

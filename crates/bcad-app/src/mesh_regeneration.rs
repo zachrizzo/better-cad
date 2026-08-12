@@ -154,50 +154,33 @@ fn opening_specs_for_wall(wall_id: &str, elements: &[Element]) -> Vec<bcad_bim::
         .collect()
 }
 
-/// Intersection of two infinite lines defined by point + direction.
-/// Returns `None` if the lines are (near) parallel.
-#[allow(dead_code)]
-fn line_line_intersection(
-    p1: [f64; 2],
-    d1: [f64; 2],
-    p2: [f64; 2],
-    d2: [f64; 2],
-) -> Option<[f64; 2]> {
-    let cross = d1[0] * d2[1] - d1[1] * d2[0];
-    if cross.abs() < 1e-10 {
-        return None;
-    }
-    let dx = p2[0] - p1[0];
-    let dy = p2[1] - p1[1];
-    let t = (dx * d2[1] - dy * d2[0]) / cross;
-    Some([p1[0] + t * d1[0], p1[1] + t * d1[1]])
-}
-
-/// Adjust wall endpoints to prevent overlap at junctions.
-///
-/// Uses the "one wall wins" approach: at each shared endpoint, this wall
-/// is shortened along its centerline so its rectangular end face stops at
-/// the connecting wall's near face. The connecting wall extends through the
-/// corner (filling it solid). The wall with the longer projection onto the
-/// other wall's normal "wins" and extends; the other is trimmed.
 fn dist_2d(a: [f64; 2], b: [f64; 2]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
 }
 
-fn adjust_wall_for_junctions(
+/// Adjust wall endpoints using a butt-joint "one wall wins" approach.
+///
+/// At each shared endpoint the wall that ENDS there wins (it extends fully
+/// to the junction); the wall that STARTS there is trimmed back so it butts
+/// cleanly against the winning wall's side face.  When both walls end or
+/// both start at the junction the wall with the lexicographically larger
+/// meta-id wins.
+///
+/// The trim distance along the losing wall's centreline is
+/// `other.thickness / (2 * |sin(angle)|)` — the exact amount needed for
+/// the losing wall's face to clear the winning wall's side face at any angle.
+fn adjust_wall_for_junctions_butt(
     wall: &WallElement,
     all_elements: &[Element],
 ) -> ([f64; 2], [f64; 2]) {
     let mut start = wall.start;
-    let mut end = wall.end;
+    let mut end   = wall.end;
     let eps = 0.01;
 
     let dx = end[0] - start[0];
     let dy = end[1] - start[1];
     let len = (dx * dx + dy * dy).sqrt();
-    if len < 1e-6 {
-        return (start, end);
-    }
+    if len < 1e-6 { return (start, end); }
     let ux = dx / len;
     let uy = dy / len;
 
@@ -210,41 +193,54 @@ fn adjust_wall_for_junctions(
         let odx = other.end[0] - other.start[0];
         let ody = other.end[1] - other.start[1];
         let olen = (odx * odx + ody * ody).sqrt();
-        if olen < 1e-6 {
-            continue;
-        }
+        if olen < 1e-6 { continue; }
         let oux = odx / olen;
         let ouy = ody / olen;
 
-        // Skip near-parallel walls (collinear continuation)
-        let cross = (ux * ouy - uy * oux).abs();
-        if cross < 0.1 {
-            continue;
+        let sin_angle = (ux * ouy - uy * oux).abs();
+        if sin_angle < 0.1 { continue; } // near-parallel, skip
+
+        let shorten = (other.thickness * 0.5) / sin_angle;
+
+        // --- Start of this wall ---
+        let start_at_other_start = dist_2d(other.start, wall.start) < eps;
+        let start_at_other_end   = dist_2d(other.end,   wall.start) < eps;
+        if start_at_other_start || start_at_other_end {
+            // If other ENDS here → other wins → this wall (starting here) is trimmed.
+            // If other STARTS here → both start; larger id wins.
+            let this_wins = if start_at_other_end {
+                false
+            } else {
+                wall.meta.id > other.meta.id
+            };
+            if !this_wins {
+                start[0] += ux * shorten;
+                start[1] += uy * shorten;
+            }
         }
 
-        // Shorten by half the other wall's thickness.
-        // Simple and correct for 90-degree junctions, good enough for other angles.
-        let shorten = other.thickness * 0.5;
-
-        // Check if the other wall shares this wall's start endpoint
-        let shares_start = dist_2d(other.start, wall.start) < eps
-            || dist_2d(other.end, wall.start) < eps;
-        if shares_start {
-            start[0] += ux * shorten;
-            start[1] += uy * shorten;
-        }
-
-        // Check if the other wall shares this wall's end endpoint
-        let shares_end =
-            dist_2d(other.start, wall.end) < eps || dist_2d(other.end, wall.end) < eps;
-        if shares_end {
-            end[0] -= ux * shorten;
-            end[1] -= uy * shorten;
+        // --- End of this wall ---
+        let end_at_other_start = dist_2d(other.start, wall.end) < eps;
+        let end_at_other_end   = dist_2d(other.end,   wall.end) < eps;
+        if end_at_other_start || end_at_other_end {
+            // If other STARTS here → this wall (ending here) wins → NOT trimmed.
+            // If other ENDS here → both end; larger id wins.
+            let this_wins = if end_at_other_start {
+                true
+            } else {
+                wall.meta.id > other.meta.id
+            };
+            if !this_wins {
+                end[0] -= ux * shorten;
+                end[1] -= uy * shorten;
+            }
         }
     }
 
     (start, end)
 }
+
+/// Adjust wall endpoints for junctions using the angle-correct miter distance.
 
 /// Tessellate a single element using the bcad-bim mesh generators.
 ///
@@ -269,7 +265,11 @@ fn tessellate_element(element: &Element, all_elements: &[Element]) -> Option<Tes
                     &openings,
                 )
             } else {
-                let (adj_start, adj_end) = adjust_wall_for_junctions(wall, all_elements);
+                // Butt-joint junctions: the wall that ends at a shared endpoint
+                // "wins" and extends fully; the wall that starts is trimmed.
+                // Works correctly at any angle including acute triangle corners.
+                let (adj_start, adj_end) =
+                    adjust_wall_for_junctions_butt(wall, all_elements);
                 bcad_bim::wall::wall_mesh_with_openings(
                     &bcad_bim::wall::WallParams {
                         start: adj_start,

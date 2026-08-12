@@ -56,7 +56,6 @@ impl PlacementCategory {
             Self::Accessibility => [0.3, 0.3, 0.9, 1.0],
         }
     }
-
 }
 
 pub struct PlacementTool {
@@ -78,8 +77,12 @@ impl PlacementTool {
 
     fn create_element(&mut self, pos: Vec2, ctx: &ToolContext) -> Element {
         self.placement_count += 1;
-        let meta = ElementMeta::new(format!("{} {}", self.category.label(), self.placement_count))
-            .with_level(ctx.active_level_id.clone());
+        let meta = ElementMeta::new(format!(
+            "{} {}",
+            self.category.label(),
+            self.placement_count
+        ))
+        .with_level(ctx.active_level_id.clone());
         let position = [pos.x as f64, pos.y as f64];
 
         match self.category {

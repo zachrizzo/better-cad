@@ -261,9 +261,7 @@ pub(crate) fn convert_tool_commands(
             bcad_tools::tool_trait::Command::AutoJoinWalls { wall_id, level_id } => {
                 result.push(bcad_state::Command::AutoJoinWalls { wall_id, level_id });
             }
-            bcad_tools::tool_trait::Command::Duplicate => {
-                convert_duplicate(app_state, &mut result)
-            }
+            bcad_tools::tool_trait::Command::Duplicate => convert_duplicate(app_state, &mut result),
             bcad_tools::tool_trait::Command::DeleteSelected => {
                 if let Some(id) = &app_state.ui.selected_body_id {
                     result.push(bcad_state::Command::DeleteElement { id: id.clone() });
@@ -378,11 +376,7 @@ fn convert_duplicate(app_state: &AppState, result: &mut Vec<bcad_state::Command>
 ///
 /// Called from both `convert_duplicate` here and from `command_processor` via
 /// `crate::command_translator::set_element_id_and_offset`.
-pub(crate) fn set_element_id_and_offset(
-    element: &mut bcad_domain::Element,
-    new_id: &str,
-    o: f64,
-) {
+pub(crate) fn set_element_id_and_offset(element: &mut bcad_domain::Element, new_id: &str, o: f64) {
     match element {
         bcad_domain::Element::Wall(w) => {
             w.meta.id = new_id.into();

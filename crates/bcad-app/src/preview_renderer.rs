@@ -258,7 +258,8 @@ fn world_radius_to_pixels(
 ) -> f32 {
     if is_2d {
         let c = world_to_screen_vec2(center, camera_2d, viewport);
-        let edge = world_to_screen_vec2(Vec2::new(center.x + radius, center.y), camera_2d, viewport);
+        let edge =
+            world_to_screen_vec2(Vec2::new(center.x + radius, center.y), camera_2d, viewport);
         (edge.x - c.x).abs().max(4.0)
     } else {
         let c = world_to_screen_3d(center, camera_3d, viewport, level_y);

@@ -5,7 +5,9 @@
 
 use printpdf::*;
 
-use crate::drawing_helpers::{draw_hline, draw_rect, draw_vline, mm, set_pen, set_stroke_color_rgb};
+use crate::drawing_helpers::{
+    draw_hline, draw_rect, draw_vline, mm, set_pen, set_stroke_color_rgb,
+};
 use crate::types::Lineweights;
 use crate::types::PaperSize;
 use crate::types::ProjectInfo;
@@ -157,7 +159,10 @@ pub fn render_title_block(
         font,
     );
     layer.use_text(
-        format!("ARCHITECT: {}", config.project.architect_name.to_uppercase()),
+        format!(
+            "ARCHITECT: {}",
+            config.project.architect_name.to_uppercase()
+        ),
         5.5,
         mm(ts_left + 4.0),
         mm(row2_y + 4.0),
@@ -189,7 +194,10 @@ pub fn render_title_block(
         font,
     );
     layer.use_text(
-        format!("PROJECT #: {}", config.project.project_number.to_uppercase()),
+        format!(
+            "PROJECT #: {}",
+            config.project.project_number.to_uppercase()
+        ),
         6.0,
         mm(ts_left + 4.0),
         mm(ts_bottom + 2.0),

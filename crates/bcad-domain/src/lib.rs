@@ -1137,11 +1137,23 @@ impl PrototypeState {
         // and (where applicable) that the target is the correct element kind.
         type RefCheck<'a> = (&'a str, Option<&'a str>, Option<fn(&Element) -> bool>);
         let ref_checks: &[RefCheck<'_>] = &[
-            ("level", meta.level_id.as_deref(), Some(|e: &Element| matches!(e, Element::Level(_)))),
+            (
+                "level",
+                meta.level_id.as_deref(),
+                Some(|e: &Element| matches!(e, Element::Level(_))),
+            ),
             ("host", meta.host_id.as_deref(), None),
-            ("type", meta.type_id.as_deref(), Some(|e: &Element| matches!(e, Element::FamilyType(_)))),
+            (
+                "type",
+                meta.type_id.as_deref(),
+                Some(|e: &Element| matches!(e, Element::FamilyType(_))),
+            ),
             ("parent", meta.parent_id.as_deref(), None),
-            ("material", meta.material_id.as_deref(), Some(|e: &Element| matches!(e, Element::Material(_)))),
+            (
+                "material",
+                meta.material_id.as_deref(),
+                Some(|e: &Element| matches!(e, Element::Material(_))),
+            ),
         ];
 
         for &(role, ref_value, type_check) in ref_checks {

@@ -671,8 +671,22 @@ fn add_fire_safety_symbol(drawing: &mut dxf::Drawing, fs: &FireSafetyElement) {
         _ => {
             // Generic: X circle
             add_circle_approx(drawing, px, py, 0.12, layer);
-            add_line(drawing, px - 0.085, py - 0.085, px + 0.085, py + 0.085, layer);
-            add_line(drawing, px + 0.085, py - 0.085, px - 0.085, py + 0.085, layer);
+            add_line(
+                drawing,
+                px - 0.085,
+                py - 0.085,
+                px + 0.085,
+                py + 0.085,
+                layer,
+            );
+            add_line(
+                drawing,
+                px + 0.085,
+                py - 0.085,
+                px - 0.085,
+                py + 0.085,
+                layer,
+            );
         }
     }
 }
@@ -800,8 +814,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                 }
 
                 let is_closed = poly.is_closed();
-                let boundary: Vec<[f64; 2]> =
-                    poly.vertices.iter().map(|v| [v.x, v.y]).collect();
+                let boundary: Vec<[f64; 2]> = poly.vertices.iter().map(|v| [v.x, v.y]).collect();
 
                 match layer.as_str() {
                     "WALLS" | "A-WALL" if is_closed && poly.vertices.len() >= 4 => {
@@ -942,10 +955,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                 let px = text.location.x;
                 let py = text.location.y;
                 elements.push(Element::LeaderAnnotation(LeaderAnnotationElement {
-                    meta: ElementMeta::new(format!(
-                        "Imported Text {}",
-                        elements.len() + 1
-                    )),
+                    meta: ElementMeta::new(format!("Imported Text {}", elements.len() + 1)),
                     start: [px, py],
                     end: [px + 1.0, py],
                     text: text.value.clone(),
@@ -957,10 +967,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                 let px = mtext.insertion_point.x;
                 let py = mtext.insertion_point.y;
                 elements.push(Element::LeaderAnnotation(LeaderAnnotationElement {
-                    meta: ElementMeta::new(format!(
-                        "Imported MText {}",
-                        elements.len() + 1
-                    )),
+                    meta: ElementMeta::new(format!("Imported MText {}", elements.len() + 1)),
                     start: [px, py],
                     end: [px + 1.0, py],
                     text: mtext.text.clone(),
@@ -975,10 +982,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
 
                 if block_upper.contains("DOOR") {
                     elements.push(Element::Door(DoorElement {
-                        meta: ElementMeta::new(format!(
-                            "Imported Door {}",
-                            elements.len() + 1
-                        )),
+                        meta: ElementMeta::new(format!("Imported Door {}", elements.len() + 1)),
                         wall_id: String::new(),
                         position_along_wall: 0.5,
                         width: 0.9,
@@ -990,10 +994,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                     }));
                 } else if block_upper.contains("WINDOW") || block_upper.contains("WIN") {
                     elements.push(Element::Window(WindowElement {
-                        meta: ElementMeta::new(format!(
-                            "Imported Window {}",
-                            elements.len() + 1
-                        )),
+                        meta: ElementMeta::new(format!("Imported Window {}", elements.len() + 1)),
                         wall_id: String::new(),
                         position_along_wall: 0.5,
                         width: 1.2,
@@ -1004,10 +1005,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                     }));
                 } else if block_upper.contains("COLUMN") || block_upper.contains("COL") {
                     elements.push(Element::Column(ColumnElement {
-                        meta: ElementMeta::new(format!(
-                            "Imported Column {}",
-                            elements.len() + 1
-                        )),
+                        meta: ElementMeta::new(format!("Imported Column {}", elements.len() + 1)),
                         center: [px, py],
                         width: 0.3,
                         depth: 0.3,
@@ -1018,10 +1016,7 @@ pub fn import_dxf(data: &[u8]) -> Result<Vec<Element>, Box<dyn std::error::Error
                 } else {
                     // Generic block → furniture
                     elements.push(Element::Furniture(FurnitureElement {
-                        meta: ElementMeta::new(format!(
-                            "Imported Block {}",
-                            elements.len() + 1
-                        )),
+                        meta: ElementMeta::new(format!("Imported Block {}", elements.len() + 1)),
                         symbol_type: ins.name.clone(),
                         position: [px, py],
                         rotation: ins.rotation,

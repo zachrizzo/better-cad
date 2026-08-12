@@ -35,7 +35,8 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<Command> {
                 tc.text_muted
             };
             let dot_rect = ui.allocate_space(Vec2::new(8.0, 8.0));
-            ui.painter().circle_filled(dot_rect.1.center(), 4.0, dot_color);
+            ui.painter()
+                .circle_filled(dot_rect.1.center(), 4.0, dot_color);
         });
     });
     ui.add_space(2.0);
@@ -51,21 +52,29 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<Command> {
 
     ui.horizontal(|ui| {
         // Plan mode toggle button
-        let plan_label = if plan_mode { "\u{1F4CB} Plan: ON" } else { "\u{26A1} Plan: OFF" };
-        let plan_color = if plan_mode { tc.success } else { tc.text_muted };
-        let plan_btn = egui::Button::new(
-            RichText::new(plan_label).size(11.0).color(plan_color)
-        )
-        .fill(if plan_mode {
-            Color32::from_rgba_unmultiplied(tc.success.r(), tc.success.g(), tc.success.b(), 25)
+        let plan_label = if plan_mode {
+            "\u{1F4CB} Plan: ON"
         } else {
-            Color32::TRANSPARENT
-        })
-        .stroke(Stroke::new(0.5, plan_color))
-        .corner_radius(CornerRadius::same(4));
+            "\u{26A1} Plan: OFF"
+        };
+        let plan_color = if plan_mode { tc.success } else { tc.text_muted };
+        let plan_btn = egui::Button::new(RichText::new(plan_label).size(11.0).color(plan_color))
+            .fill(if plan_mode {
+                Color32::from_rgba_unmultiplied(tc.success.r(), tc.success.g(), tc.success.b(), 25)
+            } else {
+                Color32::TRANSPARENT
+            })
+            .stroke(Stroke::new(0.5, plan_color))
+            .corner_radius(CornerRadius::same(4));
 
-        if ui.add(plan_btn).on_hover_text("Plan mode: AI describes what it will build before executing").clicked() {
-            cmds.push(Command::SetPlanMode { enabled: !plan_mode });
+        if ui
+            .add(plan_btn)
+            .on_hover_text("Plan mode: AI describes what it will build before executing")
+            .clicked()
+        {
+            cmds.push(Command::SetPlanMode {
+                enabled: !plan_mode,
+            });
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -95,11 +104,7 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<Command> {
                 if chat.ui_messages.is_empty() {
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
-                        ui.label(
-                            RichText::new("\u{1F3D7}")
-                                .size(32.0)
-                                .color(tc.text_muted),
-                        );
+                        ui.label(RichText::new("\u{1F3D7}").size(32.0).color(tc.text_muted));
                         ui.add_space(8.0);
                         ui.label(
                             RichText::new("Start a conversation")
@@ -227,16 +232,17 @@ fn render_message(
             Vec::new()
         }
         UiChatMessage::ToolCall {
-            name, status, result, ..
+            name,
+            status,
+            result,
+            ..
         } => {
             render_tool_call(ui, name, status, result.as_deref(), tc, is_dark);
             Vec::new()
         }
         UiChatMessage::Plan {
             content, status, ..
-        } => {
-            render_plan(ui, content, status, tc, is_dark)
-        }
+        } => render_plan(ui, content, status, tc, is_dark),
     }
 }
 
@@ -251,7 +257,9 @@ fn render_plan_approval_buttons(
         ui.add_space(36.0); // indent to match AI avatar
 
         let approve_btn = egui::Button::new(
-            RichText::new("\u{2705} Approve Plan").size(13.0).color(Color32::WHITE)
+            RichText::new("\u{2705} Approve Plan")
+                .size(13.0)
+                .color(Color32::WHITE),
         )
         .fill(tc.success)
         .corner_radius(CornerRadius::same(6))
@@ -266,7 +274,9 @@ fn render_plan_approval_buttons(
         ui.add_space(4.0);
 
         let revise_btn = egui::Button::new(
-            RichText::new("\u{270F}\u{FE0F} Request Changes").size(13.0).color(tc.text_primary)
+            RichText::new("\u{270F}\u{FE0F} Request Changes")
+                .size(13.0)
+                .color(tc.text_primary),
         )
         .fill(if is_dark {
             Color32::from_rgb(33, 38, 45)
@@ -291,21 +301,13 @@ fn render_plan_approval_buttons(
     cmds
 }
 
-fn render_user_bubble(
-    ui: &mut egui::Ui,
-    content: &str,
-    tc: &theme::ThemeColors,
-    _is_dark: bool,
-) {
+fn render_user_bubble(ui: &mut egui::Ui, content: &str, tc: &theme::ThemeColors, _is_dark: bool) {
     // Right-aligned user bubble
     ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
         // Avatar circle
         let (_, avatar_rect) = ui.allocate_space(Vec2::new(28.0, 28.0));
-        ui.painter().circle_filled(
-            avatar_rect.center(),
-            13.0,
-            tc.accent,
-        );
+        ui.painter()
+            .circle_filled(avatar_rect.center(), 13.0, tc.accent);
         ui.painter().text(
             avatar_rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -315,12 +317,8 @@ fn render_user_bubble(
         );
 
         // Message bubble
-        let bubble_color = Color32::from_rgba_premultiplied(
-            tc.accent.r(),
-            tc.accent.g(),
-            tc.accent.b(),
-            40,
-        );
+        let bubble_color =
+            Color32::from_rgba_premultiplied(tc.accent.r(), tc.accent.g(), tc.accent.b(), 40);
         let frame = egui::Frame::new()
             .fill(bubble_color)
             .inner_margin(Margin::symmetric(12, 8))
@@ -333,11 +331,7 @@ fn render_user_bubble(
 
         frame.show(ui, |ui| {
             ui.set_max_width(ui.available_width() - 40.0);
-            ui.label(
-                RichText::new(content)
-                    .size(13.0)
-                    .color(tc.text_primary),
-            );
+            ui.label(RichText::new(content).size(13.0).color(tc.text_primary));
         });
     });
 }
@@ -358,7 +352,8 @@ fn render_assistant_bubble(
         } else {
             Color32::from_rgb(220, 225, 235)
         };
-        ui.painter().circle_filled(avatar_rect.center(), 13.0, avatar_color);
+        ui.painter()
+            .circle_filled(avatar_rect.center(), 13.0, avatar_color);
         ui.painter().text(
             avatar_rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -407,10 +402,14 @@ fn render_assistant_bubble(
                             let phase = (t * 3.0 + i as f64 * 0.8).sin() * 0.5 + 0.5;
                             let alpha = (phase * 200.0 + 55.0) as u8;
                             let dot_color = Color32::from_rgba_unmultiplied(
-                                tc.text_muted.r(), tc.text_muted.g(), tc.text_muted.b(), alpha,
+                                tc.text_muted.r(),
+                                tc.text_muted.g(),
+                                tc.text_muted.b(),
+                                alpha,
                             );
                             let (_, dot_rect) = ui.allocate_space(Vec2::new(8.0, 16.0));
-                            ui.painter().circle_filled(dot_rect.center(), 3.0, dot_color);
+                            ui.painter()
+                                .circle_filled(dot_rect.center(), 3.0, dot_color);
                             ui.ctx().request_repaint();
                         }
                     });
@@ -436,8 +435,8 @@ fn render_tool_call(
 ) {
     let (icon, status_color) = match status {
         bcad_state::chat_state::ToolCallStatus::Pending => ("\u{23F3}", tc.accent), // hourglass
-        bcad_state::chat_state::ToolCallStatus::Done => ("\u{2705}", tc.success),    // check
-        bcad_state::chat_state::ToolCallStatus::Error => ("\u{274C}", tc.danger),    // X
+        bcad_state::chat_state::ToolCallStatus::Done => ("\u{2705}", tc.success),   // check
+        bcad_state::chat_state::ToolCallStatus::Error => ("\u{274C}", tc.danger),   // X
     };
 
     ui.horizontal(|ui| {
@@ -521,7 +520,9 @@ fn render_plan(
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         let approve_btn = egui::Button::new(
-                            RichText::new("\u{2705} Approve & Build").size(13.0).color(Color32::WHITE)
+                            RichText::new("\u{2705} Approve & Build")
+                                .size(13.0)
+                                .color(Color32::WHITE),
                         )
                         .fill(tc.success)
                         .corner_radius(CornerRadius::same(6))
@@ -536,9 +537,15 @@ fn render_plan(
                         ui.add_space(6.0);
 
                         let revise_btn = egui::Button::new(
-                            RichText::new("\u{270F}\u{FE0F} Request Changes").size(13.0).color(tc.text_primary)
+                            RichText::new("\u{270F}\u{FE0F} Request Changes")
+                                .size(13.0)
+                                .color(tc.text_primary),
                         )
-                        .fill(if is_dark { Color32::from_rgb(33, 38, 45) } else { Color32::from_rgb(234, 238, 242) })
+                        .fill(if is_dark {
+                            Color32::from_rgb(33, 38, 45)
+                        } else {
+                            Color32::from_rgb(234, 238, 242)
+                        })
                         .stroke(Stroke::new(0.5, tc.border))
                         .corner_radius(CornerRadius::same(6))
                         .min_size(Vec2::new(140.0, 30.0));

@@ -854,10 +854,9 @@ fn insert_cloned_element(
     });
     let id = cloned.meta().id.clone();
     state.document.prototype.project.elements.push(cloned);
-    state.document.append_transaction(
-        bcad_state::document_state::TransactionAction::Create,
-        &id,
-    );
+    state
+        .document
+        .append_transaction(bcad_state::document_state::TransactionAction::Create, &id);
     state.ui.selected_body_id = Some(new_id);
     ChangeFlags::ELEMENTS
         | ChangeFlags::DOCUMENT
@@ -871,11 +870,7 @@ fn insert_cloned_element(
 /// Collects all wall elements (optionally filtered by level), runs the
 /// `auto_join_endpoints` algorithm from `bcad_tools::wall_cleanup`, and
 /// applies any endpoint modifications back into state.
-fn auto_join_walls(
-    wall_id: &str,
-    level_id: Option<&str>,
-    state: &mut AppState,
-) -> ChangeFlags {
+fn auto_join_walls(wall_id: &str, level_id: Option<&str>, state: &mut AppState) -> ChangeFlags {
     use bcad_tools::wall_cleanup::{auto_join_endpoints, WallData};
 
     let elements = &state.document.prototype.project.elements;
@@ -891,9 +886,7 @@ fn auto_join_walls(
         .iter()
         .filter_map(|e| {
             if let bcad_domain::Element::Wall(w) = e {
-                if level_id.map_or(true, |lid| {
-                    w.meta.level_id.as_deref() == Some(lid)
-                }) {
+                if level_id.map_or(true, |lid| w.meta.level_id.as_deref() == Some(lid)) {
                     Some(WallData {
                         id: w.meta.id.clone(),
                         start: w.start,

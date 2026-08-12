@@ -144,14 +144,20 @@ pub fn render_elevation(
         Theme::Dark => Color32::from_rgb(30, 30, 35),
         Theme::Light => Color32::from_rgb(245, 245, 250),
     };
-    let outline_stroke = Stroke::new(2.0, match theme {
-        Theme::Dark => Color32::from_rgb(220, 220, 230),
-        Theme::Light => Color32::from_rgb(20, 20, 30),
-    });
-    let opening_stroke = Stroke::new(1.0, match theme {
-        Theme::Dark => Color32::from_rgb(150, 150, 160),
-        Theme::Light => Color32::from_rgb(80, 80, 90),
-    });
+    let outline_stroke = Stroke::new(
+        2.0,
+        match theme {
+            Theme::Dark => Color32::from_rgb(220, 220, 230),
+            Theme::Light => Color32::from_rgb(20, 20, 30),
+        },
+    );
+    let opening_stroke = Stroke::new(
+        1.0,
+        match theme {
+            Theme::Dark => Color32::from_rgb(150, 150, 160),
+            Theme::Light => Color32::from_rgb(80, 80, 90),
+        },
+    );
 
     // Draw each wall strip.
     for strip in &strips {
@@ -235,18 +241,12 @@ fn elevation_strip(wall: &WallElement, dir: ElevationDirection) -> Option<ElevSt
     // For North/South views, the face is the XZ plane — parallel axis is X.
     // For East/West views, the face is the YZ plane — parallel axis is Y.
     let (s_par, e_par, _s_perp, _e_perp) = match dir {
-        ElevationDirection::North | ElevationDirection::South => (
-            wall.start[0],
-            wall.end[0],
-            wall.start[1],
-            wall.end[1],
-        ),
-        ElevationDirection::East | ElevationDirection::West => (
-            wall.start[1],
-            wall.end[1],
-            wall.start[0],
-            wall.end[0],
-        ),
+        ElevationDirection::North | ElevationDirection::South => {
+            (wall.start[0], wall.end[0], wall.start[1], wall.end[1])
+        }
+        ElevationDirection::East | ElevationDirection::West => {
+            (wall.start[1], wall.end[1], wall.start[0], wall.end[0])
+        }
     };
 
     let parallel_len = (e_par - s_par).abs();

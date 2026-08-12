@@ -38,7 +38,11 @@ pub fn window_mesh(input: &WindowGeometryInput) -> Result<TessellatedMesh, Kerne
     let pane_thickness = wall.thickness + INSERT_FACE_OVERHANG * 2.0;
     let mut meshes = window_style_meshes(window, center, axis_u, axis_v, pane_thickness)?;
     meshes.extend(window_hardware_meshes(
-        window, center, axis_u, axis_v, pane_thickness,
+        window,
+        center,
+        axis_u,
+        axis_v,
+        pane_thickness,
     )?);
 
     combine_meshes(&meshes).ok_or_else(|| KernelError::TopologyError("window mesh is empty".into()))

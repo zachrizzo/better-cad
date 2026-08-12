@@ -170,7 +170,8 @@ impl Tool for SelectTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
+                self.base
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
 
                 // If dragging a gizmo axis, accumulate delta
                 if let (Some(axis), Some(start)) = (self.dragging_axis, self.drag_start) {

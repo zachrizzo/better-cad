@@ -271,7 +271,10 @@ fn edit_menu(ui: &mut egui::Ui, state: &AppState, dialogs: &mut DialogState) -> 
         } else {
             "Undo  Ctrl+Z".to_string()
         };
-        let undo_btn = ui.add_enabled(state.history.can_undo(), egui::Button::new(undo_label).frame(false));
+        let undo_btn = ui.add_enabled(
+            state.history.can_undo(),
+            egui::Button::new(undo_label).frame(false),
+        );
         if undo_btn.clicked() {
             cmds.push(Command::Undo);
             ui.close_menu();
@@ -281,7 +284,10 @@ fn edit_menu(ui: &mut egui::Ui, state: &AppState, dialogs: &mut DialogState) -> 
         } else {
             "Redo  Ctrl+Shift+Z".to_string()
         };
-        let redo_btn = ui.add_enabled(state.history.can_redo(), egui::Button::new(redo_label).frame(false));
+        let redo_btn = ui.add_enabled(
+            state.history.can_redo(),
+            egui::Button::new(redo_label).frame(false),
+        );
         if redo_btn.clicked() {
             cmds.push(Command::Redo);
             ui.close_menu();
@@ -293,17 +299,26 @@ fn edit_menu(ui: &mut egui::Ui, state: &AppState, dialogs: &mut DialogState) -> 
         let has_selection = state.ui.selected_body_id.is_some();
         let has_clipboard = state.clipboard.is_some();
 
-        let copy_btn = ui.add_enabled(has_selection, egui::Button::new("Copy  Ctrl+C").frame(false));
+        let copy_btn = ui.add_enabled(
+            has_selection,
+            egui::Button::new("Copy  Ctrl+C").frame(false),
+        );
         if copy_btn.clicked() {
             cmds.push(Command::CopySelected);
             ui.close_menu();
         }
-        let paste_btn = ui.add_enabled(has_clipboard, egui::Button::new("Paste  Ctrl+V").frame(false));
+        let paste_btn = ui.add_enabled(
+            has_clipboard,
+            egui::Button::new("Paste  Ctrl+V").frame(false),
+        );
         if paste_btn.clicked() {
             cmds.push(Command::PasteFromClipboard);
             ui.close_menu();
         }
-        let dup_btn = ui.add_enabled(has_selection, egui::Button::new("Duplicate  Ctrl+D").frame(false));
+        let dup_btn = ui.add_enabled(
+            has_selection,
+            egui::Button::new("Duplicate  Ctrl+D").frame(false),
+        );
         if dup_btn.clicked() {
             cmds.push(Command::DuplicateSelected);
             ui.close_menu();
@@ -312,7 +327,10 @@ fn edit_menu(ui: &mut egui::Ui, state: &AppState, dialogs: &mut DialogState) -> 
         ui.separator();
 
         // -- Delete Selected --
-        let del_btn = ui.add_enabled(has_selection, egui::Button::new("Delete Selected  Del").frame(false));
+        let del_btn = ui.add_enabled(
+            has_selection,
+            egui::Button::new("Delete Selected  Del").frame(false),
+        );
         if del_btn.clicked() {
             if let Some(ref id) = state.ui.selected_body_id {
                 cmds.push(Command::DeleteElement { id: id.clone() });

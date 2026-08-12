@@ -63,10 +63,26 @@ pub fn collect_wall_snaps(wall: &WallElement) -> Vec<SnapCandidate> {
         let ny = dx / len * half_t;
 
         // Corner points
-        out.push(candidate([wall.start[0] + nx, wall.start[1] + ny], SnapType::Nearest, id));
-        out.push(candidate([wall.start[0] - nx, wall.start[1] - ny], SnapType::Nearest, id));
-        out.push(candidate([wall.end[0] + nx, wall.end[1] + ny], SnapType::Nearest, id));
-        out.push(candidate([wall.end[0] - nx, wall.end[1] - ny], SnapType::Nearest, id));
+        out.push(candidate(
+            [wall.start[0] + nx, wall.start[1] + ny],
+            SnapType::Nearest,
+            id,
+        ));
+        out.push(candidate(
+            [wall.start[0] - nx, wall.start[1] - ny],
+            SnapType::Nearest,
+            id,
+        ));
+        out.push(candidate(
+            [wall.end[0] + nx, wall.end[1] + ny],
+            SnapType::Nearest,
+            id,
+        ));
+        out.push(candidate(
+            [wall.end[0] - nx, wall.end[1] - ny],
+            SnapType::Nearest,
+            id,
+        ));
 
         // Points along both wall edges at 25%, 50%, 75% (for snapping to wall face)
         for frac in &[0.25, 0.5, 0.75] {
