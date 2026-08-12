@@ -3,12 +3,12 @@
 //! Two-point rectangle for Foundation, Floor, or Parking elements.
 //! The slab_kind field determines which element type is produced.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{Element, ElementMeta, FloorElement, FoundationElement};
 use glam::Vec2;
 
 const MIN_FLOOR_DIMENSION: f64 = 0.2;
-const SLAB_SNAP_THRESHOLD: f64 = 0.3;
 
 /// Which element type this slab tool instance creates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +93,7 @@ impl Tool for SlabTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, SLAB_SNAP_THRESHOLD);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -102,7 +102,7 @@ impl Tool for SlabTool {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.base.update_cursor(plan_pos, snap, SLAB_SNAP_THRESHOLD);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
 
                 match &self.state {
@@ -184,9 +184,13 @@ impl Tool for SlabTool {
 
     fn preview_geometry(&self, ctx: &ToolContext) -> Vec<PreviewGeometry> {
         let mut geom = Vec::new();
-        let color = self.slab_kind.color();
+        let base_color = self.slab_kind.color();
 
         if let Some(pos) = self.base.cursor_pos {
+            let color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => base_color,
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.06,
@@ -195,11 +199,21 @@ impl Tool for SlabTool {
             });
         }
 
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
+            });
+        }
+
         if let SlabState::Drawing { start_corner } = &self.state {
             geom.push(PreviewGeometry::Point {
                 position: *start_corner,
                 radius: 0.1,
-                color,
+                color: base_color,
                 shape: MarkerShape::Circle,
             });
 
@@ -221,13 +235,13 @@ impl Tool for SlabTool {
                         Vec2::new(end.x, end.y),
                         Vec2::new(sc.x, end.y),
                     ],
-                    color: [color[0], color[1], color[2], 0.2],
+                    color: [base_color[0], base_color[1], base_color[2], 0.2],
                 });
 
                 // Outline
                 geom.push(PreviewGeometry::Line {
                     points: rect,
-                    color,
+                    color: base_color,
                     width: 2.0,
                     dashed: true,
                     dash_size: 0.3,

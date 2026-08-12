@@ -3,11 +3,10 @@
 //!
 //! Click to place, R key rotates by 90 degrees.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::*;
 use glam::Vec2;
-
-const PLACEMENT_SNAP_THRESHOLD: f64 = 0.3;
 
 /// Which placement category this tool instance handles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,17 +57,6 @@ impl PlacementCategory {
         }
     }
 
-    fn rotation_from_defaults(self, defaults: &BimDefaults) -> f64 {
-        match self {
-            Self::Furniture => defaults.furniture_rotation,
-            Self::Plumbing => defaults.plumbing_rotation,
-            Self::Electrical => defaults.electrical_rotation,
-            Self::Cabinet => defaults.cabinet_rotation,
-            Self::Hvac => defaults.hvac_rotation,
-            Self::FireSafety => defaults.fire_safety_rotation,
-            Self::Accessibility => defaults.accessibility_rotation,
-        }
-    }
 }
 
 pub struct PlacementTool {
@@ -181,13 +169,10 @@ impl Tool for PlacementTool {
         snap: &SnapContext,
         ctx: &ToolContext,
     ) -> ToolAction {
-        // Sync rotation from defaults
-        self.rotation = self.category.rotation_from_defaults(&ctx.defaults);
-
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
                 self.base
-                    .update_cursor(plan_pos, snap, PLACEMENT_SNAP_THRESHOLD);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -197,7 +182,7 @@ impl Tool for PlacementTool {
                 ..
             } => {
                 self.base
-                    .update_cursor(plan_pos, snap, PLACEMENT_SNAP_THRESHOLD);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 if let Some(pos) = self.base.pos() {
                     let element = self.create_element(pos, ctx);
                     ToolAction::EmitCommands(vec![Command::CreateElement(element)])
@@ -229,9 +214,13 @@ impl Tool for PlacementTool {
 
     fn preview_geometry(&self, _ctx: &ToolContext) -> Vec<PreviewGeometry> {
         let mut geom = Vec::new();
-        let color = self.category.color();
+        let base_color = self.category.color();
 
         if let Some(pos) = self.base.cursor_pos {
+            let color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => base_color,
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.1,
@@ -239,12 +228,22 @@ impl Tool for PlacementTool {
                 shape: MarkerShape::Circle,
             });
 
+            // Snap ring indicator
+            if let Some(snap) = &self.base.snap_result {
+                geom.push(PreviewGeometry::Point {
+                    position: snap.point,
+                    radius: 0.15,
+                    color: snap_type_color(snap.snap_type),
+                    shape: MarkerShape::Ring { inner_radius: 0.1 },
+                });
+            }
+
             // Rotation indicator line
             let angle_rad = (self.rotation as f32).to_radians();
             let dir = Vec2::new(angle_rad.cos(), angle_rad.sin());
             geom.push(PreviewGeometry::Line {
                 points: vec![pos, pos + dir * 0.3],
-                color,
+                color: base_color,
                 width: 2.0,
                 dashed: false,
                 dash_size: 0.0,

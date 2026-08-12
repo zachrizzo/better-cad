@@ -2,11 +2,10 @@
 //!
 //! Click to place a column. Simple single-click placement with snap support.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{ColumnElement, Element, ElementMeta};
 use glam::Vec2;
-
-const COLUMN_SNAP_THRESHOLD: f64 = 0.3;
 const COLUMN_COLOR: [f32; 4] = [0.6, 0.4, 0.8, 1.0];
 
 pub struct ColumnTool {
@@ -55,7 +54,7 @@ impl Tool for ColumnTool {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
                 self.base
-                    .update_cursor(plan_pos, snap, COLUMN_SNAP_THRESHOLD);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -65,7 +64,7 @@ impl Tool for ColumnTool {
                 ..
             } => {
                 self.base
-                    .update_cursor(plan_pos, snap, COLUMN_SNAP_THRESHOLD);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 if let Some(pos) = self.base.pos() {
                     self.column_count += 1;
                     let element = Element::Column(ColumnElement {
@@ -131,6 +130,16 @@ impl Tool for ColumnTool {
                 dash_size: 0.2,
                 gap_size: 0.1,
             });
+
+            // Snap ring indicator
+            if let Some(snap) = &self.base.snap_result {
+                geom.push(PreviewGeometry::Point {
+                    position: snap.point,
+                    radius: 0.1,
+                    color: snap_type_color(snap.snap_type),
+                    shape: MarkerShape::Ring { inner_radius: 0.06 },
+                });
+            }
 
             geom.push(PreviewGeometry::Label {
                 position: pos + Vec2::new(0.0, hd + 0.15),

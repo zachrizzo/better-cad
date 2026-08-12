@@ -2,11 +2,10 @@
 //!
 //! Simplest tool: single-click to place an elevation marker.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{Element, ElementMeta, LevelRef};
 use glam::Vec2;
-
-const SPOT_SNAP_DISTANCE: f64 = 0.3;
 const SPOT_COLOR: [f32; 4] = [0.9, 0.6, 0.1, 1.0];
 
 pub struct SpotElevationTool {
@@ -54,7 +53,7 @@ impl Tool for SpotElevationTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, SPOT_SNAP_DISTANCE);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -63,7 +62,7 @@ impl Tool for SpotElevationTool {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.base.update_cursor(plan_pos, snap, SPOT_SNAP_DISTANCE);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
 
                 self.spot_count += 1;
@@ -141,6 +140,16 @@ impl Tool for SpotElevationTool {
                 text: format!("EL {:.2} m", ctx.active_level_elevation),
                 font_size: 11.0,
                 color: [1.0, 1.0, 1.0, 1.0],
+            });
+        }
+
+        // Snap ring indicator — larger than elevation marker ring (0.15) to distinguish
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.2,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.16 },
             });
         }
 

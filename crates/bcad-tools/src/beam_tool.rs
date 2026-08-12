@@ -3,12 +3,12 @@
 //! Two-point tool: click start, click end. The beam snaps to structural
 //! supports (columns, walls, existing beams) for elevation resolution.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{BeamElement, Element, ElementMeta};
 use glam::Vec2;
 
 const MIN_BEAM_LENGTH: f64 = 0.2;
-const BEAM_SNAP_THRESHOLD: f64 = 0.3;
 const BEAM_COLOR: [f32; 4] = [0.2, 0.6, 1.0, 1.0];
 
 #[derive(Debug, Clone)]
@@ -75,7 +75,7 @@ impl Tool for BeamTool {
                         pos = apply_ortho_constraint(*start, pos);
                     }
                 }
-                self.base.update_cursor(pos, snap, BEAM_SNAP_THRESHOLD);
+                self.base.update_cursor(pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -91,7 +91,7 @@ impl Tool for BeamTool {
                         pos = apply_ortho_constraint(*start, pos);
                     }
                 }
-                self.base.update_cursor(pos, snap, BEAM_SNAP_THRESHOLD);
+                self.base.update_cursor(pos, snap, DEFAULT_SNAP_DISTANCE);
                 let snapped = self.base.pos().unwrap_or(pos);
 
                 match &self.state {
@@ -167,6 +167,16 @@ impl Tool for BeamTool {
                 radius: 0.06,
                 color,
                 shape: MarkerShape::Circle,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

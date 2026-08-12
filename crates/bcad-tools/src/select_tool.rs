@@ -3,6 +3,7 @@
 //! Click to select an element (by proximity picking). Click empty space
 //! to deselect. This is the default tool.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::Element;
 use glam::Vec2;
@@ -169,7 +170,7 @@ impl Tool for SelectTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, 0.3);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
 
                 // If dragging a gizmo axis, accumulate delta
                 if let (Some(axis), Some(start)) = (self.dragging_axis, self.drag_start) {
@@ -332,13 +333,27 @@ impl Tool for SelectTool {
             }
         }
 
-        // Cursor
+        // Cursor — color from snap type when snapping
         if let Some(pos) = self.base.cursor_pos {
+            let color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => [0.8, 0.8, 0.8, 0.5],
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.04,
-                color: [0.8, 0.8, 0.8, 0.5],
+                color,
                 shape: MarkerShape::Circle,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

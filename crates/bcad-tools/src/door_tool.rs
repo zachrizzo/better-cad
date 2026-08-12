@@ -4,14 +4,13 @@
 //! The door is projected onto the nearest wall and clamped so it
 //! doesn't extend past wall endpoints.
 
-use crate::snap::project_point_onto_segment;
+use crate::snap::{project_point_onto_segment, DEFAULT_SNAP_DISTANCE};
 use crate::tool_trait::*;
 use bcad_domain::{DoorElement, DoorHardwareType, DoorStyle, DoorSwing, Element, ElementMeta};
 use glam::Vec2;
 
 const DOOR_ATTACH_DISTANCE: f32 = 0.8;
 const DOOR_END_CLEARANCE: f64 = 0.05;
-const DOOR_SNAP_THRESHOLD: f64 = 0.3;
 const DOOR_COLOR: [f32; 4] = [0.4, 0.8, 1.0, 1.0];
 
 /// Candidate for door placement on a wall.
@@ -156,7 +155,7 @@ impl Tool for DoorTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, DOOR_SNAP_THRESHOLD);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 self.candidate = self.find_candidate(plan_pos, ctx);
                 ToolAction::StateChanged
             }
@@ -262,16 +261,31 @@ impl Tool for DoorTool {
 
         // Cursor marker
         if let Some(pos) = self.base.cursor_pos {
-            let color = if self.candidate.is_some() {
-                DOOR_COLOR
-            } else {
-                [0.5, 0.5, 0.5, 1.0]
+            let color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => {
+                    if self.candidate.is_some() {
+                        DOOR_COLOR
+                    } else {
+                        [0.5, 0.5, 0.5, 1.0]
+                    }
+                }
             };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.06,
                 color,
                 shape: MarkerShape::Circle,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

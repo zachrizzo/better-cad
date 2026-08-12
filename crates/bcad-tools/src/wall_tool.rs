@@ -3,13 +3,13 @@
 //! The most complex tool: supports chain drawing, ortho constraint (Shift),
 //! snap to endpoints/grid, and wall-wall snap.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use bcad_domain::{Element, ElementMeta, WallElement};
 use glam::Vec2;
 
 // Constants from the spec.
 const MIN_WALL_LENGTH: f64 = 0.2;
-const WALL_SNAP_DISTANCE: f64 = 0.35;
 const WALL_COLOR: [f32; 4] = [1.0, 0.667, 0.0, 1.0]; // #ffaa00
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
@@ -65,12 +65,12 @@ impl WallTool {
         }
 
         // Try discrete snap points first (endpoints, midpoints)
-        if let Some(result) = snap.find_nearest(point, WALL_SNAP_DISTANCE as f64) {
+        if let Some(result) = snap.find_nearest(point, DEFAULT_SNAP_DISTANCE) {
             return result.point;
         }
 
         // Then try continuous wall edge snap — find nearest point on any wall edge
-        if let Some(edge_pt) = nearest_point_on_wall_edge(point, ctx, WALL_SNAP_DISTANCE as f32) {
+        if let Some(edge_pt) = nearest_point_on_wall_edge(point, ctx, DEFAULT_SNAP_DISTANCE as f32) {
             return edge_pt;
         }
 
@@ -186,7 +186,7 @@ impl Tool for WallTool {
                 let pos = self.get_constrained_pos(plan_pos, shift, snap, ctx);
                 self.base.cursor_pos = Some(pos);
                 // Update snap result
-                if let Some(r) = snap.find_nearest(pos, WALL_SNAP_DISTANCE as f64) {
+                if let Some(r) = snap.find_nearest(pos, DEFAULT_SNAP_DISTANCE) {
                     self.base.snap_result = Some(r);
                 } else {
                     self.base.snap_result = None;
@@ -314,7 +314,7 @@ impl Tool for WallTool {
 
                     // Check if start or end snaps to an existing wall endpoint
                     // and compute junction corners for the preview
-                    let eps = WALL_SNAP_DISTANCE as f32;
+                    let eps = DEFAULT_SNAP_DISTANCE as f32;
                     for element in &ctx.elements {
                         if let Element::Wall(other) = element {
                             if other.arc.is_some() {

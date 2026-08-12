@@ -3,10 +3,9 @@
 //! Click to add points. Shows segment distances and cumulative total.
 //! Right-click or double-click to finish. Display-only.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use glam::Vec2;
-
-const PATH_SNAP_THRESHOLD: f64 = 0.3;
 const PATH_COLOR: [f32; 4] = [0.0, 0.8, 0.9, 1.0];
 
 pub struct PathMeasureTool {
@@ -64,7 +63,7 @@ impl Tool for PathMeasureTool {
     ) -> ToolAction {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
-                self.base.update_cursor(plan_pos, snap, PATH_SNAP_THRESHOLD);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -77,7 +76,7 @@ impl Tool for PathMeasureTool {
                     self.points.clear();
                     self.finished = false;
                 }
-                self.base.update_cursor(plan_pos, snap, PATH_SNAP_THRESHOLD);
+                self.base.update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
                 self.points.push(pos);
                 ToolAction::StateChanged
@@ -188,11 +187,25 @@ impl Tool for PathMeasureTool {
 
         // Cursor
         if let Some(pos) = self.base.cursor_pos {
+            let color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => PATH_COLOR,
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.04,
-                color: PATH_COLOR,
+                color,
                 shape: MarkerShape::Circle,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

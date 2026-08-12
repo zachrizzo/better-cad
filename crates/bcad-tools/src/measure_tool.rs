@@ -3,10 +3,9 @@
 //! Click two points to measure the distance between them. Display-only,
 //! does not create any persistent element.
 
+use crate::snap::DEFAULT_SNAP_DISTANCE;
 use crate::tool_trait::*;
 use glam::Vec2;
-
-const MEASURE_SNAP_THRESHOLD: f64 = 0.3;
 const MEASURE_COLOR: [f32; 4] = [0.0, 0.9, 0.5, 1.0];
 const MEASURE_DASH: [f32; 4] = [0.0, 0.9, 0.5, 0.7];
 
@@ -63,7 +62,7 @@ impl Tool for MeasureTool {
         match input {
             ToolInput::PointerMove { plan_pos, .. } => {
                 self.base
-                    .update_cursor(plan_pos, snap, MEASURE_SNAP_THRESHOLD);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 ToolAction::StateChanged
             }
 
@@ -73,7 +72,7 @@ impl Tool for MeasureTool {
                 ..
             } => {
                 self.base
-                    .update_cursor(plan_pos, snap, MEASURE_SNAP_THRESHOLD);
+                    .update_cursor(plan_pos, snap, DEFAULT_SNAP_DISTANCE);
                 let pos = self.base.pos().unwrap_or(plan_pos);
 
                 match &self.state {
@@ -121,11 +120,25 @@ impl Tool for MeasureTool {
         let mut geom = Vec::new();
 
         if let Some(pos) = self.base.cursor_pos {
+            let color = match &self.base.snap_result {
+                Some(s) => snap_type_color(s.snap_type),
+                None => MEASURE_COLOR,
+            };
             geom.push(PreviewGeometry::Point {
                 position: pos,
                 radius: 0.06,
-                color: MEASURE_COLOR,
+                color,
                 shape: MarkerShape::Circle,
+            });
+        }
+
+        // Snap ring indicator
+        if let Some(snap) = &self.base.snap_result {
+            geom.push(PreviewGeometry::Point {
+                position: snap.point,
+                radius: 0.1,
+                color: snap_type_color(snap.snap_type),
+                shape: MarkerShape::Ring { inner_radius: 0.06 },
             });
         }
 

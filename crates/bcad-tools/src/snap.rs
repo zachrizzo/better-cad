@@ -9,6 +9,9 @@ use crate::tool_trait::{SnapCandidate, SnapMode};
 use bcad_domain::Element;
 use glam::Vec2;
 
+/// Unified snap search radius used by all tools (in plan-view metres).
+pub const DEFAULT_SNAP_DISTANCE: f64 = 0.35;
+
 /// Push endpoint and midpoint snap candidates for a linear segment.
 fn collect_segment_snaps(
     start: [f64; 2],
